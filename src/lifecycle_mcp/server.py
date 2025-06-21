@@ -198,6 +198,82 @@ async def list_tools() -> List[Tool]:
                     "requirement_id": {"type": "string"}
                 }
             }
+        ),
+        Tool(
+            name="update_architecture_status",
+            description="Update architecture decision status",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "architecture_id": {"type": "string"},
+                    "new_status": {"type": "string", "enum": [
+                        "Proposed", "Accepted", "Rejected", "Deprecated", "Superseded",
+                        "Draft", "Under Review", "Approved", "Implemented"
+                    ]},
+                    "comment": {"type": "string"}
+                },
+                "required": ["architecture_id", "new_status"]
+            }
+        ),
+        Tool(
+            name="query_architecture_decisions",
+            description="Search and filter architecture decisions",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string"},
+                    "type": {"type": "string"},
+                    "requirement_id": {"type": "string"},
+                    "search_text": {"type": "string"}
+                }
+            }
+        ),
+        Tool(
+            name="get_architecture_details",
+            description="Get full architecture decision details",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "architecture_id": {"type": "string"}
+                },
+                "required": ["architecture_id"]
+            }
+        ),
+        Tool(
+            name="add_architecture_review",
+            description="Add review comment to architecture decision",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "architecture_id": {"type": "string"},
+                    "comment": {"type": "string"},
+                    "reviewer": {"type": "string"}
+                },
+                "required": ["architecture_id", "comment"]
+            }
+        ),
+        Tool(
+            name="start_requirement_interview",
+            description="Start interactive requirement gathering interview",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_context": {"type": "string"},
+                    "stakeholder_role": {"type": "string"}
+                }
+            }
+        ),
+        Tool(
+            name="continue_requirement_interview",
+            description="Continue requirement interview with answers",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "answers": {"type": "object"}
+                },
+                "required": ["session_id", "answers"]
+            }
         )
     ]
 
@@ -227,6 +303,18 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         return await handle_get_task_details(**arguments)
     elif name == "query_tasks":
         return await handle_query_tasks(**arguments)
+    elif name == "update_architecture_status":
+        return await handle_update_architecture_status(**arguments)
+    elif name == "query_architecture_decisions":
+        return await handle_query_architecture_decisions(**arguments)
+    elif name == "get_architecture_details":
+        return await handle_get_architecture_details(**arguments)
+    elif name == "add_architecture_review":
+        return await handle_add_architecture_review(**arguments)
+    elif name == "start_requirement_interview":
+        return await handle_start_requirement_interview(**arguments)
+    elif name == "continue_requirement_interview":
+        return await handle_continue_requirement_interview(**arguments)
     else:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -850,6 +938,360 @@ async def handle_query_tasks(**params) -> List[TextContent]:
         result += "\n"
     
     return [TextContent(type="text", text=result)]
+
+async def handle_update_architecture_status(**params) -> List[TextContent]:
+    """Update architecture decision status"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    try:
+        # Get current status
+        cur.execute("SELECT status FROM architecture WHERE id = ?", (params["architecture_id"],))
+        current = cur.fetchone()
+        if not current:
+            return [TextContent(type="text", text="Architecture decision not found")]
+        
+        current_status = current[0]
+        new_status = params["new_status"]
+        
+        # Update status
+        cur.execute("""
+            UPDATE architecture 
+            SET status = ?, updated_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+        """, (new_status, params["architecture_id"]))
+        
+        # Add review comment if provided
+        if params.get("comment"):
+            cur.execute("""
+                INSERT INTO reviews (entity_type, entity_id, reviewer, comment)
+                VALUES ('architecture', ?, 'MCP User', ?)
+            """, (params["architecture_id"], params["comment"]))
+        
+        conn.commit()
+        
+        return [TextContent(
+            type="text",
+            text=f"Updated {params['architecture_id']} from {current_status} to {new_status}"
+        )]
+        
+    except Exception as e:
+        conn.rollback()
+        return [TextContent(type="text", text=f"Error updating architecture status: {str(e)}")]
+    finally:
+        conn.close()
+
+async def handle_query_architecture_decisions(**params) -> List[TextContent]:
+    """Query architecture decisions with filters"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    
+    query = "SELECT * FROM architecture WHERE 1=1"
+    query_params = []
+    
+    if params.get("status"):
+        query += " AND status = ?"
+        query_params.append(params["status"])
+    
+    if params.get("type"):
+        query += " AND type = ?"
+        query_params.append(params["type"])
+    
+    if params.get("requirement_id"):
+        query = """
+            SELECT a.* FROM architecture a
+            JOIN requirement_architecture ra ON a.id = ra.architecture_id
+            WHERE ra.requirement_id = ?
+        """
+        query_params = [params["requirement_id"]]
+    
+    if params.get("search_text"):
+        if params.get("requirement_id"):
+            query += " AND (a.title LIKE ? OR a.context LIKE ?)"
+        else:
+            query += " AND (title LIKE ? OR context LIKE ?)"
+        search = f"%{params['search_text']}%"
+        query_params.extend([search, search])
+    
+    query += " ORDER BY created_at DESC"
+    
+    cur.execute(query, query_params)
+    decisions = cur.fetchall()
+    
+    if not decisions:
+        return [TextContent(type="text", text="No architecture decisions found matching criteria")]
+    
+    result = f"Found {len(decisions)} architecture decisions:\n\n"
+    for decision in decisions:
+        result += f"- {decision['id']}: {decision['title']} [{decision['status']}] ({decision['type']})\n"
+    
+    return [TextContent(type="text", text=result)]
+
+async def handle_get_architecture_details(**params) -> List[TextContent]:
+    """Get full architecture decision details"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    
+    try:
+        # Get architecture decision
+        cur.execute("SELECT * FROM architecture WHERE id = ?", (params["architecture_id"],))
+        arch = cur.fetchone()
+        if not arch:
+            return [TextContent(type="text", text="Architecture decision not found")]
+        
+        # Build detailed report
+        report = f"""# Architecture Decision: {arch['id']}
+
+## Basic Information
+- **Title**: {arch['title']}
+- **Type**: {arch['type']}
+- **Status**: {arch['status']}
+- **Created**: {arch['created_at']}
+- **Updated**: {arch['updated_at']}
+- **Authors**: {arch['authors'] or 'Not specified'}
+
+## Context
+{arch['context']}
+
+## Decision
+{arch['decision_outcome']}
+"""
+        
+        if arch['decision_drivers']:
+            drivers = json.loads(arch['decision_drivers'])
+            report += "\n## Decision Drivers\n"
+            for driver in drivers:
+                report += f"- {driver}\n"
+        
+        if arch['considered_options']:
+            options = json.loads(arch['considered_options'])
+            report += "\n## Considered Options\n"
+            for option in options:
+                report += f"- {option}\n"
+        
+        if arch['consequences']:
+            consequences = json.loads(arch['consequences'])
+            report += "\n## Consequences\n"
+            if isinstance(consequences, dict):
+                for key, value in consequences.items():
+                    report += f"**{key.title()}**: {value}\n"
+            else:
+                report += f"{consequences}\n"
+        
+        # Get linked requirements
+        cur.execute("""
+            SELECT r.id, r.title FROM requirements r
+            JOIN requirement_architecture ra ON r.id = ra.requirement_id
+            WHERE ra.architecture_id = ?
+        """, (params["architecture_id"],))
+        requirements = cur.fetchall()
+        
+        if requirements:
+            report += f"\n## Linked Requirements ({len(requirements)})\n"
+            for req in requirements:
+                report += f"- {req['id']}: {req['title']}\n"
+        
+        # Get reviews
+        cur.execute("""
+            SELECT reviewer, comment, created_at FROM reviews
+            WHERE entity_type = 'architecture' AND entity_id = ?
+            ORDER BY created_at DESC
+        """, (params["architecture_id"],))
+        reviews = cur.fetchall()
+        
+        if reviews:
+            report += f"\n## Reviews ({len(reviews)})\n"
+            for review in reviews:
+                report += f"- **{review['reviewer']}** ({review['created_at']}): {review['comment']}\n"
+        
+        return [TextContent(type="text", text=report)]
+        
+    finally:
+        conn.close()
+
+async def handle_add_architecture_review(**params) -> List[TextContent]:
+    """Add review comment to architecture decision"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    try:
+        # Verify architecture exists
+        cur.execute("SELECT id FROM architecture WHERE id = ?", (params["architecture_id"],))
+        if not cur.fetchone():
+            return [TextContent(type="text", text="Architecture decision not found")]
+        
+        # Add review
+        cur.execute("""
+            INSERT INTO reviews (entity_type, entity_id, reviewer, comment)
+            VALUES ('architecture', ?, ?, ?)
+        """, (params["architecture_id"], params.get("reviewer", "MCP User"), params["comment"]))
+        
+        conn.commit()
+        
+        return [TextContent(
+            type="text",
+            text=f"Added review to {params['architecture_id']}"
+        )]
+        
+    except Exception as e:
+        conn.rollback()
+        return [TextContent(type="text", text=f"Error adding review: {str(e)}")]
+    finally:
+        conn.close()
+
+# Interview session storage (in-memory for simplicity)
+interview_sessions = {}
+
+async def handle_start_requirement_interview(**params) -> List[TextContent]:
+    """Start interactive requirement gathering interview"""
+    import uuid
+    
+    session_id = str(uuid.uuid4())[:8]
+    
+    # Initialize interview session
+    interview_sessions[session_id] = {
+        "project_context": params.get("project_context", ""),
+        "stakeholder_role": params.get("stakeholder_role", ""),
+        "gathered_data": {},
+        "current_stage": "problem_identification",
+        "questions_asked": []
+    }
+    
+    # Determine first questions based on context
+    questions = []
+    if params.get("project_context"):
+        questions.append("What specific problem or opportunity are you trying to address in this project?")
+        questions.append("Who would be most impacted if this problem isn't solved?")
+    else:
+        questions.append("Can you describe the project or system you're working on?")
+        questions.append("What's the main challenge you're facing that requires this new requirement?")
+    
+    interview_sessions[session_id]["current_questions"] = questions
+    
+    response = f"""# Requirement Interview Started
+**Session ID**: {session_id}
+
+## Context
+- **Project**: {params.get('project_context', 'Not specified')}
+- **Your Role**: {params.get('stakeholder_role', 'Not specified')}
+
+## Next Questions
+Please answer these questions to help gather your requirement:
+
+"""
+    
+    for i, question in enumerate(questions, 1):
+        response += f"{i}. {question}\n"
+    
+    response += "\nOnce you answer these, use `continue_requirement_interview` with your session ID and answers."
+    
+    return [TextContent(type="text", text=response)]
+
+async def handle_continue_requirement_interview(**params) -> List[TextContent]:
+    """Continue requirement interview with answers"""
+    session_id = params["session_id"]
+    answers = params["answers"]
+    
+    if session_id not in interview_sessions:
+        return [TextContent(type="text", text="Interview session not found or expired")]
+    
+    session = interview_sessions[session_id]
+    
+    # Store answers
+    for key, value in answers.items():
+        session["gathered_data"][key] = value
+    
+    # Move to next stage based on current progress
+    current_stage = session["current_stage"]
+    next_questions = []
+    
+    if current_stage == "problem_identification":
+        session["current_stage"] = "solution_definition"
+        next_questions = [
+            "What would success look like once this requirement is implemented?",
+            "Are there any specific constraints or limitations we need to consider?"
+        ]
+    
+    elif current_stage == "solution_definition":
+        session["current_stage"] = "details_gathering"
+        next_questions = [
+            "What priority would you assign to this requirement (P0=Critical, P1=High, P2=Medium, P3=Low)?",
+            "What type of requirement is this (FUNC=Functional, NFUNC=Non-functional, TECH=Technical, BUS=Business, INTF=Interface)?"
+        ]
+    
+    elif current_stage == "details_gathering":
+        session["current_stage"] = "validation"
+        next_questions = [
+            "How will we know this requirement has been successfully implemented?",
+            "What are the acceptance criteria that must be met?"
+        ]
+    
+    elif current_stage == "validation":
+        # Interview complete - generate requirement
+        return await complete_requirement_interview(session_id)
+    
+    session["current_questions"] = next_questions
+    
+    response = f"""# Interview Progress - Session {session_id}
+
+## Your Previous Answers Recorded ✓
+
+## Next Questions
+"""
+    
+    for i, question in enumerate(next_questions, 1):
+        response += f"{i}. {question}\n"
+    
+    response += f"\nStage: {session['current_stage'].replace('_', ' ').title()}"
+    response += "\nContinue with `continue_requirement_interview` and your answers."
+    
+    return [TextContent(type="text", text=response)]
+
+async def complete_requirement_interview(session_id: str) -> List[TextContent]:
+    """Complete interview and create requirement"""
+    session = interview_sessions[session_id]
+    data = session["gathered_data"]
+    
+    # Map interview data to requirement fields
+    requirement_data = {
+        "type": data.get("requirement_type", "FUNC"),
+        "title": data.get("title", "Requirement from Interview"),
+        "priority": data.get("priority", "P2"),
+        "current_state": data.get("current_problem", "Current state not specified"),
+        "desired_state": data.get("desired_outcome", "Desired state not specified"),
+        "business_value": data.get("success_criteria", ""),
+        "acceptance_criteria": data.get("acceptance_criteria", "").split("\n") if data.get("acceptance_criteria") else [],
+        "author": f"Interview Session {session_id}"
+    }
+    
+    # Create the requirement
+    try:
+        result = await handle_create_requirement(**requirement_data)
+        
+        # Clean up session
+        del interview_sessions[session_id]
+        
+        interview_summary = f"""# Interview Complete! 
+
+## Requirement Created
+{result[0].text}
+
+## Interview Summary
+- **Problem Identified**: {data.get('current_problem', 'Not specified')}
+- **Solution Desired**: {data.get('desired_outcome', 'Not specified')}
+- **Success Criteria**: {data.get('success_criteria', 'Not specified')}
+- **Priority**: {data.get('priority', 'P2')}
+- **Type**: {data.get('requirement_type', 'FUNC')}
+
+You can now use other tools to further develop this requirement, create tasks, or add architecture decisions.
+"""
+        
+        return [TextContent(type="text", text=interview_summary)]
+        
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error creating requirement: {str(e)}")]
 
 async def amain():
     """Run the MCP server"""

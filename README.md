@@ -49,7 +49,7 @@ Add to your MCP configuration:
 
 ## MCP Tools Reference
 
-The server exposes 11 MCP tools for comprehensive lifecycle management:
+The server exposes 17 MCP tools for comprehensive lifecycle management:
 
 ### Requirement Management
 
@@ -210,6 +210,39 @@ Record architecture decisions (ADRs) with full context.
 }
 ```
 
+#### `update_architecture_status`
+Update the status of an architecture decision with validation.
+
+**Parameters:**
+- `architecture_id` (required): Architecture ID (e.g., "ADR-0001")
+- `new_status` (required): New status - "Proposed", "Accepted", "Rejected", "Deprecated", "Superseded", "Draft", "Under Review", "Approved", "Implemented"
+- `comment` (optional): Status change comment
+
+#### `query_architecture_decisions`
+Search and filter architecture decisions by various criteria.
+
+**Parameters:**
+- `status` (optional): Filter by status
+- `type` (optional): Filter by type (ADR, TDD, INTG)
+- `requirement_id` (optional): Filter by linked requirement
+- `search_text` (optional): Text search in title and context
+
+#### `get_architecture_details`
+Get comprehensive architecture decision information including all relationships and reviews.
+
+**Parameters:**
+- `architecture_id` (required): Architecture ID
+
+**Returns:** Detailed report with basic info, context, decision details, drivers, options, consequences, linked requirements, and review history.
+
+#### `add_architecture_review`
+Add review comments to architecture decisions.
+
+**Parameters:**
+- `architecture_id` (required): Architecture ID
+- `comment` (required): Review comment
+- `reviewer` (optional): Reviewer name (default: "MCP User")
+
 ### Project Monitoring
 
 #### `get_project_status`
@@ -219,6 +252,53 @@ Get comprehensive project health metrics and dashboards.
 - `include_blocked` (optional): Include blocked items analysis (default: true)
 
 **Returns:** Dashboard with requirement overview, task statistics, completion percentages, and blocked items analysis.
+
+### Interactive Interview Tools
+
+#### `start_requirement_interview`
+Start an interactive requirement gathering interview session.
+
+**Parameters:**
+- `project_context` (optional): Description of the project or system
+- `stakeholder_role` (optional): Role of the person being interviewed
+
+**Returns:** Session ID and initial questions to guide requirement gathering.
+
+**Example:**
+```json
+{
+  "project_context": "E-commerce platform modernization",
+  "stakeholder_role": "Product Manager"
+}
+```
+
+#### `continue_requirement_interview`
+Continue an active interview session by providing answers to questions.
+
+**Parameters:**
+- `session_id` (required): Interview session ID from start_requirement_interview
+- `answers` (required): Object containing answers to the current questions
+
+**Returns:** Next set of questions or completion summary with created requirement.
+
+**Example:**
+```json
+{
+  "session_id": "a1b2c3d4",
+  "answers": {
+    "current_problem": "Users struggle with complex checkout process",
+    "desired_outcome": "Streamlined one-click checkout experience",
+    "success_criteria": "Checkout completion rate increases by 25%"
+  }
+}
+```
+
+**Interview Flow:**
+1. **Problem Identification**: Understanding the current challenge
+2. **Solution Definition**: Defining the desired outcome and constraints
+3. **Details Gathering**: Collecting priority, type, and technical details
+4. **Validation**: Establishing acceptance criteria and success metrics
+5. **Completion**: Automatic requirement creation with interview summary
 
 ## Database Schema
 

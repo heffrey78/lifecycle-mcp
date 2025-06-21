@@ -22,6 +22,12 @@ pip install lifecycle-mcp
 claude mcp add lifecycle-mcp
 ```
 
+Alternatively, reference the repository folder. Set the environment variable `LIFECYCLE_DB` to the desired location. Recommend on db per project.
+
+```bash
+claude mcp add lifecycle python3.10 {REPOSITORY FOLDER}/lifecycle_server.py -e LIFECYCLE_DB=./lifecycle.db
+```
+
 ## Manual Configuration
 
 Add to your MCP configuration:

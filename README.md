@@ -14,8 +14,24 @@ A Model Context Protocol (MCP) server for comprehensive software lifecycle manag
 
 ## Installation
 
+### From PyPI
 ```bash
 pip install lifecycle-mcp
+```
+
+### From Source (Development)
+To install from a local clone of this repository:
+
+```bash
+# Clone and install from another directory
+git clone https://github.com/your-org/lifecycle-mcp.git
+cd lifecycle-mcp
+pip install -e .
+```
+
+Or install directly from the repository path:
+```bash
+pip install -e /path/to/lifecycle-mcp
 ```
 
 ## Usage with Claude Code
@@ -49,7 +65,30 @@ Add to your MCP configuration:
 
 ## MCP Tools Reference
 
-The server exposes 17 MCP tools for comprehensive lifecycle management:
+The server exposes 22 MCP tools across 6 handler modules for comprehensive lifecycle management:
+
+### Tool List
+- `create_requirement` - Create new requirements from interview data
+- `update_requirement_status` - Move requirements through lifecycle states
+- `query_requirements` - Search and filter requirements
+- `get_requirement_details` - Get full requirement with relationships
+- `trace_requirement` - Trace requirement through implementation
+- `create_task` - Create implementation tasks from requirements
+- `update_task_status` - Update task progress
+- `query_tasks` - Search and filter tasks
+- `get_task_details` - Get full task details with dependencies
+- `create_architecture_decision` - Record architecture decisions (ADRs)
+- `update_architecture_status` - Update architecture decision status
+- `query_architecture_decisions` - Search and filter architecture decisions
+- `get_architecture_details` - Get full architecture decision details
+- `add_architecture_review` - Add review comments to architecture decisions
+- `get_project_status` - Get project health metrics and dashboards
+- `start_requirement_interview` - Start interactive requirement gathering
+- `continue_requirement_interview` - Continue requirement interview sessions
+- `start_architectural_conversation` - Start interactive architecture discussions
+- `continue_architectural_conversation` - Continue architecture conversations
+- `export_project_documentation` - Export comprehensive markdown documentation
+- `create_architectural_diagrams` - Generate Mermaid diagrams for project visualization
 
 ### Requirement Management
 
@@ -300,6 +339,114 @@ Continue an active interview session by providing answers to questions.
 4. **Validation**: Establishing acceptance criteria and success metrics
 5. **Completion**: Automatic requirement creation with interview summary
 
+### Documentation Export Tools
+
+#### `export_project_documentation`
+Export comprehensive project documentation in structured markdown format.
+
+**Parameters:**
+- `project_name` (optional): Name for the project used in filenames (default: "project")
+- `include_requirements` (optional): Include requirements documentation (default: true)
+- `include_tasks` (optional): Include tasks documentation (default: true)
+- `include_architecture` (optional): Include architecture documentation (default: true)
+- `output_directory` (optional): Directory to save exported files (default: ".")
+
+**Returns:** List of exported files with their paths.
+
+**Generated Files:**
+- `{project_name}-requirements.md` - Complete requirements documentation grouped by type
+- `{project_name}-tasks.md` - Task documentation grouped by status with linked requirements
+- `{project_name}-architecture.md` - Architecture decisions with context, decisions, and consequences
+
+**Example:**
+```json
+{
+  "project_name": "ecommerce-platform",
+  "include_requirements": true,
+  "include_tasks": true,
+  "include_architecture": true,
+  "output_directory": "./docs"
+}
+```
+
+#### `create_architectural_diagrams`
+Generate Mermaid diagrams for project architecture and relationships visualization.
+
+**Parameters:**
+- `diagram_type` (optional): Type of diagram - "requirements", "tasks", "architecture", "full_project", "directory_structure", "dependencies" (default: "full_project")
+- `requirement_ids` (optional): Array of specific requirement IDs to include
+- `include_relationships` (optional): Include relationship arrows in diagrams (default: true)
+- `output_format` (optional): Output format - "mermaid", "markdown_with_mermaid" (default: "mermaid")
+- `interactive` (optional): Start interactive conversation for complex diagrams (default: false)
+
+**Returns:** Mermaid diagram code or markdown-wrapped diagram.
+
+**Diagram Types:**
+- **requirements**: Flowchart showing requirement hierarchy by type with status colors
+- **tasks**: Task hierarchy with parent-child relationships and status indicators
+- **architecture**: Architecture decisions with status-based styling
+- **full_project**: High-level overview showing relationships between requirements, tasks, and architecture
+- **directory_structure**: Project directory structure visualization
+- **dependencies**: Task dependency graph showing blocking relationships
+
+**Status Colors:**
+- Requirements: Draft (red), Under Review (orange), Approved (blue), Ready (green), etc.
+- Tasks: Not Started (red), In Progress (orange), Blocked (dark red), Complete (green), etc.
+- Architecture: Proposed (orange), Accepted (green), Rejected (red), Deprecated (gray), etc.
+
+**Example:**
+```json
+{
+  "diagram_type": "requirements",
+  "include_relationships": true,
+  "output_format": "markdown_with_mermaid"
+}
+```
+
+### Interactive Architectural Conversation Tools
+
+#### `start_architectural_conversation`
+Start an interactive conversation for complex architectural diagram generation.
+
+**Parameters:**
+- `project_context` (optional): Description of the project or system
+- `diagram_purpose` (optional): Purpose and goals for the diagram
+- `complexity_level` (optional): Conversation complexity - "simple", "medium", "complex" (default: "medium")
+
+**Returns:** Session ID and contextual questions based on complexity level.
+
+**Complexity Levels:**
+- **Simple**: Basic component and relationship questions
+- **Medium**: Architectural challenges, stakeholders, and detail level questions
+- **Complex**: Deep architectural patterns, compliance, security, and performance considerations
+
+#### `continue_architectural_conversation`
+Continue an active architectural conversation session with responses.
+
+**Parameters:**
+- `session_id` (required): Conversation session ID from start_architectural_conversation
+- `responses` (required): Object containing responses to current questions
+
+**Returns:** Next questions or completion with generated diagram.
+
+**Conversation Flow:**
+1. **Context Gathering**: Understanding architectural needs and stakeholders
+2. **Diagram Specification**: Determining optimal diagram type and focus
+3. **Detail Refinement**: Visual preferences and emphasis areas
+4. **Completion**: Automatic diagram generation with conversation summary
+
+**Example:**
+```json
+{
+  "session_id": "a1b2c3d4",
+  "responses": {
+    "main_challenge": "Visualizing microservice dependencies for new team members",
+    "stakeholders": "Development team and system architects",
+    "detail_level": "High-level overview with key integration points"
+  }
+}
+```
+
 ## Database Schema
 
 The server maintains a comprehensive SQLite database with the following key entities:
@@ -321,6 +468,47 @@ The server maintains a comprehensive SQLite database with the following key enti
 
 - `LIFECYCLE_DB`: Path to SQLite database file (default: "./lifecycle.db")
 
+## Troubleshooting
+
+### Connection Issues
+
+**"MCP error -32000: Connection closed"**
+
+This error typically occurs when there are async/await mismatches in the server implementation. If you encounter this:
+
+1. Ensure the package is properly installed:
+   ```bash
+   pip install -e .
+   ```
+
+2. Re-add the MCP server:
+   ```bash
+   claude mcp add lifecycle-mcp lifecycle-mcp
+   ```
+
+3. Check that the server starts without errors:
+   ```bash
+   lifecycle-mcp
+   ```
+
+**Server Not Found**
+
+If the `lifecycle-mcp` command is not found after installation:
+
+1. Verify installation completed successfully
+2. Check that the entry point is registered in `pyproject.toml`
+3. Try reinstalling with `pip install -e .`
+
+### Database Issues
+
+**Database Lock Errors**
+
+If you see database lock errors, ensure only one instance of the server is running and that the database file has proper permissions.
+
+**Schema Initialization**
+
+The database schema is automatically created on first run. If you need to reset the database, simply delete the SQLite file (default: `lifecycle.db`).
+
 ## Development
 
 ```bash
@@ -331,5 +519,5 @@ pip install -e .
 lifecycle-mcp
 
 # Test with Claude Code
-claude mcp add lifecycle-mcp
+claude mcp add lifecycle-mcp lifecycle-mcp
 ```

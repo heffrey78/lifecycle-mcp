@@ -14,17 +14,12 @@ A Model Context Protocol (MCP) server for comprehensive software lifecycle manag
 
 ## Installation
 
-### From PyPI
-```bash
-pip install lifecycle-mcp
-```
-
 ### From Source (Development)
 To install from a local clone of this repository:
 
 ```bash
 # Clone and install from another directory
-git clone https://github.com/your-org/lifecycle-mcp.git
+git clone https://github.com/heffrey78/lifecycle-mcp.git
 cd lifecycle-mcp
 pip install -e .
 ```

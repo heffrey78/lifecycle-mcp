@@ -10,6 +10,7 @@ from mcp.types import TextContent
 
 from .base_handler import BaseHandler
 from .requirement_handler import RequirementHandler
+from ..llm_question_generator import LLMQuestionGenerator, InterviewStage
 
 
 class InterviewHandler(BaseHandler):
@@ -19,6 +20,7 @@ class InterviewHandler(BaseHandler):
         """Initialize with database manager and requirement handler for creating requirements"""
         super().__init__(db_manager)
         self.requirement_handler = requirement_handler
+        self.question_generator = LLMQuestionGenerator()
         
         # Session storage (in-memory for simplicity)
         self.interview_sessions = {}
@@ -80,9 +82,9 @@ class InterviewHandler(BaseHandler):
         """Route tool calls to appropriate handler methods"""
         try:
             if tool_name == "start_requirement_interview":
-                return self._start_requirement_interview(**arguments)
+                return await self._start_requirement_interview(**arguments)
             elif tool_name == "continue_requirement_interview":
-                return self._continue_requirement_interview(**arguments)
+                return await self._continue_requirement_interview(**arguments)
             elif tool_name == "start_architectural_conversation":
                 return self._start_architectural_conversation(**arguments)
             elif tool_name == "continue_architectural_conversation":
@@ -92,7 +94,7 @@ class InterviewHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response(f"Error handling {tool_name}", e)
     
-    def _start_requirement_interview(self, **params) -> List[TextContent]:
+    async def _start_requirement_interview(self, **params) -> List[TextContent]:
         """Start interactive requirement gathering interview"""
         try:
             session_id = str(uuid.uuid4())[:8]
@@ -102,18 +104,16 @@ class InterviewHandler(BaseHandler):
                 "project_context": params.get("project_context", ""),
                 "stakeholder_role": params.get("stakeholder_role", ""),
                 "gathered_data": {},
-                "current_stage": "problem_identification",
+                "current_stage": InterviewStage.PROBLEM_IDENTIFICATION,
                 "questions_asked": []
             }
             
-            # Determine first questions based on context
-            questions = []
-            if params.get("project_context"):
-                questions.append("What specific problem or opportunity are you trying to address in this project?")
-                questions.append("Who would be most impacted if this problem isn't solved?")
-            else:
-                questions.append("Can you describe the project or system you're working on?")
-                questions.append("What's the main challenge you're facing that requires this new requirement?")
+            # Generate intelligent questions using LLM
+            questions = await self.question_generator.generate_questions(
+                stage=InterviewStage.PROBLEM_IDENTIFICATION,
+                project_context=params.get("project_context", ""),
+                stakeholder_role=params.get("stakeholder_role", "")
+            )
             
             self.interview_sessions[session_id]["current_questions"] = questions
             
@@ -134,12 +134,15 @@ Please answer these questions to help gather your requirement:
             
             response += "\nOnce you answer these, use `continue_requirement_interview` with your session ID and answers."
             
-            return self._create_response(response)
+            # Create above-the-fold response for interview start
+            key_info = f"Interview session {session_id} started"
+            action_info = f"🎤 {len(questions)} questions | Stage: {InterviewStage.PROBLEM_IDENTIFICATION.value.replace('_', ' ').title()}"
+            return self._create_above_fold_response("SUCCESS", key_info, action_info, response)
             
         except Exception as e:
             return self._create_error_response("Failed to start requirement interview", e)
     
-    def _continue_requirement_interview(self, **params) -> List[TextContent]:
+    async def _continue_requirement_interview(self, **params) -> List[TextContent]:
         """Continue requirement interview with answers"""
         # Validate required parameters
         error = self._validate_required_params(params, ["session_id", "answers"])
@@ -163,30 +166,33 @@ Please answer these questions to help gather your requirement:
             current_stage = session["current_stage"]
             next_questions = []
             
-            if current_stage == "problem_identification":
-                session["current_stage"] = "solution_definition"
-                next_questions = [
-                    "What would success look like once this requirement is implemented?",
-                    "Are there any specific constraints or limitations we need to consider?"
-                ]
+            if current_stage == InterviewStage.PROBLEM_IDENTIFICATION:
+                session["current_stage"] = InterviewStage.SOLUTION_DEFINITION
+                next_questions = await self.question_generator.generate_questions(
+                    stage=InterviewStage.SOLUTION_DEFINITION,
+                    previous_answers=session["gathered_data"],
+                    existing_requirements=await self._get_existing_requirements()
+                )
             
-            elif current_stage == "solution_definition":
-                session["current_stage"] = "details_gathering"
-                next_questions = [
-                    "What priority would you assign to this requirement (P0=Critical, P1=High, P2=Medium, P3=Low)?",
-                    "What type of requirement is this (FUNC=Functional, NFUNC=Non-functional, TECH=Technical, BUS=Business, INTF=Interface)?"
-                ]
+            elif current_stage == InterviewStage.SOLUTION_DEFINITION:
+                session["current_stage"] = InterviewStage.DETAILS_GATHERING
+                next_questions = await self.question_generator.generate_questions(
+                    stage=InterviewStage.DETAILS_GATHERING,
+                    previous_answers=session["gathered_data"],
+                    existing_requirements=await self._get_existing_requirements()
+                )
             
-            elif current_stage == "details_gathering":
-                session["current_stage"] = "validation"
-                next_questions = [
-                    "How will we know this requirement has been successfully implemented?",
-                    "What are the acceptance criteria that must be met?"
-                ]
+            elif current_stage == InterviewStage.DETAILS_GATHERING:
+                session["current_stage"] = InterviewStage.VALIDATION
+                next_questions = await self.question_generator.generate_questions(
+                    stage=InterviewStage.VALIDATION,
+                    previous_answers=session["gathered_data"],
+                    existing_requirements=await self._get_existing_requirements()
+                )
             
-            elif current_stage == "validation":
+            elif current_stage == InterviewStage.VALIDATION:
                 # Interview complete - generate requirement
-                return self._complete_requirement_interview(session_id)
+                return await self._complete_requirement_interview(session_id)
             
             session["current_questions"] = next_questions
             
@@ -200,15 +206,18 @@ Please answer these questions to help gather your requirement:
             for i, question in enumerate(next_questions, 1):
                 response += f"{i}. {question}\n"
             
-            response += f"\nStage: {session['current_stage'].replace('_', ' ').title()}"
+            response += f"\nStage: {session['current_stage'].value.replace('_', ' ').title()}"
             response += "\nContinue with `continue_requirement_interview` and your answers."
             
-            return self._create_response(response)
+            # Create above-the-fold response for interview continuation
+            key_info = f"Interview session {session_id} continued"
+            action_info = f"🎤 {len(next_questions)} more questions | Stage: {session['current_stage'].value.replace('_', ' ').title()}"
+            return self._create_above_fold_response("SUCCESS", key_info, action_info, response)
             
         except Exception as e:
             return self._create_error_response("Failed to continue requirement interview", e)
     
-    def _complete_requirement_interview(self, session_id: str) -> List[TextContent]:
+    async def _complete_requirement_interview(self, session_id: str) -> List[TextContent]:
         """Complete interview and create requirement"""
         try:
             session = self.interview_sessions[session_id]
@@ -227,7 +236,7 @@ Please answer these questions to help gather your requirement:
             }
             
             # Create the requirement using the requirement handler
-            result = self.requirement_handler._create_requirement(**requirement_data)
+            result = await self.requirement_handler._create_requirement(**requirement_data)
             
             # Clean up session
             del self.interview_sessions[session_id]
@@ -247,10 +256,26 @@ Please answer these questions to help gather your requirement:
 You can now use other tools to further develop this requirement, create tasks, or add architecture decisions.
 """
             
-            return self._create_response(interview_summary)
+            # Create above-the-fold response for interview completion
+            key_info = f"Interview session {session_id} completed"
+            action_info = f"✅ Requirement created | Type: {data.get('requirement_type', 'FUNC')} | Priority: {data.get('priority', 'P2')}"
+            return self._create_above_fold_response("SUCCESS", key_info, action_info, interview_summary)
             
         except Exception as e:
             return self._create_error_response("Failed to complete requirement interview", e)
+    
+    async def _get_existing_requirements(self) -> List[Dict[str, Any]]:
+        """Get existing requirements for context in question generation"""
+        try:
+            async with self.db_manager.get_connection() as conn:
+                cursor = await conn.execute(
+                    "SELECT id, type, title, priority, status FROM requirements ORDER BY created_at DESC LIMIT 10"
+                )
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            # Return empty list if query fails
+            return []
     
     def _start_architectural_conversation(self, **params) -> List[TextContent]:
         """Start interactive architectural conversation"""
@@ -310,7 +335,10 @@ Please answer these questions to help create the most useful architectural diagr
             
             response += "\nOnce you answer these, use `continue_architectural_conversation` with your session ID and responses."
             
-            return self._create_response(response)
+            # Create above-the-fold response for architectural conversation start
+            key_info = f"Architectural session {session_id} started"
+            action_info = f"🏢 {len(questions)} questions | Purpose: {params.get('diagram_purpose', 'Diagram generation')}"
+            return self._create_above_fold_response("SUCCESS", key_info, action_info, response)
             
         except Exception as e:
             return self._create_error_response("Failed to start architectural conversation", e)
@@ -372,7 +400,10 @@ Please answer these questions to help create the most useful architectural diagr
             response += f"\nStage: {session['current_stage'].replace('_', ' ').title()}"
             response += "\nContinue with `continue_architectural_conversation` and your responses."
             
-            return self._create_response(response)
+            # Create above-the-fold response for architectural conversation continuation
+            key_info = f"Architectural session {session_id} continued"
+            action_info = f"🏢 {len(next_questions)} more questions | Stage: {session['current_stage'].replace('_', ' ').title()}"
+            return self._create_above_fold_response("SUCCESS", key_info, action_info, response)
             
         except Exception as e:
             return self._create_error_response("Failed to continue architectural conversation", e)
@@ -413,7 +444,10 @@ Based on your responses, I recommend creating a **{diagram_type}** diagram.
 Use the `create_architectural_diagrams` tool with diagram_type="{diagram_type}" to generate the diagram.
 """
             
-            return self._create_response(conversation_summary)
+            # Create above-the-fold response for architectural conversation completion
+            key_info = f"Architectural session {session_id} completed"
+            action_info = f"✅ Diagram recommendation: {diagram_type} | Complexity: {session['complexity_level']}"
+            return self._create_above_fold_response("SUCCESS", key_info, action_info, conversation_summary)
             
         except Exception as e:
             return self._create_error_response("Failed to complete architectural conversation", e)

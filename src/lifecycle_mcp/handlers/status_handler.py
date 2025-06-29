@@ -5,6 +5,7 @@ Handles project status and metrics operations
 """
 
 import sqlite3
+import os
 from typing import List, Dict, Any
 from mcp.types import TextContent
 
@@ -77,8 +78,11 @@ class StatusHandler(BaseHandler):
                     # View might not work if no dependencies exist yet
                     blocked = []
             
+            # Get project name from current working directory
+            project_name = os.path.basename(os.getcwd())
+            
             # Build report
-            report = """# Project Status Dashboard
+            report = f"""# Project Status Dashboard - {project_name}
 
 ## Requirements Overview
 """
@@ -111,7 +115,17 @@ class StatusHandler(BaseHandler):
             # Add summary metrics
             report += self._add_summary_metrics(req_stats, task_stats)
             
-            return self._create_response(report)
+            # Create above-the-fold response for project status
+            total_reqs = sum(r['count'] for r in req_stats) if req_stats else 0
+            total_tasks = sum(t['count'] for t in task_stats) if task_stats else 0
+            completed_tasks = next((t['count'] for t in task_stats if t['status'] == 'Complete'), 0)
+            
+            key_info = f"Project {project_name} status"
+            action_info = f"📈 {total_reqs} requirements | {completed_tasks}/{total_tasks} tasks complete"
+            if blocked:
+                action_info += f" | ⚠️ {len(blocked)} blocked"
+            
+            return self._create_above_fold_response("INFO", key_info, action_info, report)
             
         except Exception as e:
             return self._create_error_response("Failed to get project status", e)

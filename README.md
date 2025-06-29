@@ -72,6 +72,8 @@ The server exposes 22 MCP tools across 6 handler modules for comprehensive lifec
 - `update_task_status` - Update task progress
 - `query_tasks` - Search and filter tasks
 - `get_task_details` - Get full task details with dependencies
+- `sync_task_from_github` - Sync individual task from GitHub issue changes
+- `bulk_sync_github_tasks` - Sync all tasks with their GitHub issues
 - `create_architecture_decision` - Record architecture decisions (ADRs)
 - `update_architecture_status` - Update architecture decision status
 - `query_architecture_decisions` - Search and filter architecture decisions
@@ -212,6 +214,21 @@ Get comprehensive task information including dependencies and relationships.
 - `task_id` (required): Task ID
 
 **Returns:** Detailed report with basic info, description, acceptance criteria, and linked requirements.
+
+#### `sync_task_from_github`
+Sync individual task from GitHub issue changes with conflict detection.
+
+**Parameters:**
+- `task_id` (required): Task ID to sync with its linked GitHub issue
+
+**Returns:** Sync status and any updates applied from GitHub issue data.
+
+#### `bulk_sync_github_tasks`
+Sync all tasks with their GitHub issues in batch operation.
+
+**Parameters:** None
+
+**Returns:** Summary of sync operations performed across all tasks with GitHub issue links.
 
 ### Architecture Management
 

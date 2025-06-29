@@ -5,10 +5,12 @@ Handles all task-related operations
 """
 
 import json
+from datetime import datetime
 from typing import List, Dict, Any
 from mcp.types import TextContent
 
 from .base_handler import BaseHandler
+from ..github_utils import GitHubUtils
 
 
 class TaskHandler(BaseHandler):
@@ -74,6 +76,25 @@ class TaskHandler(BaseHandler):
                     },
                     "required": ["task_id"]
                 }
+            },
+            {
+                "name": "sync_task_from_github",
+                "description": "Sync individual task from GitHub issue changes",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {"type": "string"}
+                    },
+                    "required": ["task_id"]
+                }
+            },
+            {
+                "name": "bulk_sync_github_tasks",
+                "description": "Sync all tasks with their GitHub issues",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
             }
         ]
     
@@ -81,24 +102,53 @@ class TaskHandler(BaseHandler):
         """Route tool calls to appropriate handler methods"""
         try:
             if tool_name == "create_task":
-                return self._create_task(**arguments)
+                return await self._create_task(**arguments)
             elif tool_name == "update_task_status":
-                return self._update_task_status(**arguments)
+                return await self._update_task_status(**arguments)
             elif tool_name == "query_tasks":
                 return self._query_tasks(**arguments)
             elif tool_name == "get_task_details":
                 return self._get_task_details(**arguments)
+            elif tool_name == "sync_task_from_github":
+                return await self._sync_from_github(arguments.get("task_id", ""))
+            elif tool_name == "bulk_sync_github_tasks":
+                return await self._bulk_sync_with_github(**arguments)
             else:
                 return self._create_error_response(f"Unknown tool: {tool_name}")
         except Exception as e:
             return self._create_error_response(f"Error handling {tool_name}", e)
     
-    def _create_task(self, **params) -> List[TextContent]:
+    async def _create_task(self, **params) -> List[TextContent]:
         """Create task linked to requirements"""
         # Validate required parameters
         error = self._validate_required_params(params, ["requirement_ids", "title", "priority"])
         if error:
             return self._create_error_response(error)
+        
+        # Validate requirement approval status
+        approved_statuses = {'Approved', 'Architecture', 'Ready', 'Implemented', 'Validated'}
+        unapproved_reqs = []
+        
+        for req_id in params["requirement_ids"]:
+            req_status = self.db.get_records(
+                "requirements",
+                "status",
+                "id = ?",
+                [req_id]
+            )
+            
+            if not req_status:
+                return self._create_error_response(f"Requirement {req_id} not found")
+            
+            status = req_status[0]["status"]
+            if status not in approved_statuses:
+                unapproved_reqs.append(f"{req_id} (status: {status})")
+        
+        if unapproved_reqs:
+            error_msg = "Cannot create tasks for unapproved requirements. The following requirements must be approved first:\n"
+            error_msg += "\n".join(f"- {req}" for req in unapproved_reqs)
+            error_msg += "\n\nRequirements must be in one of these states: " + ", ".join(sorted(approved_statuses))
+            return self._create_error_response(error_msg)
         
         try:
             # Get next task number
@@ -139,7 +189,8 @@ class TaskHandler(BaseHandler):
                 "user_story": params.get("user_story"),
                 "acceptance_criteria": self._safe_json_dumps(params.get("acceptance_criteria", [])),
                 "parent_task_id": params.get("parent_task_id"),
-                "assignee": params.get("assignee")
+                "assignee": params.get("assignee"),
+                "status": "Not Started"
             }
             
             # Insert task
@@ -152,12 +203,66 @@ class TaskHandler(BaseHandler):
                     "task_id": task_id
                 })
             
-            return self._create_response(f"Created task {task_id}: {params['title']}")
+            # Create GitHub issue if available
+            github_url = None
+            github_error = None
+            if GitHubUtils.is_github_available():
+                try:
+                    github_title = f"{task_id}: {params['title']}"
+                    github_body = GitHubUtils.format_task_body(task_data)
+                    
+                    # Create labels based on priority and status
+                    labels = [params["priority"].lower()]
+                    if params.get("effort"):
+                        labels.append(f"effort-{params['effort'].lower()}")
+                    
+                    github_url = await GitHubUtils.create_github_issue(
+                        title=github_title,
+                        body=github_body,
+                        labels=labels,
+                        assignee=params.get("assignee")
+                    )
+                    
+                    # Store GitHub issue metadata if created successfully
+                    if github_url:
+                        issue_number = GitHubUtils.extract_issue_number_from_url(github_url)
+                        if issue_number:
+                            # Get the created issue details for ETag storage
+                            github_issue = await GitHubUtils.get_github_issue(issue_number)
+                            
+                            github_data = {
+                                "github_issue_number": issue_number, 
+                                "github_issue_url": github_url,
+                                "github_last_sync": datetime.now().isoformat(),
+                                "github_etag": github_issue.get('etag') if github_issue else None
+                            }
+                            
+                            self.db.update_record("tasks", github_data, "id = ?", [task_id])
+                    else:
+                        github_error = "GitHub issue creation returned no URL"
+                        
+                except Exception as e:
+                    github_error = f"GitHub issue creation failed: {str(e)}"
+                    self.logger.warning(f"GitHub integration error for task {task_id}: {github_error}")
+            else:
+                github_error = "GitHub not available or not configured"
+            
+            # Create above-the-fold response
+            key_info = f"Task {task_id} created"
+            action_info = f"📋 {params['title']} | {params['priority']} | {params.get('effort', 'No effort specified')}"
+            
+            github_info = ""
+            if github_url:
+                github_info = f"🔗 GitHub: {github_url}"
+            elif github_error:
+                github_info = f"⚠️ GitHub: {github_error}"
+            
+            return self._create_above_fold_response("SUCCESS", key_info, action_info, github_info)
             
         except Exception as e:
             return self._create_error_response("Failed to create task", e)
     
-    def _update_task_status(self, **params) -> List[TextContent]:
+    async def _update_task_status(self, **params) -> List[TextContent]:
         """Update task status"""
         # Validate required parameters
         error = self._validate_required_params(params, ["task_id", "new_status"])
@@ -165,10 +270,10 @@ class TaskHandler(BaseHandler):
             return self._create_error_response(error)
         
         try:
-            # Get current task
+            # Get current task with GitHub info
             current_tasks = self.db.get_records(
                 "tasks",
-                "status, assignee",
+                "status, assignee, github_issue_number, github_issue_url",
                 "id = ?",
                 [params["task_id"]]
             )
@@ -201,9 +306,73 @@ class TaskHandler(BaseHandler):
             if params.get("comment"):
                 self._add_review_comment("task", params["task_id"], params["comment"])
             
-            return self._create_response(
-                f"Updated task {params['task_id']} from {current_status} to {new_status}"
-            )
+            # Update GitHub issue if it exists using sync-safe operations
+            github_updated = False
+            github_error = None
+            
+            if current_task.get("github_issue_number") and GitHubUtils.is_github_available():
+                try:
+                    # Prepare GitHub updates
+                    github_updates = {}
+                    
+                    # Map task status to GitHub state
+                    if new_status == "Complete":
+                        github_updates['state'] = 'closed'
+                    elif new_status in ["Not Started", "In Progress", "Blocked"]:
+                        github_updates['state'] = 'open'
+                    
+                    # Prepare comment
+                    github_comment = f"Task status updated from '{current_status}' to '{new_status}'"
+                    if params.get("comment"):
+                        github_comment += f"\n\n{params['comment']}"
+                    github_updates['comment'] = github_comment
+                    
+                    # Update assignee if changed
+                    if params.get("assignee") and params["assignee"] != current_task.get("assignee"):
+                        github_updates['assignees'] = [params["assignee"]] if params["assignee"] else []
+                    
+                    # Use sync-safe update with current ETag
+                    current_etag = current_task.get("github_etag")
+                    success, error_msg, updated_issue = await GitHubUtils.update_github_issue_safe(
+                        str(current_task["github_issue_number"]),
+                        github_updates,
+                        expected_etag=current_etag
+                    )
+                    
+                    if success and updated_issue:
+                        github_updated = True
+                        # Update stored ETag and sync timestamp
+                        self.db.update_record(
+                            "tasks",
+                            {
+                                "github_etag": updated_issue.get('etag'),
+                                "github_last_sync": datetime.now().isoformat()
+                            },
+                            "id = ?",
+                            [params["task_id"]]
+                        )
+                    else:
+                        github_error = error_msg or "GitHub update failed"
+                        self.logger.warning(f"GitHub sync failed for task {params['task_id']}: {github_error}")
+                        
+                except Exception as e:
+                    github_error = f"GitHub update error: {str(e)}"
+                    self.logger.error(f"GitHub integration error: {github_error}")
+            else:
+                if current_task.get("github_issue_number"):
+                    github_error = "GitHub not available"
+            
+            # Create above-the-fold response
+            key_info = f"Task {params['task_id']} updated"
+            action_info = f"📈 {current_status} → {new_status}"
+            
+            github_info = ""
+            if github_updated:
+                github_info = f"🔗 GitHub issue #{current_task['github_issue_number']} synced"
+            elif github_error:
+                github_info = f"⚠️ GitHub sync failed: {github_error}"
+            
+            return self._create_above_fold_response("SUCCESS", key_info, action_info, github_info)
             
         except Exception as e:
             return self._create_error_response("Failed to update task", e)
@@ -247,20 +416,226 @@ class TaskHandler(BaseHandler):
                 )
             
             if not tasks:
-                return self._create_response("No tasks found matching criteria")
+                return self._create_above_fold_response("INFO", "No tasks found", "Try adjusting search criteria")
             
-            result = f"Found {len(tasks)} tasks:\n\n"
+            # Build filter description for above-the-fold
+            filters = []
+            if params.get("status"):
+                filters.append(f"status: {params['status']}")
+            if params.get("priority"):
+                filters.append(f"priority: {params['priority']}")
+            if params.get("assignee"):
+                filters.append(f"assignee: {params['assignee']}")
+            filter_desc = " | ".join(filters) if filters else "all tasks"
+            
+            # Build detailed list
+            task_list = []
             for task in tasks:
-                result += f"- {task['id']}: {task['title']} [{task['status']}] {task['priority']}"
+                task_info = f"- {task['id']}: {task['title']} [{task['status']}] {task['priority']}"
                 if task['assignee']:
-                    result += f" (Assigned: {task['assignee']})"
-                result += "\n"
+                    task_info += f" (👤 {task['assignee']})"
+                task_list.append(task_info)
             
-            return self._create_response(result)
+            key_info = self._format_count_summary("task", len(tasks), filter_desc)
+            details = "\n".join(task_list)
+            
+            return self._create_above_fold_response("SUCCESS", key_info, "", details)
             
         except Exception as e:
             return self._create_error_response("Failed to query tasks", e)
     
+    async def _sync_from_github(self, task_id: str) -> List[TextContent]:
+        """Sync task from GitHub issue changes"""
+        try:
+            # Get current task with GitHub info
+            tasks = self.db.get_records(
+                "tasks",
+                "*", 
+                "id = ?",
+                [task_id]
+            )
+            
+            if not tasks:
+                return self._create_error_response("Task not found")
+            
+            task = tasks[0]
+            github_issue_number = task.get("github_issue_number")
+            
+            if not github_issue_number:
+                return self._create_error_response("Task has no associated GitHub issue")
+            
+            # Use GitHubUtils sync method
+            success, sync_message, github_issue = await GitHubUtils.sync_task_with_github(
+                dict(task), force_sync=False
+            )
+            
+            if not success:
+                return self._create_error_response(f"GitHub sync failed: {sync_message}")
+            
+            # If conflicts detected, return them for user resolution
+            if "conflicts detected" in sync_message.lower():
+                key_info = f"Sync conflicts for task {task_id}"
+                return self._create_above_fold_response("WARNING", key_info, sync_message)
+            
+            # Apply GitHub changes to local task if needed
+            updates_applied = []
+            
+            if github_issue:
+                # Map GitHub state to task status
+                github_state = github_issue.get('state', '')
+                current_status = task.get('status', '')
+                
+                new_status = None
+                if github_state == 'closed' and current_status != 'Complete':
+                    new_status = 'Complete'
+                elif github_state == 'open' and current_status == 'Complete':
+                    new_status = 'In Progress'
+                
+                if new_status:
+                    self.db.update_record(
+                        "tasks",
+                        {
+                            "status": new_status,
+                            "github_last_sync": datetime.now().isoformat(),
+                            "github_etag": github_issue.get('etag')
+                        },
+                        "id = ?",
+                        [task_id]
+                    )
+                    updates_applied.append(f"Status: {current_status} → {new_status}")
+                
+                # Update assignee if changed
+                github_assignees = [a.get('login', '') for a in github_issue.get('assignees', [])]
+                github_assignee = github_assignees[0] if github_assignees else None
+                current_assignee = task.get('assignee')
+                
+                if github_assignee != current_assignee:
+                    self.db.update_record(
+                        "tasks",
+                        {"assignee": github_assignee},
+                        "id = ?",
+                        [task_id]
+                    )
+                    updates_applied.append(f"Assignee: {current_assignee or 'None'} → {github_assignee or 'None'}")
+            
+            # Create response
+            if updates_applied:
+                key_info = f"Task {task_id} synced from GitHub"
+                action_info = " | ".join(updates_applied)
+                return self._create_above_fold_response("SUCCESS", key_info, action_info)
+            else:
+                key_info = f"Task {task_id} already in sync"
+                return self._create_above_fold_response("INFO", key_info, sync_message)
+            
+        except Exception as e:
+            return self._create_error_response("Failed to sync from GitHub", e)
+
+    async def _bulk_sync_with_github(self, **params) -> List[TextContent]:
+        """Sync all tasks with GitHub issues"""
+        try:
+            # Get all tasks with GitHub issues
+            tasks_with_github = self.db.get_records(
+                "tasks",
+                "id, title, status, github_issue_number, github_last_sync",
+                "github_issue_number IS NOT NULL AND github_issue_number != ''",
+                [],
+                "created_at DESC"
+            )
+            
+            if not tasks_with_github:
+                return self._create_above_fold_response("INFO", "No tasks with GitHub issues found")
+            
+            # Check sync status for each task
+            sync_results = []
+            conflicts_found = []
+            updates_applied = []
+            
+            for task in tasks_with_github:
+                try:
+                    success, sync_message, github_issue = await GitHubUtils.sync_task_with_github(
+                        dict(task), force_sync=False
+                    )
+                    
+                    if not success:
+                        if "conflicts detected" in sync_message.lower():
+                            conflicts_found.append(f"{task['id']}: {sync_message}")
+                        else:
+                            sync_results.append(f"❌ {task['id']}: {sync_message}")
+                    elif "in sync" in sync_message.lower():
+                        sync_results.append(f"✅ {task['id']}: {sync_message}")
+                    else:
+                        # Apply updates if any changes detected
+                        task_updates = []
+                        
+                        if github_issue:
+                            # Update status if changed
+                            github_state = github_issue.get('state', '')
+                            current_status = task.get('status', '')
+                            
+                            new_status = None
+                            if github_state == 'closed' and current_status != 'Complete':
+                                new_status = 'Complete'
+                            elif github_state == 'open' and current_status == 'Complete':
+                                new_status = 'In Progress'
+                            
+                            update_data = {
+                                "github_last_sync": datetime.now().isoformat(),
+                                "github_etag": github_issue.get('etag')
+                            }
+                            
+                            if new_status:
+                                update_data["status"] = new_status
+                                task_updates.append(f"Status: {current_status} → {new_status}")
+                            
+                            # Update assignee if changed
+                            github_assignees = [a.get('login', '') for a in github_issue.get('assignees', [])]
+                            github_assignee = github_assignees[0] if github_assignees else None
+                            current_assignee = task.get('assignee')
+                            
+                            if github_assignee != current_assignee:
+                                update_data["assignee"] = github_assignee
+                                task_updates.append(f"Assignee: {current_assignee or 'None'} → {github_assignee or 'None'}")
+                            
+                            if task_updates:
+                                self.db.update_record("tasks", update_data, "id = ?", [task['id']])
+                                updates_applied.append(f"🔄 {task['id']}: {' | '.join(task_updates)}")
+                            else:
+                                sync_results.append(f"✅ {task['id']}: Updated sync metadata")
+                        
+                except Exception as e:
+                    sync_results.append(f"❌ {task['id']}: Error - {str(e)}")
+            
+            # Build summary
+            total_tasks = len(tasks_with_github)
+            updates_count = len(updates_applied)
+            conflicts_count = len(conflicts_found)
+            
+            key_info = f"Synced {total_tasks} GitHub task(s)"
+            action_info = f"🔄 {updates_count} updated | ⚠️ {conflicts_count} conflicts"
+            
+            # Build detailed report
+            details = []
+            if updates_applied:
+                details.append("## Updated Tasks")
+                details.extend(updates_applied)
+                details.append("")
+            
+            if conflicts_found:
+                details.append("## Conflicts Detected")
+                details.extend(conflicts_found)
+                details.append("")
+            
+            if sync_results:
+                details.append("## All Sync Results")
+                details.extend(sync_results)
+            
+            report = "\n".join(details)
+            
+            return self._create_above_fold_response("SUCCESS", key_info, action_info, report)
+            
+        except Exception as e:
+            return self._create_error_response("Failed to bulk sync with GitHub", e)
+
     def _get_task_details(self, **params) -> List[TextContent]:
         """Get full task details"""
         # Validate required parameters
@@ -350,7 +725,13 @@ class TaskHandler(BaseHandler):
                     report += f"\n## Parent Task\n"
                     report += f"- {parent['id']}: {parent['title']} [{parent['status']}]\n"
             
-            return self._create_response(report)
+            # Create above-the-fold summary
+            key_info = self._format_status_summary("Task", task['id'], task['status'])
+            action_info = f"📋 {task['title']} | {task['priority']} | {task['effort'] or 'No effort'}"
+            if task['assignee']:
+                action_info += f" | 👤 {task['assignee']}"
+            
+            return self._create_above_fold_response("INFO", key_info, action_info, report)
             
         except Exception as e:
             return self._create_error_response("Failed to get task details", e)

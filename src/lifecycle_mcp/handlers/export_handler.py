@@ -83,12 +83,13 @@ class ExportHandler(BaseHandler):
                 exported_files.extend(self._export_architecture(project_name, output_dir))
             
             if exported_files:
-                return self._create_response(
-                    f"Successfully exported {len(exported_files)} files to {output_dir}:\n" + 
-                    "\n".join(f"- {f}" for f in exported_files)
-                )
+                # Create above-the-fold response for successful export
+                key_info = f"Exported {len(exported_files)} files to {output_dir}"
+                action_info = f"📄 {project_name} documentation"
+                details = "\n".join(f"- {f}" for f in exported_files)
+                return self._create_above_fold_response("SUCCESS", key_info, action_info, details)
             else:
-                return self._create_response("No data found to export")
+                return self._create_above_fold_response("INFO", "No data found to export", "Check if requirements, tasks, or architecture exist")
                 
         except Exception as e:
             return self._create_error_response("Failed to export project documentation", e)
@@ -310,9 +311,10 @@ class ExportHandler(BaseHandler):
         if params.get("interactive", False):
             # For interactive mode, we'd need to integrate with InterviewHandler
             # For now, provide a helpful message
-            return self._create_response(
-                "Interactive diagram generation requires the `start_architectural_conversation` tool. "
-                "Use that tool first, then call this tool with the recommended diagram_type."
+            return self._create_above_fold_response(
+                "INFO", 
+                "Interactive mode requires architectural conversation",
+                "Use start_architectural_conversation tool first"
             )
         
         try:
@@ -337,7 +339,7 @@ class ExportHandler(BaseHandler):
                 mermaid_content = self._generate_dependencies_diagram()
             
             if not mermaid_content:
-                return self._create_response("No data found for the requested diagram type")
+                return self._create_above_fold_response("INFO", "No data found for diagram", f"Check if {diagram_type} data exists in the system")
             
             # Prepare content for output
             if output_format == "markdown_with_mermaid":
@@ -370,12 +372,13 @@ class ExportHandler(BaseHandler):
                 except (OSError, PermissionError) as e:
                     return self._create_error_response(f"Failed to save diagram file: {str(e)}")
             
-            # Prepare response message
-            response_message = result
+            # Create above-the-fold response
+            key_info = f"{diagram_type.replace('_', ' ').title()} diagram generated"
+            action_info = f"📊 {output_format} format"
             if saved_file_path:
-                response_message += f"\n\nDiagram saved to: {saved_file_path}"
+                action_info += f" | Saved to {saved_file_path}"
             
-            return self._create_response(response_message)
+            return self._create_above_fold_response("SUCCESS", key_info, action_info, result)
             
         except Exception as e:
             return self._create_error_response("Failed to create architectural diagram", e)

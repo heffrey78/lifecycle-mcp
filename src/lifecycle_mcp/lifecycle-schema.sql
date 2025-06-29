@@ -71,6 +71,10 @@ CREATE TABLE tasks (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
     
+    -- GitHub Integration
+    github_issue_number TEXT,
+    github_issue_url TEXT,
+    
     -- Relationships
     parent_task_id TEXT REFERENCES tasks(id),
     

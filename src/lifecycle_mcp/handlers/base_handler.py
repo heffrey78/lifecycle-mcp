@@ -27,13 +27,65 @@ class BaseHandler(ABC):
         """Create standardized response format"""
         return [TextContent(type="text", text=text)]
     
+    def _create_above_fold_response(self, status: str, key_info: str, action_info: str = "", details: str = "") -> List[TextContent]:
+        """Create above-the-fold optimized response format
+        
+        Args:
+            status: Status indicator (SUCCESS/ERROR/INFO etc)
+            key_info: Most important information (ID, count, etc)
+            action_info: Actionable information or next steps (optional)
+            details: Detailed information for expansion (optional)
+        """
+        # Line 1: Status + Key Info
+        line1 = f"[{status}] {key_info}"
+        
+        # Line 2: Action info if provided
+        line2 = action_info if action_info else ""
+        
+        # Line 3: Summary or continuation indicator
+        if details:
+            line3 = "📄 Details available below (expand to view)"
+        else:
+            line3 = ""
+        
+        # Build response
+        response_lines = [line1]
+        if line2:
+            response_lines.append(line2)
+        if line3:
+            response_lines.append(line3)
+        
+        # Add details section if provided
+        if details:
+            response_lines.append("")  # Blank line separator
+            response_lines.append(details)
+        
+        return [TextContent(type="text", text="\n".join(response_lines))]
+    
+    def _format_status_summary(self, entity_type: str, entity_id: str, status: str, extra_info: str = "") -> str:
+        """Format a concise status summary for above-the-fold display"""
+        base = f"{entity_type} {entity_id} [{status}]"
+        if extra_info:
+            return f"{base} - {extra_info}"
+        return base
+    
+    def _format_count_summary(self, entity_type: str, count: int, filter_desc: str = "") -> str:
+        """Format a count summary for above-the-fold display"""
+        if filter_desc:
+            return f"Found {count} {entity_type}(s) matching: {filter_desc}"
+        return f"Found {count} {entity_type}(s)"
+    
     def _create_error_response(self, error_msg: str, exception: Optional[Exception] = None) -> List[TextContent]:
         """Create standardized error response"""
         if exception:
             self.logger.error(f"{error_msg}: {str(exception)}")
+            full_error = f"{error_msg}: {str(exception)}"
         else:
             self.logger.error(error_msg)
-        return self._create_response(f"Error: {error_msg}")
+            full_error = error_msg
+        
+        # Use above-the-fold format for errors
+        return self._create_above_fold_response("ERROR", error_msg)
     
     def _validate_required_params(self, params: Dict[str, Any], required_fields: List[str]) -> Optional[str]:
         """Validate that required parameters are present"""

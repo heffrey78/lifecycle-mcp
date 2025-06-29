@@ -30,31 +30,39 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
 
 ### Core Components
 
-1. **MCP Server** (`src/lifecycle_mcp/server.py`): Main server implementation using the `mcp` library
+1. **LifecycleMCPServer** (`src/lifecycle_mcp/server.py`): Refactored main server using modular handler architecture
    - Exposes 22 tools for lifecycle management across 6 handler modules
    - Uses async architecture for proper MCP protocol compliance
-   - Handles database operations and tool routing through modular handlers
-   - Validates state transitions and business rules
+   - Implements clean separation of concerns with handler registry for tool routing
+   - Validates state transitions and business rules through domain-specific handlers
+   - Maintains backward compatibility while improving maintainability
 
 2. **Handler Architecture** (`src/lifecycle_mcp/handlers/`): Modular async handlers for different domains
-   - `BaseHandler`: Abstract base with common async patterns and utilities
-   - `RequirementHandler`: Requirements lifecycle management (5 tools)
-   - `TaskHandler`: Task creation and progress tracking (4 tools)
-   - `ArchitectureHandler`: ADR management and reviews (5 tools)
-   - `InterviewHandler`: Interactive requirement gathering (4 tools)
-   - `ExportHandler`: Documentation generation (2 tools)
-   - `StatusHandler`: Project health monitoring (2 tools)
+   - `BaseHandler`: Abstract base class with common async patterns, utilities, and standardized response formatting
+   - `RequirementHandler`: Requirements lifecycle management (5 tools) - create, update, query, details, trace
+   - `TaskHandler`: Task creation and progress tracking (4 tools) - create, update, query, details
+   - `ArchitectureHandler`: ADR management and reviews (5 tools) - create, update, query, details, review
+   - `InterviewHandler`: Interactive requirement gathering (4 tools) - start/continue interviews and conversations
+   - `ExportHandler`: Documentation generation (2 tools) - export docs, create diagrams
+   - `StatusHandler`: Project health monitoring (2 tools) - project status and metrics
 
-3. **Database Schema** (`src/lifecycle_mcp/lifecycle-schema.sql`): Comprehensive SQLite schema
-   - Requirements table with full lifecycle states
-   - Tasks table with hierarchical structure
-   - Architecture decisions (ADRs) tracking
-   - Many-to-many relationships for traceability
-   - Automated triggers for status updates and metrics
+3. **DatabaseManager** (`src/lifecycle_mcp/database_manager.py`): Centralized database operations
+   - Manages SQLite database connections and schema initialization
+   - Provides async database operations for all handlers
+   - Handles database path configuration via LIFECYCLE_DB environment variable
+   - Implements connection pooling and error handling
 
-4. **Project Configuration** (`pyproject.toml`): Standard Python packaging
+4. **Database Schema** (`src/lifecycle_mcp/lifecycle-schema.sql`): Comprehensive SQLite schema
+   - Requirements table with full lifecycle states and metadata
+   - Tasks table with hierarchical structure and effort tracking
+   - Architecture decisions (ADRs) tracking with decision drivers
+   - Many-to-many relationships for full traceability between entities
+   - Automated triggers for status updates and denormalized metrics
+
+5. **Project Configuration** (`pyproject.toml`): Standard Python packaging
    - Entry point: `lifecycle-mcp = "lifecycle_mcp.server:main"`
    - Minimal dependencies: only `mcp>=1.0.0`
+   - Development dependencies for testing and linting
 
 ### Key Design Patterns
 

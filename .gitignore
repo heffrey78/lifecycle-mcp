@@ -151,3 +151,6 @@ Thumbs.db
 
 # MCP specific
 mcp-server.log
+
+# App specific
+exports/

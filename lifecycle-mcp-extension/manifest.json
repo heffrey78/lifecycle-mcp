@@ -1,0 +1,25 @@
+{
+  "dxt_version": "0.1",
+  "name": "lifecycle-mcp",
+  "version": "1.0.0",
+  "description": "Software lifecycle management MCP server for tracking requirements, tasks, and architecture decisions",
+  "author": {
+    "name": "Jeff Wikstrom"
+  },
+  "server": {
+    "type": "python",
+    "entry_point": "src/lifecycle_mcp/server.py",
+    "install_script": "setup.py",
+    "mcp_config": {
+      "command": "python",
+      "args": [
+        "-m",
+        "lifecycle_mcp.server"
+      ],
+      "env": {
+        "LIFECYCLE_DB": "${__dirname}/lifecycle.db"
+      }
+    }
+  },
+  "license": "MIT"
+}

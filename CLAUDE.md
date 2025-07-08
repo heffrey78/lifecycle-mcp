@@ -5,23 +5,44 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Development Commands
 
 ### Installation and Setup
+
+#### Using uv (Recommended - No Installation Required!)
+```bash
+# Install uv if needed
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Sync dependencies
+uv sync
+```
+
+#### Using pip (Traditional)
 ```bash
 pip install -e .
 ```
 
 ### Running the MCP Server
+
+#### With uv (Recommended)
+```bash
+uv run server.py
+```
+
+#### With pip installation
 ```bash
 lifecycle-mcp
 ```
 
 ### Testing the Server
 ```bash
-# Test with Claude Code
-claude mcp add lifecycle-mcp
+# Test with Claude Code (uv method - recommended)
+claude mcp add lifecycle $(which uv) -- --directory $(pwd) run server.py
+
+# Test with Claude Code (pip method)
+claude mcp add lifecycle lifecycle-mcp
 
 # Manual configuration for other MCP clients
 export LIFECYCLE_DB="./lifecycle.db"
-lifecycle-mcp
+uv run server.py  # or lifecycle-mcp if installed with pip
 ```
 
 ## Architecture Overview
@@ -138,5 +159,7 @@ The server uses the `LIFECYCLE_DB` environment variable to specify the SQLite da
 If you encounter "MCP error -32000: Connection closed", ensure:
 1. All handler `handle_tool_call` methods are properly async
 2. Server properly awaits handler calls
-3. Package is installed with `pip install -e .`
-4. Re-add server with `claude mcp add lifecycle-mcp lifecycle-mcp`
+3. If using pip: Package is installed with `pip install -e .`
+4. Re-add server with the appropriate command:
+   - uv method: `claude mcp add lifecycle $(which uv) -- --directory $(pwd) run server.py`
+   - pip method: `claude mcp add lifecycle lifecycle-mcp`

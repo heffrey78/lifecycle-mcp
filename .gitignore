@@ -154,3 +154,9 @@ mcp-server.log
 
 # App specific
 exports/
+
+# Test files
+test_server.py
+
+# Build artifacts
+*.dxt

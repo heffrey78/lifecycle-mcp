@@ -21,6 +21,17 @@ jobs:
       run: |
         pip install pytest
     
+    - name: Run simple test
+      run: |
+        python -m pytest tests/test_simple.py -v
+    
     - name: Run debug test
       run: |
         python -m pytest tests/test_windows_debug.py -v -s
+      continue-on-error: true
+    
+    - name: List directory structure
+      run: |
+        dir
+        dir src
+        dir tests

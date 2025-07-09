@@ -84,7 +84,7 @@ def db_manager(temp_db):
     manager = DatabaseManager(temp_db)
     yield manager
     # Ensure all connections are closed before cleanup
-    manager.close_all()
+    manager.close()
 
 
 @pytest.fixture

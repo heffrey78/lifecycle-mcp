@@ -174,6 +174,9 @@ class TaskHandler(BaseHandler):
                         [params["parent_task_id"]]
                     )
                     task_number = parent_task_number
+                else:
+                    # Parent task not found
+                    return self._create_error_response(f"Parent task {params['parent_task_id']} not found")
             
             task_id = f"TASK-{task_number:04d}-{subtask_number:02d}-00"
             
@@ -281,7 +284,7 @@ class TaskHandler(BaseHandler):
             if not current_tasks:
                 return self._create_error_response("Task not found")
             
-            current_task = current_tasks[0]
+            current_task = dict(current_tasks[0])  # Convert Row to dict for .get() method
             current_status = current_task["status"]
             new_status = params["new_status"]
             
@@ -458,7 +461,7 @@ class TaskHandler(BaseHandler):
             if not tasks:
                 return self._create_error_response("Task not found")
             
-            task = tasks[0]
+            task = dict(tasks[0])  # Convert Row to dict for .get() method
             github_issue_number = task.get("github_issue_number")
             
             if not github_issue_number:
@@ -466,7 +469,7 @@ class TaskHandler(BaseHandler):
             
             # Use GitHubUtils sync method
             success, sync_message, github_issue = await GitHubUtils.sync_task_with_github(
-                dict(task), force_sync=False
+                task, force_sync=False  # task is already a dict
             )
             
             if not success:
@@ -655,7 +658,7 @@ class TaskHandler(BaseHandler):
             if not tasks:
                 return self._create_error_response("Task not found")
             
-            task = tasks[0]
+            task = dict(tasks[0])  # Convert Row to dict for .get() method
             
             # Build report
             report = f"""# Task Details: {task['id']}
@@ -721,7 +724,7 @@ class TaskHandler(BaseHandler):
                 )
                 
                 if parent_tasks:
-                    parent = parent_tasks[0]
+                    parent = dict(parent_tasks[0])  # Convert Row to dict for consistency
                     report += f"\n## Parent Task\n"
                     report += f"- {parent['id']}: {parent['title']} [{parent['status']}]\n"
             

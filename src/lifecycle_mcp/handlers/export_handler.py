@@ -323,20 +323,26 @@ class ExportHandler(BaseHandler):
             output_format = params.get("output_format", "mermaid")
             output_path = params.get("output_path", "exports")
             
+            # Validate diagram type
+            valid_types = ["requirements", "tasks", "architecture", "full_project", "directory_structure", "dependencies"]
+            if diagram_type not in valid_types:
+                return self._create_error_response(f"Invalid diagram type: {diagram_type}. Valid types are: {', '.join(valid_types)}")
+            
             mermaid_content = ""
+            requirement_ids = params.get("requirement_ids", [])
             
             if diagram_type == "requirements":
-                mermaid_content = self._generate_requirements_diagram()
+                mermaid_content = self._generate_requirements_diagram(requirement_ids)
             elif diagram_type == "tasks":
-                mermaid_content = self._generate_tasks_diagram()
+                mermaid_content = self._generate_tasks_diagram(requirement_ids)
             elif diagram_type == "architecture":
-                mermaid_content = self._generate_architecture_diagram()
+                mermaid_content = self._generate_architecture_diagram(requirement_ids)
             elif diagram_type == "full_project":
-                mermaid_content = self._generate_full_project_diagram(include_relationships)
+                mermaid_content = self._generate_full_project_diagram(include_relationships, requirement_ids)
             elif diagram_type == "directory_structure":
                 mermaid_content = self._generate_directory_structure_diagram()
             elif diagram_type == "dependencies":
-                mermaid_content = self._generate_dependencies_diagram()
+                mermaid_content = self._generate_dependencies_diagram(requirement_ids)
             
             if not mermaid_content:
                 return self._create_above_fold_response("INFO", "No data found for diagram", f"Check if {diagram_type} data exists in the system")
@@ -383,12 +389,22 @@ class ExportHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to create architectural diagram", e)
     
-    def _generate_requirements_diagram(self) -> str:
+    def _generate_requirements_diagram(self, requirement_ids: List[str] = None) -> str:
         """Generate requirements flowchart"""
-        requirements = self.db.get_records(
-            "requirements",
-            "*",
-            order_by="type, requirement_number"
+        if requirement_ids:
+            # Filter specific requirements
+            placeholders = ",".join(["?"] * len(requirement_ids))
+            requirements = self.db.execute_query(
+                f"SELECT * FROM requirements WHERE id IN ({placeholders}) ORDER BY type, requirement_number",
+                requirement_ids,
+                fetch_all=True,
+                row_factory=True
+            )
+        else:
+            requirements = self.db.get_records(
+                "requirements",
+                "*",
+                order_by="type, requirement_number"
         )
         
         if not requirements:
@@ -429,13 +445,23 @@ class ExportHandler(BaseHandler):
         
         return mermaid_content
     
-    def _generate_tasks_diagram(self) -> str:
+    def _generate_tasks_diagram(self, requirement_ids: List[str] = None) -> str:
         """Generate task hierarchy diagram"""
-        tasks = self.db.get_records(
-            "tasks",
-            "*",
-            order_by="task_number, subtask_number"
-        )
+        if requirement_ids:
+            # Get tasks for specific requirements
+            placeholders = ",".join(["?"] * len(requirement_ids))
+            tasks = self.db.execute_query(f"""
+                SELECT DISTINCT t.* FROM tasks t
+                JOIN requirement_tasks rt ON t.id = rt.task_id
+                WHERE rt.requirement_id IN ({placeholders})
+                ORDER BY t.task_number, t.subtask_number
+            """, requirement_ids, fetch_all=True, row_factory=True)
+        else:
+            tasks = self.db.get_records(
+                "tasks",
+                "*",
+                order_by="task_number, subtask_number"
+            )
         
         if not tasks:
             return ""
@@ -464,13 +490,23 @@ class ExportHandler(BaseHandler):
         
         return mermaid_content
     
-    def _generate_architecture_diagram(self) -> str:
+    def _generate_architecture_diagram(self, requirement_ids: List[str] = None) -> str:
         """Generate architecture decisions diagram"""
-        architecture = self.db.get_records(
-            "architecture",
-            "*",
-            order_by="created_at DESC"
-        )
+        if requirement_ids:
+            # Get architecture decisions for specific requirements
+            placeholders = ",".join(["?"] * len(requirement_ids))
+            architecture = self.db.execute_query(f"""
+                SELECT DISTINCT a.* FROM architecture a
+                JOIN requirement_architecture ra ON a.id = ra.architecture_id
+                WHERE ra.requirement_id IN ({placeholders})
+                ORDER BY a.created_at DESC
+            """, requirement_ids, fetch_all=True, row_factory=True)
+        else:
+            architecture = self.db.get_records(
+                "architecture",
+                "*",
+                order_by="created_at DESC"
+            )
         
         if not architecture:
             return ""
@@ -493,11 +529,33 @@ class ExportHandler(BaseHandler):
         
         return mermaid_content
     
-    def _generate_full_project_diagram(self, include_relationships: bool) -> str:
+    def _generate_full_project_diagram(self, include_relationships: bool, requirement_ids: List[str] = None) -> str:
         """Generate full project overview diagram"""
-        requirements = self.db.get_records("requirements", "*", order_by="type, requirement_number")
-        tasks = self.db.get_records("tasks", "*", order_by="task_number, subtask_number")
-        architecture = self.db.get_records("architecture", "*", order_by="created_at DESC")
+        if requirement_ids:
+            # Filter to specific requirements
+            placeholders = ",".join(["?"] * len(requirement_ids))
+            requirements = self.db.execute_query(
+                f"SELECT * FROM requirements WHERE id IN ({placeholders}) ORDER BY type, requirement_number",
+                requirement_ids,
+                fetch_all=True,
+                row_factory=True
+            )
+            tasks = self.db.execute_query(f"""
+                SELECT DISTINCT t.* FROM tasks t
+                JOIN requirement_tasks rt ON t.id = rt.task_id
+                WHERE rt.requirement_id IN ({placeholders})
+                ORDER BY t.task_number, t.subtask_number
+            """, requirement_ids, fetch_all=True, row_factory=True)
+            architecture = self.db.execute_query(f"""
+                SELECT DISTINCT a.* FROM architecture a
+                JOIN requirement_architecture ra ON a.id = ra.architecture_id
+                WHERE ra.requirement_id IN ({placeholders})
+                ORDER BY a.created_at DESC
+            """, requirement_ids, fetch_all=True, row_factory=True)
+        else:
+            requirements = self.db.get_records("requirements", "*", order_by="type, requirement_number")
+            tasks = self.db.get_records("tasks", "*", order_by="task_number, subtask_number")
+            architecture = self.db.get_records("architecture", "*", order_by="created_at DESC")
         
         mermaid_content = "flowchart TD\n"
         mermaid_content += "    Requirements[Requirements]\n"
@@ -551,14 +609,36 @@ class ExportHandler(BaseHandler):
     Root --> Docs
     Root --> Tests"""
     
-    def _generate_dependencies_diagram(self) -> str:
+    def _generate_dependencies_diagram(self, requirement_ids: List[str] = None) -> str:
         """Generate dependencies diagram"""
-        dependencies = self.db.execute_query("""
-            SELECT td.task_id, td.depends_on_task_id 
-            FROM task_dependencies td
-            JOIN tasks t1 ON td.task_id = t1.id
-            JOIN tasks t2 ON td.depends_on_task_id = t2.id
-        """, fetch_all=True, row_factory=True)
+        if requirement_ids:
+            # Get task dependencies for specific requirements
+            placeholders = ",".join(["?"] * len(requirement_ids))
+            task_ids_query = self.db.execute_query(f"""
+                SELECT DISTINCT task_id FROM requirement_tasks
+                WHERE requirement_id IN ({placeholders})
+            """, requirement_ids, fetch_all=True, row_factory=True)
+            
+            task_ids = [row['task_id'] for row in task_ids_query]
+            if task_ids:
+                task_placeholders = ",".join(["?"] * len(task_ids))
+                dependencies = self.db.execute_query(f"""
+                    SELECT td.task_id, td.depends_on_task_id 
+                    FROM task_dependencies td
+                    JOIN tasks t1 ON td.task_id = t1.id
+                    JOIN tasks t2 ON td.depends_on_task_id = t2.id
+                    WHERE td.task_id IN ({task_placeholders}) 
+                       OR td.depends_on_task_id IN ({task_placeholders})
+                """, task_ids + task_ids, fetch_all=True, row_factory=True)
+            else:
+                dependencies = []
+        else:
+            dependencies = self.db.execute_query("""
+                SELECT td.task_id, td.depends_on_task_id 
+                FROM task_dependencies td
+                JOIN tasks t1 ON td.task_id = t1.id
+                JOIN tasks t2 ON td.depends_on_task_id = t2.id
+            """, fetch_all=True, row_factory=True)
         
         if not dependencies:
             return "flowchart TD\n    NoDeps[No task dependencies found]\n"

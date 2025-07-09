@@ -5,10 +5,11 @@ Unit tests for above-the-fold display optimization
 import pytest
 from unittest.mock import Mock
 
-from src.lifecycle_mcp.handlers.base_handler import BaseHandler
-from src.lifecycle_mcp.database_manager import DatabaseManager
+from lifecycle_mcp.handlers.base_handler import BaseHandler
+from lifecycle_mcp.database_manager import DatabaseManager
 
 
+@pytest.mark.unit
 class TestAboveFoldFormatting:
     """Test cases for above-the-fold display formatting"""
     

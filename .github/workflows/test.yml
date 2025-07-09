@@ -50,7 +50,16 @@ jobs:
     
     - name: Run tests with coverage
       run: |
-        pytest tests/ -n auto --randomly-seed=42 --cov=src/lifecycle_mcp --cov-report=xml --cov-report=html --cov-report=term --cov-fail-under=0 -k "not (property or performance)"
+        echo "Python version:"
+        python --version
+        echo "Pytest version:"
+        pytest --version
+        echo "Installed packages:"
+        pip list | grep -E "pytest|coverage|lifecycle"
+        echo "Test collection:"
+        pytest tests/ --collect-only -k "not (property or performance)" | tail -5
+        echo "Running tests..."
+        pytest tests/ --randomly-seed=42 --cov=src/lifecycle_mcp --cov-report=xml --cov-report=html --cov-report=term --cov-fail-under=0 -k "not (property or performance)"
     
     - name: Upload coverage reports
       uses: codecov/codecov-action@v4

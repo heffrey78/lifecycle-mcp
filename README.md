@@ -12,38 +12,91 @@ A Model Context Protocol (MCP) server for comprehensive software lifecycle manag
 - **State Validation**: Automatic validation of lifecycle state transitions
 - **Relationship Tracking**: Many-to-many relationships between requirements, tasks, and architecture
 
-## Installation
-
-### From Source (Development)
-To install from a local clone of this repository:
+## Quick Start
 
 ```bash
-# Clone and install from another directory
+# 1. Clone the repository
 git clone https://github.com/heffrey78/lifecycle-mcp.git
 cd lifecycle-mcp
+
+# 2. Install globally (easiest for using across projects)
 pip install -e .
+
+# 3. Go to any project where you want to use lifecycle management
+cd /path/to/your/project
+
+# 4. Add the MCP server to Claude
+claude mcp add lifecycle lifecycle-mcp -e LIFECYCLE_DB=./lifecycle.db
+
+# 5. Start using lifecycle tools in Claude!
 ```
 
-Or install directly from the repository path:
+## Installation Options
+
+### Prerequisites (Optional)
+If you want to use `uv` (faster Python package manager):
 ```bash
-pip install -e /path/to/lifecycle-mcp
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Or with homebrew
+brew install uv
+```
+
+### Clone the Repository
+```bash
+git clone https://github.com/heffrey78/lifecycle-mcp.git
+cd lifecycle-mcp
 ```
 
 ## Usage with Claude Code
 
+For detailed examples and scenarios, see [USAGE_EXAMPLES.md](USAGE_EXAMPLES.md).
+
+### Option 1: Global Installation (Recommended for Multiple Projects)
+
+Install the server globally so it can be used from any project:
+
 ```bash
-claude mcp add lifecycle-mcp
+# From the lifecycle-mcp directory
+pip install -e .
+
+# Now from ANY project directory, add the server:
+claude mcp add lifecycle lifecycle-mcp -e LIFECYCLE_DB=./lifecycle.db
 ```
 
-Alternatively, reference the repository folder. Set the environment variable `LIFECYCLE_DB` to the desired location. Recommend one database per project.
+**Note**: Each project gets its own database file in its directory.
+
+### Option 2: Run from Source with uv
+
+If you prefer not to install globally:
 
 ```bash
-claude mcp add lifecycle python3.10 {REPOSITORY FOLDER}/lifecycle_server.py -e LIFECYCLE_DB=./lifecycle.db
+# Get the full path to the lifecycle-mcp directory
+LIFECYCLE_PATH="/path/to/lifecycle-mcp"  # Replace with your actual path
+
+# From any project directory:
+claude mcp add lifecycle $(which uv) -- --directory $LIFECYCLE_PATH run server.py -e LIFECYCLE_DB=./lifecycle.db
+```
+
+### Option 3: Direct Python Execution
+
+For maximum compatibility:
+
+```bash
+# Get the full path to the server
+LIFECYCLE_PATH="/path/to/lifecycle-mcp"  # Replace with your actual path
+
+# From any project directory:
+claude mcp add lifecycle $(which python) $LIFECYCLE_PATH/server.py -e LIFECYCLE_DB=./lifecycle.db
 ```
 
 ## Manual Configuration
 
-Add to your MCP configuration:
+You can also manually edit your Claude Desktop configuration file:
+
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`  
+**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
@@ -56,6 +109,30 @@ Add to your MCP configuration:
     }
   }
 }
+```
+
+## Best Practices
+
+### Database Location
+- Each project should have its own `lifecycle.db` file
+- Use `LIFECYCLE_DB=./lifecycle.db` to create the database in the current project
+- Or use an absolute path for a shared database: `LIFECYCLE_DB=/path/to/shared/lifecycle.db`
+
+### Virtual Environment (Recommended)
+```bash
+# Create a virtual environment for lifecycle-mcp
+cd /path/to/lifecycle-mcp
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install in the virtual environment
+pip install -e .
+
+# Find the venv's lifecycle-mcp command
+which lifecycle-mcp  # Copy this path
+
+# Use the full path when adding to Claude
+claude mcp add lifecycle /path/to/venv/bin/lifecycle-mcp -e LIFECYCLE_DB=./lifecycle.db
 ```
 
 ## MCP Tools Reference
@@ -495,7 +572,7 @@ This error typically occurs when there are async/await mismatches in the server 
 
 2. Re-add the MCP server:
    ```bash
-   claude mcp add lifecycle-mcp lifecycle-mcp
+   claude mcp add lifecycle lifecycle-mcp
    ```
 
 3. Check that the server starts without errors:
@@ -523,6 +600,19 @@ The database schema is automatically created on first run. If you need to reset 
 
 ## Development
 
+### Using uv (Recommended)
+```bash
+# Install dependencies
+uv sync
+
+# Run the server directly
+uv run server.py
+
+# Test with Claude Code
+claude mcp add lifecycle $(which uv) -- --directory $(pwd) run server.py
+```
+
+### Using pip (Traditional)
 ```bash
 # Install in development mode
 pip install -e .
@@ -531,5 +621,18 @@ pip install -e .
 lifecycle-mcp
 
 # Test with Claude Code
-claude mcp add lifecycle-mcp lifecycle-mcp
+claude mcp add lifecycle lifecycle-mcp
 ```
+
+## Building Desktop Extension (.dxt)
+
+To create a Desktop Extension package for one-click installation:
+
+```bash
+# Build the .dxt file
+make build-dxt
+# or
+python build_dxt.py
+```
+
+This creates `lifecycle-mcp-1.0.0.dxt` which users can double-click to install in Claude Desktop.

@@ -5,11 +5,13 @@ Test configuration and fixtures for MCP Lifecycle Management Server
 import pytest
 import tempfile
 import os
+import asyncio
 from pathlib import Path
 from unittest.mock import Mock
+import logging
 
-from src.lifecycle_mcp.database_manager import DatabaseManager
-from src.lifecycle_mcp.handlers import (
+from lifecycle_mcp.database_manager import DatabaseManager
+from lifecycle_mcp.handlers import (
     RequirementHandler,
     TaskHandler,
     ArchitectureHandler,
@@ -17,6 +19,29 @@ from src.lifecycle_mcp.handlers import (
     ExportHandler,
     StatusHandler
 )
+
+# Configure pytest-asyncio to avoid deprecation warnings
+pytest_plugins = ('pytest_asyncio',)
+
+# Configure logging for tests
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+
+def pytest_configure(config):
+    """Configure pytest with asyncio settings"""
+    # This addresses the deprecation warning about asyncio_default_fixture_loop_scope
+    config.option.asyncio_default_fixture_loop_scope = "function"
+
+
+@pytest.fixture(scope="function")
+def event_loop():
+    """Create an instance of the default event loop for each test function."""
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
 
 
 @pytest.fixture

@@ -5,7 +5,7 @@ Property-based tests using Hypothesis for lifecycle MCP
 import string
 
 import pytest
-from hypothesis import given
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, initialize, invariant, rule
 
@@ -23,6 +23,7 @@ class TestPropertyBasedValidation:
         current_state=st.text(min_size=1, max_size=1000).filter(lambda x: x.strip()),
         desired_state=st.text(min_size=1, max_size=1000).filter(lambda x: x.strip()),
     )
+    @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
     @pytest.mark.asyncio
     async def test_requirement_creation_properties(
         self, requirement_handler, req_type, priority, title, current_state, desired_state
@@ -51,6 +52,7 @@ class TestPropertyBasedValidation:
         ),
         risk_level=st.sampled_from(["High", "Medium", "Low"]),
     )
+    @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
     @pytest.mark.asyncio
     async def test_requirement_json_fields(self, requirement_handler, functional_reqs, acceptance_criteria, risk_level):
         """Test that JSON fields are properly handled regardless of content"""
@@ -87,6 +89,7 @@ class TestPropertyBasedValidation:
         ),
         user_story=st.text(min_size=0, max_size=1000),
     )
+    @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
     @pytest.mark.asyncio
     async def test_task_creation_properties(self, task_handler, requirement_handler, effort, assignee, user_story):
         """Test task creation with various valid inputs"""
@@ -243,6 +246,7 @@ def test_requirement_lifecycle_state_machine():
 
 
 @given(num_requirements=st.integers(min_value=0, max_value=10), num_tasks_per_req=st.integers(min_value=0, max_value=5))
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
 @pytest.mark.asyncio
 async def test_project_metrics_consistency(
     db_manager, requirement_handler, task_handler, num_requirements, num_tasks_per_req

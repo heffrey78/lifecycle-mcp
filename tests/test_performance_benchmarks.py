@@ -3,6 +3,7 @@ Performance benchmark tests for lifecycle MCP
 """
 
 import asyncio
+import json
 import statistics
 import time
 from contextlib import contextmanager
@@ -63,9 +64,16 @@ class TestPerformanceBenchmarks:
         single_times = []
         for i, req_data in enumerate(requirements[:10]):
             with measure_time(f"Single insert {i + 1}") as timer:
+                # Convert lists to JSON strings for storage
+                req_copy = req_data.copy()
+                if "functional_requirements" in req_copy:
+                    req_copy["functional_requirements"] = json.dumps(req_copy["functional_requirements"])
+                if "acceptance_criteria" in req_copy:
+                    req_copy["acceptance_criteria"] = json.dumps(req_copy["acceptance_criteria"])
+                
                 db_manager.insert_record(
                     "requirements",
-                    {"id": f"REQ-{str(i + 1).zfill(4)}-FUNC-00", "requirement_number": i + 1, **req_data},
+                    {"id": f"REQ-{str(i + 1).zfill(4)}-FUNC-00", "requirement_number": i + 1, **req_copy},
                 )
             single_times.append(timer)
 
@@ -102,8 +110,15 @@ class TestPerformanceBenchmarks:
         """Benchmark database query operations"""
         # First populate database
         for i, req in enumerate(benchmark_data["requirements"]):
+            # Convert lists to JSON strings for storage
+            req_copy = req.copy()
+            if "functional_requirements" in req_copy:
+                req_copy["functional_requirements"] = json.dumps(req_copy["functional_requirements"])
+            if "acceptance_criteria" in req_copy:
+                req_copy["acceptance_criteria"] = json.dumps(req_copy["acceptance_criteria"])
+            
             db_manager.insert_record(
-                "requirements", {"id": f"REQ-{str(i + 1).zfill(4)}-FUNC-00", "requirement_number": i + 1, **req}
+                "requirements", {"id": f"REQ-{str(i + 1).zfill(4)}-FUNC-00", "requirement_number": i + 1, **req_copy}
             )
 
         # Simple query

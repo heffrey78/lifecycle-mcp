@@ -1,0 +1,72 @@
+name: Windows Debug
+
+on:
+  push:
+    branches: [ "refactor/*" ]
+
+jobs:
+  debug-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+    
+    - name: Debug environment
+      run: |
+        echo "Python version:"
+        python --version
+        echo "Current directory:"
+        pwd
+        echo "Directory contents:"
+        dir
+        echo "PYTHONPATH:"
+        echo $env:PYTHONPATH
+        echo "System encoding:"
+        python -c "import sys; print(f'Default encoding: {sys.getdefaultencoding()}')"
+        python -c "import locale; print(f'Preferred encoding: {locale.getpreferredencoding()}')"
+    
+    - name: Install package
+      run: |
+        uv pip install -e . --system
+        echo "Installed packages:"
+        pip list | findstr lifecycle
+    
+    - name: Test imports
+      run: |
+        python -c "import lifecycle_mcp; print('Main import OK')"
+        python -c "from lifecycle_mcp.database_manager import DatabaseManager; print('DatabaseManager import OK')"
+        python -c "from lifecycle_mcp.handlers import RequirementHandler; print('Handlers import OK')"
+    
+    - name: Check schema file
+      run: |
+        python -c "from pathlib import Path; p = Path('src/lifecycle_mcp/lifecycle-schema.sql'); print(f'Schema exists: {p.exists()}, Path: {p.resolve()}')"
+    
+    - name: Install test dependencies
+      run: |
+        uv pip install pytest pytest-asyncio --system
+    
+    - name: Run single test with maximum verbosity
+      run: |
+        python -m pytest tests/test_database_manager.py::TestDatabaseManager::test_init_creates_database -xvs --tb=long
+      env:
+        PYTHONIOENCODING: utf-8
+        PYTHONUTF8: 1
+    
+    - name: If failed, try with different encoding settings
+      if: failure()
+      run: |
+        echo "Trying with chcp 65001 (UTF-8)"
+        chcp 65001
+        python -m pytest tests/test_database_manager.py::TestDatabaseManager::test_init_creates_database -xvs --tb=long

@@ -11,11 +11,11 @@ from .status_handler import StatusHandler
 from .task_handler import TaskHandler
 
 __all__ = [
-    'BaseHandler',
-    'RequirementHandler', 
-    'TaskHandler',
-    'ArchitectureHandler',
-    'InterviewHandler',
-    'ExportHandler',
-    'StatusHandler'
+    "BaseHandler",
+    "RequirementHandler",
+    "TaskHandler",
+    "ArchitectureHandler",
+    "InterviewHandler",
+    "ExportHandler",
+    "StatusHandler",
 ]

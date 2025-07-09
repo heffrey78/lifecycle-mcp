@@ -22,13 +22,10 @@ from lifecycle_mcp.handlers import (
 )
 
 # Configure pytest-asyncio to avoid deprecation warnings
-pytest_plugins = ('pytest_asyncio',)
+pytest_plugins = ("pytest_asyncio",)
 
 # Configure logging for tests
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 
 def pytest_configure(config):
@@ -48,20 +45,21 @@ def event_loop():
 @pytest.fixture
 def temp_db():
     """Create a temporary database for testing"""
-    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp_file:
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp_file:
         db_path = tmp_file.name
-    
+
     # Create schema
     schema_path = Path(__file__).parent.parent / "src" / "lifecycle_mcp" / "lifecycle-schema.sql"
     if schema_path.exists():
         import sqlite3
+
         conn = sqlite3.connect(db_path)
-        with open(schema_path, 'r') as f:
+        with open(schema_path, "r") as f:
             conn.executescript(f.read())
         conn.close()
-    
+
     yield db_path
-    
+
     # Clean up
     try:
         os.unlink(db_path)
@@ -124,7 +122,7 @@ def sample_requirement_data():
         "acceptance_criteria": ["Acceptance criteria 1", "Acceptance criteria 2"],
         "business_value": "Test business value",
         "risk_level": "Medium",
-        "author": "Test Author"
+        "author": "Test Author",
     }
 
 
@@ -138,7 +136,7 @@ def sample_task_data():
         "effort": "M",
         "user_story": "As a user, I want to test this functionality",
         "acceptance_criteria": ["Task acceptance criteria 1", "Task acceptance criteria 2"],
-        "assignee": "Test Assignee"
+        "assignee": "Test Assignee",
     }
 
 
@@ -153,16 +151,18 @@ def sample_architecture_data():
         "decision_drivers": ["Driver 1", "Driver 2"],
         "considered_options": ["Option 1", "Option 2"],
         "consequences": {"positive": "Good outcome", "negative": "Some trade-offs"},
-        "authors": ["Test Architect"]
+        "authors": ["Test Architect"],
     }
 
 
 @pytest.fixture
 def mock_text_content():
     """Mock TextContent for testing"""
+
     def _create_mock(text):
         mock = Mock()
         mock.type = "text"
         mock.text = text
         return mock
+
     return _create_mock

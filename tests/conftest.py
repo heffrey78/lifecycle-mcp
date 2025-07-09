@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -45,32 +46,45 @@ def event_loop():
 @pytest.fixture
 def temp_db():
     """Create a temporary database for testing"""
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp_file:
-        db_path = tmp_file.name
+    # Use a unique temp file to avoid conflicts
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)  # Close the file descriptor immediately
 
     # Create schema
     schema_path = Path(__file__).parent.parent / "src" / "lifecycle_mcp" / "lifecycle-schema.sql"
+    # Ensure path works on Windows
+    schema_path = schema_path.resolve()
     if schema_path.exists():
         import sqlite3
 
         conn = sqlite3.connect(db_path)
-        with open(schema_path, "r") as f:
-            conn.executescript(f.read())
-        conn.close()
+        try:
+            with open(schema_path, "r") as f:
+                conn.executescript(f.read())
+        finally:
+            conn.close()
 
     yield db_path
 
-    # Clean up
-    try:
-        os.unlink(db_path)
-    except OSError:
-        pass
+    # Clean up - retry on Windows if file is locked
+    for attempt in range(3):
+        try:
+            os.unlink(db_path)
+            break
+        except OSError:
+            if attempt < 2:
+                time.sleep(0.1)  # Give Windows time to release the file
+            else:
+                pass  # Give up after 3 attempts
 
 
 @pytest.fixture
 def db_manager(temp_db):
     """Create a DatabaseManager instance with temporary database"""
-    return DatabaseManager(temp_db)
+    manager = DatabaseManager(temp_db)
+    yield manager
+    # Ensure all connections are closed before cleanup
+    manager.close_all()
 
 
 @pytest.fixture

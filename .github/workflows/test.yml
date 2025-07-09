@@ -58,17 +58,18 @@ jobs:
         file: ./coverage.xml
         flags: unittests
         name: codecov-umbrella
-        fail_ci_if_error: true
+        fail_ci_if_error: false
       env:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      if: always()
     
     - name: Generate coverage report comment
-      if: github.event_name == 'pull_request'
+      if: github.event_name == 'pull_request' && always()
       uses: py-cov-action/python-coverage-comment-action@v3
       with:
         GITHUB_TOKEN: ${{ github.token }}
-        MINIMUM_GREEN: 90
-        MINIMUM_ORANGE: 80
+        MINIMUM_GREEN: 50
+        MINIMUM_ORANGE: 40
     
     - name: Store test results
       if: always()

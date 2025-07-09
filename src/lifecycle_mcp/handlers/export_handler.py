@@ -178,7 +178,7 @@ class ExportHandler(BaseHandler):
 
                 content += "---\n\n"
 
-        with open(filepath, "w") as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
         return [filename]
@@ -246,7 +246,7 @@ class ExportHandler(BaseHandler):
 
                 content += "---\n\n"
 
-        with open(filepath, "w") as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
         return [filename]
@@ -326,7 +326,7 @@ class ExportHandler(BaseHandler):
 
             content += "---\n\n"
 
-        with open(filepath, "w") as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
         return [filename]

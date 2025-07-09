@@ -6,6 +6,7 @@ Provides centralized database connection and operation management
 
 import logging
 import os
+import platform
 import sqlite3
 import threading
 import time
@@ -56,7 +57,12 @@ class ConnectionPool:
         )
 
         # Optimize SQLite settings for better performance
-        conn.execute("PRAGMA journal_mode=WAL")  # Write-Ahead Logging
+        # Use WAL mode only on non-Windows platforms (Windows can have issues with WAL on network drives)
+        if platform.system() != "Windows":
+            conn.execute("PRAGMA journal_mode=WAL")  # Write-Ahead Logging
+        else:
+            conn.execute("PRAGMA journal_mode=DELETE")  # Default mode, more compatible with Windows
+        
         conn.execute("PRAGMA synchronous=NORMAL")  # Balance between safety and speed
         conn.execute("PRAGMA cache_size=10000")  # Increase cache size
         conn.execute("PRAGMA temp_store=MEMORY")  # Use memory for temporary tables
@@ -186,7 +192,7 @@ class DatabaseManager:
             conn = sqlite3.connect(self.db_path)
             schema_path = Path(__file__).parent / "lifecycle-schema.sql"
             if schema_path.exists():
-                with open(schema_path, "r") as f:
+                with open(schema_path, "r", encoding="utf-8") as f:
                     conn.executescript(f.read())
                 logger.info("Database schema initialized")
             else:

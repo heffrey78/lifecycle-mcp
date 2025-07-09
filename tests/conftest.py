@@ -59,7 +59,7 @@ def temp_db():
 
         conn = sqlite3.connect(db_path)
         try:
-            with open(schema_path, "r") as f:
+            with open(schema_path, "r", encoding="utf-8") as f:
                 conn.executescript(f.read())
         finally:
             conn.close()

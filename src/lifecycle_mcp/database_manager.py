@@ -187,6 +187,9 @@ class DatabaseManager:
                 with open(schema_path, "r") as f:
                     conn.executescript(f.read())
                 logger.info("Database schema initialized")
+            else:
+                logger.error(f"Schema file not found at {schema_path}")
+                raise FileNotFoundError(f"Schema file not found at {schema_path}")
             conn.close()
         
         # Apply any pending migrations

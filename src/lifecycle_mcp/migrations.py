@@ -22,6 +22,12 @@ def apply_github_integration_migration(db_path: str) -> bool:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
+        # First check if tasks table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'")
+        if not cursor.fetchone():
+            print("Tasks table does not exist yet, skipping GitHub integration migration")
+            return True
+            
         # Check if github_issue_number column already exists
         cursor.execute("PRAGMA table_info(tasks)")
         columns = [column[1] for column in cursor.fetchall()]
@@ -119,6 +125,12 @@ def apply_github_sync_metadata_migration(db_path: str) -> bool:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
+        # First check if tasks table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'")
+        if not cursor.fetchone():
+            print("Tasks table does not exist yet, skipping GitHub sync metadata migration")
+            return True
+            
         # Check if github_etag column already exists
         cursor.execute("PRAGMA table_info(tasks)")
         columns = [column[1] for column in cursor.fetchall()]

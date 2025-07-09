@@ -1,0 +1,69 @@
+name: Windows Diagnostic
+
+on:
+  push:
+    branches: [ "refactor/*" ]
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+    
+    - name: Test different installation methods
+      run: |
+        echo "=== Method 1: uv with --system ==="
+        uv pip install -e ".[test]" --system
+        python -c "import lifecycle_mcp; print(lifecycle_mcp.__file__)"
+        python -m pytest --version
+        
+    - name: Run pytest collection only
+      run: |
+        echo "=== Collecting tests ==="
+        python -m pytest tests/ --collect-only
+      continue-on-error: true
+      
+    - name: Check Python path and imports
+      run: |
+        echo "=== Python paths ==="
+        python -c "import sys; print('\n'.join(sys.path))"
+        echo ""
+        echo "=== Package location ==="
+        python -c "import lifecycle_mcp; print(f'Package at: {lifecycle_mcp.__file__}')"
+        echo ""
+        echo "=== Can import handlers? ==="
+        python -c "from lifecycle_mcp.handlers import RequirementHandler; print('OK')"
+    
+    - name: Try running WITHOUT editable install
+      run: |
+        echo "=== Uninstalling editable ==="
+        pip uninstall -y lifecycle-mcp
+        echo ""
+        echo "=== Installing non-editable ==="
+        uv pip install . --system
+        echo ""
+        echo "=== Testing imports ==="
+        python -c "import lifecycle_mcp; print(f'Non-editable at: {lifecycle_mcp.__file__}')"
+        
+    - name: Run tests with non-editable install
+      run: |
+        python -m pytest tests/test_database_manager.py -v
+      continue-on-error: true
+      
+    - name: Check for __init__.py files
+      run: |
+        echo "=== Checking __init__.py files ==="
+        Get-ChildItem -Path . -Filter "__init__.py" -Recurse | Select-Object FullName

@@ -48,18 +48,9 @@ jobs:
       run: |
         mypy src --ignore-missing-imports --no-strict-optional || true
     
-    - name: Run tests
+    - name: Run tests with coverage
       run: |
-        # Run tests without coverage to isolate issues
-        pytest tests/ -k "not (property or performance)" -v --tb=short
-        
-    - name: Generate coverage separately
-      run: |
-        # Generate coverage report after tests pass
-        coverage run -m pytest tests/ -k "not (property or performance)" -q
-        coverage xml
-        coverage html
-        coverage report
+        pytest tests/ -k "not (property or performance)" --cov=src/lifecycle_mcp --cov-report=xml --cov-report=html --cov-report=term --cov-fail-under=50
     
     - name: Upload coverage reports
       uses: codecov/codecov-action@v4

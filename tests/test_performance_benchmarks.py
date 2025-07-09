@@ -70,7 +70,7 @@ class TestPerformanceBenchmarks:
                     req_copy["functional_requirements"] = json.dumps(req_copy["functional_requirements"])
                 if "acceptance_criteria" in req_copy:
                     req_copy["acceptance_criteria"] = json.dumps(req_copy["acceptance_criteria"])
-                
+
                 db_manager.insert_record(
                     "requirements",
                     {"id": f"REQ-{str(i + 1).zfill(4)}-FUNC-00", "requirement_number": i + 1, **req_copy},
@@ -116,7 +116,7 @@ class TestPerformanceBenchmarks:
                 req_copy["functional_requirements"] = json.dumps(req_copy["functional_requirements"])
             if "acceptance_criteria" in req_copy:
                 req_copy["acceptance_criteria"] = json.dumps(req_copy["acceptance_criteria"])
-            
+
             db_manager.insert_record(
                 "requirements", {"id": f"REQ-{str(i + 1).zfill(4)}-FUNC-00", "requirement_number": i + 1, **req_copy}
             )

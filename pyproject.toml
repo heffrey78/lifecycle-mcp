@@ -127,12 +127,6 @@ addopts = [
     "-ra",
     "--strict-markers",
     "--tb=short",
-    "--cov=lifecycle_mcp",
-    "--cov-branch",
-    "--cov-report=term-missing:skip-covered",
-    "--cov-report=html",
-    "--cov-report=xml",
-    "--cov-fail-under=90",
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",

@@ -4,9 +4,10 @@ Status Handler for MCP Lifecycle Management Server
 Handles project status and metrics operations
 """
 
-import sqlite3
 import os
-from typing import List, Dict, Any
+import sqlite3
+from typing import Any, Dict, List
+
 from mcp.types import TextContent
 
 from .base_handler import BaseHandler

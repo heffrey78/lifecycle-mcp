@@ -2,10 +2,8 @@
 Unit tests for ArchitectureHandler
 """
 
-import pytest
-import json
 
-from lifecycle_mcp.handlers.architecture_handler import ArchitectureHandler
+import pytest
 
 
 @pytest.mark.unit

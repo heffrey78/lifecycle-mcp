@@ -2,12 +2,8 @@
 Unit tests for RequirementHandler
 """
 
-import pytest
-import asyncio
-import json
-from unittest.mock import Mock
 
-from lifecycle_mcp.handlers.requirement_handler import RequirementHandler
+import pytest
 
 
 @pytest.mark.unit

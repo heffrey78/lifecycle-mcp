@@ -6,20 +6,20 @@ Provides structured access to requirements, tasks, and architecture artifacts
 
 import asyncio
 import logging
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 from mcp.server import Server
-from mcp.types import Tool, TextContent
 from mcp.server.stdio import stdio_server
+from mcp.types import TextContent, Tool
 
 from .database_manager import DatabaseManager
 from .handlers import (
-    RequirementHandler,
-    TaskHandler, 
     ArchitectureHandler,
-    InterviewHandler,
     ExportHandler,
-    StatusHandler
+    InterviewHandler,
+    RequirementHandler,
+    StatusHandler,
+    TaskHandler,
 )
 
 logger = logging.getLogger(__name__)

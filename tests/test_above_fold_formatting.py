@@ -2,11 +2,10 @@
 Unit tests for above-the-fold display optimization
 """
 
+
 import pytest
-from unittest.mock import Mock
 
 from lifecycle_mcp.handlers.base_handler import BaseHandler
-from lifecycle_mcp.database_manager import DatabaseManager
 
 
 @pytest.mark.unit

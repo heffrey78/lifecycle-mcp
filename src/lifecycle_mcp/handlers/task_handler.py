@@ -4,13 +4,13 @@ Task Handler for MCP Lifecycle Management Server
 Handles all task-related operations
 """
 
-import json
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
 from mcp.types import TextContent
 
-from .base_handler import BaseHandler
 from ..github_utils import GitHubUtils
+from .base_handler import BaseHandler
 
 
 class TaskHandler(BaseHandler):
@@ -145,7 +145,8 @@ class TaskHandler(BaseHandler):
                 unapproved_reqs.append(f"{req_id} (status: {status})")
         
         if unapproved_reqs:
-            error_msg = "Cannot create tasks for unapproved requirements. The following requirements must be approved first:\n"
+            error_msg = ("Cannot create tasks for unapproved requirements. "
+                        "The following requirements must be approved first:\n")
             error_msg += "\n".join(f"- {req}" for req in unapproved_reqs)
             error_msg += "\n\nRequirements must be in one of these states: " + ", ".join(sorted(approved_statuses))
             return self._create_error_response(error_msg)
@@ -597,7 +598,9 @@ class TaskHandler(BaseHandler):
                             
                             if github_assignee != current_assignee:
                                 update_data["assignee"] = github_assignee
-                                task_updates.append(f"Assignee: {current_assignee or 'None'} → {github_assignee or 'None'}")
+                                from_assignee = current_assignee or 'None'
+                                to_assignee = github_assignee or 'None'
+                                task_updates.append(f"Assignee: {from_assignee} → {to_assignee}")
                             
                             if task_updates:
                                 self.db.update_record("tasks", update_data, "id = ?", [task['id']])
@@ -725,7 +728,7 @@ class TaskHandler(BaseHandler):
                 
                 if parent_tasks:
                     parent = dict(parent_tasks[0])  # Convert Row to dict for consistency
-                    report += f"\n## Parent Task\n"
+                    report += "\n## Parent Task\n"
                     report += f"- {parent['id']}: {parent['title']} [{parent['status']}]\n"
             
             # Create above-the-fold summary

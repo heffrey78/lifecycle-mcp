@@ -6,8 +6,8 @@ Generates contextual questions using LLM to improve requirement gathering
 
 import json
 import logging
-from typing import List, Dict, Any, Optional
 from enum import Enum
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -59,20 +59,19 @@ class LLMQuestionGenerator:
     ) -> List[str]:
         """Generate initial questions for problem identification"""
         
-        prompt = f"""You are a requirements analyst conducting an interview. Generate 1-3 targeted questions to understand the user's requirement.
-
-Context:
-- Project: {project_context or 'Not specified'}
-- User Role: {stakeholder_role or 'Not specified'}
-- Interview Stage: Problem Identification
-
-Focus on:
-- Understanding the core problem/opportunity
-- Identifying stakeholders and impact
-- Gathering initial scope boundaries
-
-Generate questions that help decompose requirements into actionable pieces. Return as JSON array of strings.
-Maximum 3 questions."""
+        prompt = (f"You are a requirements analyst conducting an interview. "
+                 f"Generate 1-3 targeted questions to understand the user's requirement.\n\n"
+                 f"Context:\n"
+                 f"- Project: {project_context or 'Not specified'}\n"
+                 f"- User Role: {stakeholder_role or 'Not specified'}\n"
+                 f"- Interview Stage: Problem Identification\n\n"
+                 f"Focus on:\n"
+                 f"- Understanding the core problem/opportunity\n"
+                 f"- Identifying stakeholders and impact\n"
+                 f"- Gathering initial scope boundaries\n\n"
+                 f"Generate questions that help decompose requirements into actionable pieces. "
+                 f"Return as JSON array of strings.\n"
+                 f"Maximum 3 questions.")
 
         return await self._call_llm_and_parse(prompt)
     

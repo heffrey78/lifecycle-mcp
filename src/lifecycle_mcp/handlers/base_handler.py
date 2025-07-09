@@ -7,7 +7,8 @@ Provides common functionality for all domain handlers
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
 from mcp.types import TextContent
 
 from ..database_manager import DatabaseManager
@@ -27,7 +28,9 @@ class BaseHandler(ABC):
         """Create standardized response format"""
         return [TextContent(type="text", text=text)]
     
-    def _create_above_fold_response(self, status: str, key_info: str, action_info: str = "", details: str = "") -> List[TextContent]:
+    def _create_above_fold_response(
+        self, status: str, key_info: str, action_info: str = "", details: str = ""
+    ) -> List[TextContent]:
         """Create above-the-fold optimized response format
         
         Args:
@@ -79,10 +82,8 @@ class BaseHandler(ABC):
         """Create standardized error response"""
         if exception:
             self.logger.error(f"{error_msg}: {str(exception)}")
-            full_error = f"{error_msg}: {str(exception)}"
         else:
             self.logger.error(error_msg)
-            full_error = error_msg
         
         # Use above-the-fold format for errors
         return self._create_above_fold_response("ERROR", error_msg)

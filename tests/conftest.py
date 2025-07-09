@@ -2,22 +2,23 @@
 Test configuration and fixtures for MCP Lifecycle Management Server
 """
 
-import pytest
-import tempfile
-import os
 import asyncio
+import logging
+import os
+import tempfile
 from pathlib import Path
 from unittest.mock import Mock
-import logging
+
+import pytest
 
 from lifecycle_mcp.database_manager import DatabaseManager
 from lifecycle_mcp.handlers import (
-    RequirementHandler,
-    TaskHandler,
     ArchitectureHandler,
-    InterviewHandler,
     ExportHandler,
-    StatusHandler
+    InterviewHandler,
+    RequirementHandler,
+    StatusHandler,
+    TaskHandler,
 )
 
 # Configure pytest-asyncio to avoid deprecation warnings

@@ -2,11 +2,12 @@
 Unit tests for DatabaseManager
 """
 
-import pytest
+import os
 import sqlite3
 import tempfile
-import os
 from pathlib import Path
+
+import pytest
 
 from lifecycle_mcp.database_manager import DatabaseManager
 
@@ -24,7 +25,7 @@ class TestDatabaseManager:
         assert not Path(db_path).exists()
         
         # Creating DatabaseManager should create the database
-        db_manager = DatabaseManager(db_path)
+        DatabaseManager(db_path)  # Creating DatabaseManager should create the database
         assert Path(db_path).exists()
         
         # Clean up
@@ -48,7 +49,8 @@ class TestDatabaseManager:
         """Test execute_query for INSERT operations"""
         # Insert a test record with all required fields
         result = db_manager.execute_query(
-            "INSERT INTO requirements (id, requirement_number, type, title, priority, current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO requirements (id, requirement_number, type, title, priority, "
+            "current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             ["REQ-0001-FUNC-00", 1, "FUNC", "Test Requirement", "P1", "Current", "Desired", "Test Author"]
         )
         assert result is not None  # Should return row ID
@@ -57,7 +59,8 @@ class TestDatabaseManager:
         """Test execute_query for SELECT operations"""
         # First insert a record with all required fields
         db_manager.execute_query(
-            "INSERT INTO requirements (id, requirement_number, type, title, priority, current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO requirements (id, requirement_number, type, title, priority, "
+            "current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             ["REQ-0001-FUNC-00", 1, "FUNC", "Test Requirement", "P1", "Current", "Desired", "Test Author"]
         )
         
@@ -76,8 +79,10 @@ class TestDatabaseManager:
         # Insert multiple records with all required fields
         for i in range(3):
             db_manager.execute_query(
-                "INSERT INTO requirements (id, requirement_number, type, title, priority, current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                [f"REQ-000{i+1}-FUNC-00", i+1, "FUNC", f"Test Requirement {i+1}", "P1", "Current", "Desired", "Test Author"]
+                "INSERT INTO requirements (id, requirement_number, type, title, priority, "
+            "current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [f"REQ-000{i+1}-FUNC-00", i+1, "FUNC", f"Test Requirement {i+1}", 
+                 "P1", "Current", "Desired", "Test Author"]
             )
         
         # Select all
@@ -97,7 +102,8 @@ class TestDatabaseManager:
         ]
         
         db_manager.execute_many(
-            "INSERT INTO requirements (id, requirement_number, type, title, priority, current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO requirements (id, requirement_number, type, title, priority, "
+            "current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             params_list
         )
         
@@ -109,7 +115,8 @@ class TestDatabaseManager:
         """Test successful transaction"""
         with db_manager.transaction() as cursor:
             cursor.execute(
-                "INSERT INTO requirements (id, requirement_number, type, title, priority, current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO requirements (id, requirement_number, type, title, priority, "
+            "current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 ["REQ-0001-FUNC-00", 1, "FUNC", "Test Requirement", "P1", "Current", "Desired", "Test Author"]
             )
         
@@ -126,7 +133,8 @@ class TestDatabaseManager:
         try:
             with db_manager.transaction() as cursor:
                 cursor.execute(
-                    "INSERT INTO requirements (id, requirement_number, type, title, priority, current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO requirements (id, requirement_number, type, title, priority, "
+            "current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     ["REQ-0001-FUNC-00", 1, "FUNC", "Test Requirement", "P1", "Current", "Desired", "Test Author"]
                 )
                 # Force an error
@@ -150,7 +158,8 @@ class TestDatabaseManager:
         
         # Insert a record with all required fields
         db_manager.execute_query(
-            "INSERT INTO requirements (id, requirement_number, type, title, priority, current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO requirements (id, requirement_number, type, title, priority, "
+            "current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             ["REQ-0001-FUNC-00", 1, "FUNC", "Test Requirement", "P1", "Current", "Desired", "Test Author"]
         )
         
@@ -162,11 +171,13 @@ class TestDatabaseManager:
         """Test get_next_id with WHERE clause"""
         # Insert records of different types with all required fields
         db_manager.execute_query(
-            "INSERT INTO requirements (id, requirement_number, type, title, priority, current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO requirements (id, requirement_number, type, title, priority, "
+            "current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             ["REQ-0001-FUNC-00", 1, "FUNC", "Test Requirement", "P1", "Current", "Desired", "Test Author"]
         )
         db_manager.execute_query(
-            "INSERT INTO requirements (id, requirement_number, type, title, priority, current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO requirements (id, requirement_number, type, title, priority, "
+            "current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             ["REQ-0001-TECH-00", 1, "TECH", "Test Requirement", "P1", "Current", "Desired", "Test Author"]
         )
         
@@ -186,7 +197,8 @@ class TestDatabaseManager:
         
         # Insert record with all required fields
         db_manager.execute_query(
-            "INSERT INTO requirements (id, requirement_number, type, title, priority, current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO requirements (id, requirement_number, type, title, priority, "
+            "current_state, desired_state, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             ["REQ-0001-FUNC-00", 1, "FUNC", "Test Requirement", "P1", "Current", "Desired", "Test Author"]
         )
         

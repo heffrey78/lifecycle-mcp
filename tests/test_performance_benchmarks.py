@@ -2,19 +2,12 @@
 Performance benchmark tests for lifecycle MCP
 """
 
-import pytest
-import time
 import asyncio
 import statistics
+import time
 from contextlib import contextmanager
 
-from lifecycle_mcp.database_manager import DatabaseManager
-from lifecycle_mcp.handlers import (
-    RequirementHandler,
-    TaskHandler,
-    ArchitectureHandler,
-    StatusHandler
-)
+import pytest
 
 
 @contextmanager
@@ -180,7 +173,7 @@ class TestPerformanceBenchmarks:
         
         # Measure query performance
         with measure_time("Query 50 requirements"):
-            result = requirement_handler._query_requirements()
+            requirement_handler._query_requirements()  # Measure query performance
         
         # Measure status updates
         update_times = []
@@ -234,18 +227,18 @@ class TestPerformanceBenchmarks:
         
         # Measure task queries
         with measure_time("Query 100 tasks"):
-            result = task_handler._query_tasks()
+            task_handler._query_tasks()  # Measure task queries
         
         # Measure filtered queries
         with measure_time("Query tasks by assignee"):
-            result = task_handler._query_tasks(assignee="User5")
+            task_handler._query_tasks(assignee="User5")  # Measure filtered queries
         
         # Measure task detail retrieval
         detail_times = []
         for i in range(10):
             task_id = f"TASK-{str(i+1).zfill(4)}-00-00"
             start = time.perf_counter()
-            result = task_handler._get_task_details(task_id=task_id)
+            task_handler._get_task_details(task_id=task_id)  # Measure task detail retrieval
             end = time.perf_counter()
             detail_times.append(end - start)
         

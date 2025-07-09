@@ -4,8 +4,6 @@ Unit tests for StatusHandler
 
 import pytest
 
-from lifecycle_mcp.handlers.status_handler import StatusHandler
-
 
 @pytest.mark.unit
 class TestStatusHandler:

@@ -4,15 +4,15 @@ Database Manager for Lifecycle MCP Server
 Provides centralized database connection and operation management
 """
 
-import sqlite3
-import os
 import logging
-import time
+import os
+import sqlite3
 import threading
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Union
+import time
 from contextlib import contextmanager
-from queue import Queue, Empty, Full
+from pathlib import Path
+from queue import Empty, Full, Queue
+from typing import Any, Dict, List, Optional, Union
 
 from .migrations import apply_all_migrations
 
@@ -82,7 +82,7 @@ class ConnectionPool:
                     self.all_connections.discard(conn)
                 try:
                     conn.close()
-                except:
+                except Exception:
                     pass
                 
                 # Create new connection
@@ -93,7 +93,7 @@ class ConnectionPool:
                 
         except Empty:
             # Pool is empty, create temporary connection
-            logger.warning(f"Connection pool exhausted, creating temporary connection")
+            logger.warning("Connection pool exhausted, creating temporary connection")
             return self._create_connection()
     
     def return_connection(self, conn: sqlite3.Connection):
@@ -109,13 +109,13 @@ class ConnectionPool:
                     self.all_connections.discard(conn)
                 try:
                     conn.close()
-                except:
+                except Exception:
                     pass
         else:
             # Temporary connection, just close it
             try:
                 conn.close()
-            except:
+            except Exception:
                 pass
     
     def close_all(self):
@@ -216,7 +216,7 @@ class DatabaseManager:
                 if conn:
                     try:
                         conn.rollback()
-                    except:
+                    except Exception:
                         pass
                 
                 # Check if this is a retry-able error
@@ -233,7 +233,7 @@ class DatabaseManager:
                 if conn:
                     try:
                         conn.rollback()
-                    except:
+                    except Exception:
                         pass
                 logger.error(f"Database operation failed: {str(e)}")
                 raise
@@ -293,7 +293,7 @@ class DatabaseManager:
                 if conn:
                     try:
                         conn.rollback()
-                    except:
+                    except Exception:
                         pass
                 
                 # Check if this is a retry-able error
@@ -310,7 +310,7 @@ class DatabaseManager:
                 if conn:
                     try:
                         conn.rollback()
-                    except:
+                    except Exception:
                         pass
                 logger.error(f"Transaction failed: {str(e)}")
                 raise

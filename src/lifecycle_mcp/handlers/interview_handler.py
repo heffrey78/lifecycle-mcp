@@ -5,12 +5,13 @@ Handles interactive interview operations for requirements and architecture
 """
 
 import uuid
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
 from mcp.types import TextContent
 
+from ..llm_question_generator import InterviewStage, LLMQuestionGenerator
 from .base_handler import BaseHandler
 from .requirement_handler import RequirementHandler
-from ..llm_question_generator import LLMQuestionGenerator, InterviewStage
 
 
 class InterviewHandler(BaseHandler):
@@ -60,7 +61,11 @@ class InterviewHandler(BaseHandler):
                     "properties": {
                         "project_context": {"type": "string"},
                         "diagram_purpose": {"type": "string"},
-                        "complexity_level": {"type": "string", "enum": ["simple", "medium", "complex"], "default": "medium"}
+                        "complexity_level": {
+                            "type": "string", 
+                            "enum": ["simple", "medium", "complex"], 
+                            "default": "medium"
+                        }
                     }
                 }
             },
@@ -132,11 +137,13 @@ Please answer these questions to help gather your requirement:
             for i, question in enumerate(questions, 1):
                 response += f"{i}. {question}\n"
             
-            response += "\nOnce you answer these, use `continue_requirement_interview` with your session ID and answers."
+            response += ("\nOnce you answer these, use `continue_requirement_interview` "
+                        "with your session ID and answers.")
             
             # Create above-the-fold response for interview start
             key_info = f"Interview session {session_id} started"
-            action_info = f"🎤 {len(questions)} questions | Stage: {InterviewStage.PROBLEM_IDENTIFICATION.value.replace('_', ' ').title()}"
+            stage_name = InterviewStage.PROBLEM_IDENTIFICATION.value.replace('_', ' ').title()
+            action_info = f"🎤 {len(questions)} questions | Stage: {stage_name}"
             return self._create_above_fold_response("SUCCESS", key_info, action_info, response)
             
         except Exception as e:
@@ -211,7 +218,8 @@ Please answer these questions to help gather your requirement:
             
             # Create above-the-fold response for interview continuation
             key_info = f"Interview session {session_id} continued"
-            action_info = f"🎤 {len(next_questions)} more questions | Stage: {session['current_stage'].value.replace('_', ' ').title()}"
+            current_stage = session['current_stage'].value.replace('_', ' ').title()
+            action_info = f"🎤 {len(next_questions)} more questions | Stage: {current_stage}"
             return self._create_above_fold_response("SUCCESS", key_info, action_info, response)
             
         except Exception as e:
@@ -231,7 +239,10 @@ Please answer these questions to help gather your requirement:
                 "current_state": data.get("current_problem", "Current state not specified"),
                 "desired_state": data.get("desired_outcome", "Desired state not specified"),
                 "business_value": data.get("success_criteria", ""),
-                "acceptance_criteria": data.get("acceptance_criteria", "").split("\n") if data.get("acceptance_criteria") else [],
+                "acceptance_criteria": (
+                    data.get("acceptance_criteria", "").split("\n") 
+                    if data.get("acceptance_criteria") else []
+                ),
                 "author": f"Interview Session {session_id}"
             }
             
@@ -258,7 +269,9 @@ You can now use other tools to further develop this requirement, create tasks, o
             
             # Create above-the-fold response for interview completion
             key_info = f"Interview session {session_id} completed"
-            action_info = f"✅ Requirement created | Type: {data.get('requirement_type', 'FUNC')} | Priority: {data.get('priority', 'P2')}"
+            req_type = data.get('requirement_type', 'FUNC')
+            priority = data.get('priority', 'P2')
+            action_info = f"✅ Requirement created | Type: {req_type} | Priority: {priority}"
             return self._create_above_fold_response("SUCCESS", key_info, action_info, interview_summary)
             
         except Exception as e:
@@ -273,7 +286,7 @@ You can now use other tools to further develop this requirement, create tasks, o
                 )
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        except Exception as e:
+        except Exception:
             # Return empty list if query fails
             return []
     
@@ -333,11 +346,13 @@ Please answer these questions to help create the most useful architectural diagr
             for i, question in enumerate(questions, 1):
                 response += f"{i}. {question}\n"
             
-            response += "\nOnce you answer these, use `continue_architectural_conversation` with your session ID and responses."
+            response += ("\nOnce you answer these, use `continue_architectural_conversation` "
+                        "with your session ID and responses.")
             
             # Create above-the-fold response for architectural conversation start
             key_info = f"Architectural session {session_id} started"
-            action_info = f"🏢 {len(questions)} questions | Purpose: {params.get('diagram_purpose', 'Diagram generation')}"
+            purpose = params.get('diagram_purpose', 'Diagram generation')
+            action_info = f"🏢 {len(questions)} questions | Purpose: {purpose}"
             return self._create_above_fold_response("SUCCESS", key_info, action_info, response)
             
         except Exception as e:
@@ -402,7 +417,8 @@ Please answer these questions to help create the most useful architectural diagr
             
             # Create above-the-fold response for architectural conversation continuation
             key_info = f"Architectural session {session_id} continued"
-            action_info = f"🏢 {len(next_questions)} more questions | Stage: {session['current_stage'].replace('_', ' ').title()}"
+            current_stage = session['current_stage'].replace('_', ' ').title()
+            action_info = f"🏢 {len(next_questions)} more questions | Stage: {current_stage}"
             return self._create_above_fold_response("SUCCESS", key_info, action_info, response)
             
         except Exception as e:

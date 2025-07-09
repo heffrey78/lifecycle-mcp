@@ -2,14 +2,15 @@
 Property-based tests using Hypothesis for lifecycle MCP
 """
 
-import pytest
-from hypothesis import given, strategies as st, assume
-from hypothesis.stateful import RuleBasedStateMachine, rule, invariant, initialize
 import string
 
-from lifecycle_mcp.handlers.requirement_handler import RequirementHandler
-from lifecycle_mcp.handlers.task_handler import TaskHandler
+import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+from hypothesis.stateful import RuleBasedStateMachine, initialize, invariant, rule
+
 from lifecycle_mcp.database_manager import DatabaseManager
+from lifecycle_mcp.handlers.requirement_handler import RequirementHandler
 
 
 class TestPropertyBasedValidation:
@@ -152,7 +153,6 @@ class RequirementLifecycleStateMachine(RuleBasedStateMachine):
     async def setup(self):
         """Initialize the state machine with a fresh database"""
         import tempfile
-        import os
         from pathlib import Path
         
         with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp_file:
@@ -177,7 +177,7 @@ class RequirementLifecycleStateMachine(RuleBasedStateMachine):
             import os
             try:
                 os.unlink(self.temp_db_path)
-            except:
+            except Exception:
                 pass
     
     @rule(
@@ -187,7 +187,6 @@ class RequirementLifecycleStateMachine(RuleBasedStateMachine):
     @pytest.mark.asyncio
     async def create_requirement(self, req_type, priority):
         """Rule: Create a new requirement"""
-        import asyncio
         result = await self.handler._create_requirement(
             type=req_type,
             title=f"Stateful test requirement {len(self.requirements)}",
@@ -228,7 +227,6 @@ class RequirementLifecycleStateMachine(RuleBasedStateMachine):
             "Deprecated": []
         }
         
-        import asyncio
         result = await self.handler._update_requirement_status(
             requirement_id=req_id,
             new_status=target_status

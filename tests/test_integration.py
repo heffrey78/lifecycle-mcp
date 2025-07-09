@@ -3,16 +3,15 @@ Integration tests for MCP Lifecycle Management Server
 Tests end-to-end functionality of the modular architecture
 """
 
-import pytest
-import tempfile
-import os
 import asyncio
-from pathlib import Path
-from typing import AsyncGenerator
 import logging
+import os
+import tempfile
+from pathlib import Path
+
+import pytest
 
 from lifecycle_mcp.server import LifecycleMCPServer
-from lifecycle_mcp.database_manager import DatabaseManager
 
 # Configure logging for tests
 logging.basicConfig(level=logging.INFO)
@@ -83,7 +82,8 @@ class TestMCPServerIntegration:
         assert server_instance.status_handler is not None
         
         # Verify all tools are registered
-        expected_tool_count = 23  # Total number of MCP tools (including sync_task_from_github and bulk_sync_github_tasks)
+        # Total number of MCP tools (including sync_task_from_github and bulk_sync_github_tasks)
+        expected_tool_count = 23
         assert len(server_instance.handlers) == expected_tool_count
     
     @pytest.mark.asyncio

@@ -3,10 +3,8 @@ Refactored unit tests for TaskHandler using parametrization
 This demonstrates how to reduce the 665 lines to ~300 with better organization
 """
 
-import pytest
-import json
 
-from lifecycle_mcp.handlers.task_handler import TaskHandler
+import pytest
 
 
 @pytest.mark.unit

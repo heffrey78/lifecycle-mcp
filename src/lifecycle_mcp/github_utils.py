@@ -6,11 +6,9 @@ Provides GitHub CLI integration for issue management
 
 import asyncio
 import json
-import os
 import subprocess
-import time
-from typing import Optional, Dict, Any, Tuple, List
-from datetime import datetime, timedelta
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class GitHubUtils:
@@ -130,7 +128,7 @@ class GitHubUtils:
         """Format task data into GitHub issue body"""
         body = f"**Status**: {task_data.get('status', 'Not Started')}\n"
         body += f"**Priority**: {task_data.get('priority', 'P2')}\n"
-        body += f"**Type**: Implementation Task\n\n"
+        body += "**Type**: Implementation Task\n\n"
         
         if task_data.get('user_story'):
             body += f"## Description\n{task_data['user_story']}\n\n"
@@ -140,7 +138,7 @@ class GitHubUtils:
         if isinstance(criteria, str):
             try:
                 criteria = json.loads(criteria)
-            except:
+            except Exception:
                 criteria = []
         
         if criteria:
@@ -165,7 +163,7 @@ class GitHubUtils:
                 idx = parts.index('issues')
                 if idx + 1 < len(parts):
                     return parts[idx + 1]
-        except:
+        except Exception:
             pass
         return None
     
@@ -343,7 +341,7 @@ class GitHubUtils:
             'updatedAt': issue_data.get('updatedAt', ''),
             'state': issue_data.get('state', ''),
             'assignees': [a.get('login', '') for a in issue_data.get('assignees', [])],
-            'labels': [l.get('name', '') for l in issue_data.get('labels', [])]
+            'labels': [label.get('name', '') for label in issue_data.get('labels', [])]
         }
         return str(hash(json.dumps(key_fields, sort_keys=True)))
     

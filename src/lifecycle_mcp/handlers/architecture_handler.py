@@ -5,7 +5,8 @@ Handles all architecture decision-related operations
 """
 
 import json
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
 from mcp.types import TextContent
 
 from .base_handler import BaseHandler
@@ -162,7 +163,8 @@ class ArchitectureHandler(BaseHandler):
                 # Format diagram suggestions for user
                 suggestions_text = self._format_diagram_suggestions(diagram_suggestions, adr_id)
                 key_info = f"Architecture decision {adr_id} created with diagram suggestions"
-                action_info = f"📐 {params['title']} | {len(diagram_suggestions['suggested_diagrams'])} diagram suggestions"
+                suggestions_count = len(diagram_suggestions['suggested_diagrams'])
+                action_info = f"📐 {params['title']} | {suggestions_count} diagram suggestions"
                 return self._create_above_fold_response("SUCCESS", key_info, action_info, suggestions_text)
             else:
                 # Standard response without suggestions
@@ -263,7 +265,9 @@ class ArchitectureHandler(BaseHandler):
             decisions = self.db.execute_query(base_query, where_params, fetch_all=True, row_factory=True)
             
             if not decisions:
-                return self._create_above_fold_response("INFO", "No architecture decisions found", "Try adjusting search criteria")
+                return self._create_above_fold_response(
+                    "INFO", "No architecture decisions found", "Try adjusting search criteria"
+                )
             
             # Build filter description for above-the-fold
             filters = []
@@ -473,49 +477,41 @@ class ArchitectureHandler(BaseHandler):
         considered_options = self._safe_json_loads(adr_data.get("considered_options", "[]"))
         consequences = self._safe_json_loads(adr_data.get("consequences", "{}"))
         
-        context = f"""Analyze this Architecture Decision Record (ADR) to suggest helpful diagrams for implementation and understanding:
-
-**ADR Title**: {adr_data['title']}
-
-**Context**: {adr_data['context']}
-
-**Decision**: {adr_data['decision_outcome']}
-
-**Decision Drivers**:
-{self._format_list_items(decision_drivers)}
-
-**Considered Options**:
-{self._format_list_items(considered_options)}
-
-**Consequences**:
-{self._format_consequences(consequences)}
-
-Please analyze this ADR and suggest 2-4 diagrams that would:
-1. Help developers implement this decision effectively
-2. Enhance stakeholder understanding of the architecture
-3. Document key relationships and dependencies
-4. Support future maintenance and evolution
-
-Focus on practical diagrams that provide real implementation value.
-
-Respond with valid JSON in this format:
-{{
-  "analysis": {{
-    "architectural_scope": "component|system|integration|deployment",
-    "complexity_level": 1-5,
-    "implementation_focus": "string describing main implementation challenges"
-  }},
-  "suggested_diagrams": [
-    {{
-      "type": "requirements|tasks|architecture|full_project|dependencies",
-      "title": "Descriptive diagram title",
-      "purpose": "implementation|understanding|documentation|maintenance",
-      "rationale": "Why this diagram helps with the ADR implementation",
-      "priority": "high|medium|low"
-    }}
-  ],
-  "implementation_notes": "Additional context for using these diagrams during implementation"
-}}"""
+        context = (f"Analyze this Architecture Decision Record (ADR) to suggest helpful "
+                  f"diagrams for implementation and understanding:\n\n"
+                  f"**ADR Title**: {adr_data['title']}\n\n"
+                  f"**Context**: {adr_data['context']}\n\n"
+                  f"**Decision**: {adr_data['decision_outcome']}\n\n"
+                  f"**Decision Drivers**:\n"
+                  f"{self._format_list_items(decision_drivers)}\n\n"
+                  f"**Considered Options**:\n"
+                  f"{self._format_list_items(considered_options)}\n\n"
+                  f"**Consequences**:\n"
+                  f"{self._format_consequences(consequences)}\n\n"
+                  f"Please analyze this ADR and suggest 2-4 diagrams that would:\n"
+                  f"1. Help developers implement this decision effectively\n"
+                  f"2. Enhance stakeholder understanding of the architecture\n"
+                  f"3. Document key relationships and dependencies\n"
+                  f"4. Support future maintenance and evolution\n\n"
+                  f"Focus on practical diagrams that provide real implementation value.\n\n"
+                  f"Respond with valid JSON in this format:\n"
+                  f'{{\n'
+                  f'  "analysis": {{\n'
+                  f'    "architectural_scope": "component|system|integration|deployment",\n'
+                  f'    "complexity_level": 1-5,\n'
+                  f'    "implementation_focus": "string describing main implementation challenges"\n'
+                  f'  }},\n'
+                  f'  "suggested_diagrams": [\n'
+                  f'    {{\n'
+                  f'      "type": "requirements|tasks|architecture|full_project|dependencies",\n'
+                  f'      "title": "Descriptive diagram title",\n'
+                  f'      "purpose": "implementation|understanding|documentation|maintenance",\n'
+                  f'      "rationale": "Why this diagram helps with the ADR implementation",\n'
+                  f'      "priority": "high|medium|low"\n'
+                  f'    }}\n'
+                  f'  ],\n'
+                  f'  "implementation_notes": "Additional context for using these diagrams during implementation"\n'
+                  f'}}')
         return context
     
     def _format_list_items(self, items: List[str]) -> str:
@@ -544,21 +540,20 @@ Respond with valid JSON in this format:
     
     def _get_diagram_analysis_system_prompt(self) -> str:
         """Get system prompt for ADR diagram analysis"""
-        return """You are an expert software architect analyzing Architecture Decision Records (ADRs) to suggest helpful diagrams.
-
-Your goal is to recommend diagrams that provide practical value for:
-- Implementation teams who need to understand how to build the solution
-- Stakeholders who need to understand the architectural impact
-- Future maintainers who need to understand the system structure
-
-Guidelines:
-- Prioritize diagrams that directly support implementation activities
-- Consider both technical and communication needs
-- Focus on diagrams that show relationships, dependencies, and data flows
-- Avoid suggesting diagrams that would be too simple or too complex for the context
-- Always provide clear rationale for each suggestion
-- Limit suggestions to 2-4 most valuable diagrams
-- Always respond with valid JSON matching the specified format"""
+        return ("You are an expert software architect analyzing Architecture Decision Records "
+                "(ADRs) to suggest helpful diagrams.\n\n"
+                "Your goal is to recommend diagrams that provide practical value for:\n"
+                "- Implementation teams who need to understand how to build the solution\n"
+                "- Stakeholders who need to understand the architectural impact\n"
+                "- Future maintainers who need to understand the system structure\n\n"
+                "Guidelines:\n"
+                "- Prioritize diagrams that directly support implementation activities\n"
+                "- Consider both technical and communication needs\n"
+                "- Focus on diagrams that show relationships, dependencies, and data flows\n"
+                "- Avoid suggesting diagrams that would be too simple or too complex for the context\n"
+                "- Always provide clear rationale for each suggestion\n"
+                "- Limit suggestions to 2-4 most valuable diagrams\n"
+                "- Always respond with valid JSON matching the specified format")
     
     def _format_diagram_suggestions(self, suggestions: Dict[str, Any], adr_id: str) -> str:
         """Format diagram suggestions for user response"""
@@ -593,7 +588,7 @@ Based on your ADR content, I recommend the following diagrams to support impleme
 
 """
         
-        response += f"""## Next Steps
+        response += """## Next Steps
 To generate these diagrams, use the `create_architectural_diagrams` tool:
 - For individual diagrams: specify the `diagram_type` (e.g., "requirements", "architecture")
 - For custom diagrams: use the interactive mode with `"interactive": true`

@@ -5,7 +5,8 @@ Handles all requirement-related operations
 """
 
 import json
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
 from mcp.types import TextContent
 
 from .base_handler import BaseHandler
@@ -222,7 +223,8 @@ Acceptance Criteria:
 {self._format_list(params.get('acceptance_criteria', []))}
 
 Please analyze if this requirement should be:
-1. Created as a single requirement (good scope examples: "natural language search", "unified navigation bar", "mobile friendly navigation")
+1. Created as a single requirement (good scope examples: "natural language search", 
+   "unified navigation bar", "mobile friendly navigation")
 2. Decomposed into sub-requirements (if it covers multiple features, pages, or complex workflows)
 3. Needs clarification (missing critical details)
 
@@ -284,7 +286,9 @@ Guidelines:
         action_info = f"❓ {len(questions)} questions | Please provide details"
         return self._create_above_fold_response("INFO", key_info, action_info, response)
     
-    def _create_decomposition_response(self, analysis: Dict[str, Any], original_params: Dict[str, Any]) -> List[TextContent]:
+    def _create_decomposition_response(
+        self, analysis: Dict[str, Any], original_params: Dict[str, Any]
+    ) -> List[TextContent]:
         """Create response with decomposition suggestions"""
         suggestions = analysis.get("decomposition", {}).get("suggested_sub_requirements", [])
         
@@ -332,7 +336,9 @@ Guidelines:
         
         return req_id
     
-    async def _create_decomposed_requirements(self, analysis: Dict[str, Any], original_params: Dict[str, Any]) -> List[TextContent]:
+    async def _create_decomposed_requirements(
+        self, analysis: Dict[str, Any], original_params: Dict[str, Any]
+    ) -> List[TextContent]:
         """Create decomposed sub-requirements automatically from LLM analysis"""
         try:
             suggestions = analysis.get("decomposition", {}).get("suggested_sub_requirements", [])
@@ -341,7 +347,9 @@ Guidelines:
                 # Fallback to single requirement if no suggestions
                 req_id = self._create_single_requirement(original_params)
                 key_info = f"Requirement {req_id} created"
-                action_info = f"📄 {original_params['title']} | {original_params['type']} | {original_params['priority']}"
+                req_type = original_params['type']
+                priority = original_params['priority']
+                action_info = f"📄 {original_params['title']} | {req_type} | {priority}"
                 return self._create_above_fold_response("SUCCESS", key_info, action_info)
             
             # Create parent requirement first
@@ -349,7 +357,8 @@ Guidelines:
                 **original_params,
                 "title": f"{original_params['title']} (Parent)",
                 "current_state": f"Parent requirement for: {original_params['current_state']}",
-                "desired_state": f"Decomposed into {len(suggestions)} sub-requirements: {original_params['desired_state']}"
+                "desired_state": (f"Decomposed into {len(suggestions)} sub-requirements: "
+                                 f"{original_params['desired_state']}")
             })
             
             # Create sub-requirements
@@ -360,7 +369,8 @@ Guidelines:
                     "type": suggestion.get("type", original_params["type"]),
                     "title": suggestion["title"],
                     "priority": original_params["priority"],  # Inherit parent priority
-                    "current_state": f"Sub-requirement {i} of {parent_req_id}: {suggestion.get('current_state', original_params['current_state'])}",
+                    "current_state": (f"Sub-requirement {i} of {parent_req_id}: "
+                                     f"{suggestion.get('current_state', original_params['current_state'])}"),
                     "desired_state": suggestion.get("desired_state", suggestion["title"]),
                     "business_value": f"Supports {parent_req_id}: {suggestion.get('rationale', '')}",
                     "author": original_params.get("author", "MCP User"),
@@ -384,7 +394,8 @@ Guidelines:
 ## Sub-Requirements Created ({len(sub_req_ids)})
 """
             for i, (sub_req_id, suggestion) in enumerate(zip(sub_req_ids, suggestions), 1):
-                response += f"{i}. **{sub_req_id}**: {suggestion['title']} ({suggestion.get('type', original_params['type'])})\n"
+                req_type = suggestion.get('type', original_params['type'])
+                response += f"{i}. **{sub_req_id}**: {suggestion['title']} ({req_type})\n"
                 response += f"   - Rationale: {suggestion.get('rationale', 'N/A')}\n"
             
             response += f"""
@@ -420,7 +431,10 @@ Guidelines:
                 "depends_on_requirement_id": depends_on_id,
                 "dependency_type": dependency_type
             })
-            self._log_operation("requirement_dependency", requirement_id, f"created_{dependency_type}_relationship", f"Linked to {depends_on_id}")
+            self._log_operation(
+                "requirement_dependency", requirement_id, 
+                f"created_{dependency_type}_relationship", f"Linked to {depends_on_id}"
+            )
         except Exception as e:
             self.logger.error(f"Failed to create requirement dependency: {e}")
     
@@ -457,7 +471,9 @@ Guidelines:
                 if incomplete_tasks:
                     task_list = "\n".join(f"- {task['id']}: {task['title']} (status: {task['status']})" 
                                         for task in incomplete_tasks)
-                    error_msg = f"Cannot validate requirement with incomplete tasks. The following tasks must be completed first:\n{task_list}\n\nAll tasks must have 'Complete' status before requirement validation."
+                    error_msg = (f"Cannot validate requirement with incomplete tasks. "
+                               f"The following tasks must be completed first:\n{task_list}\n\n"
+                               f"All tasks must have 'Complete' status before requirement validation.")
                     return self._create_error_response(error_msg)
             
             # Validate state transition
@@ -532,7 +548,9 @@ Guidelines:
             )
             
             if not requirements:
-                return self._create_above_fold_response("INFO", "No requirements found", "Try adjusting search criteria")
+                return self._create_above_fold_response(
+                    "INFO", "No requirements found", "Try adjusting search criteria"
+                )
             
             # Build filter description for above-the-fold
             filters = []
@@ -717,14 +735,16 @@ Guidelines:
                 report += f"\n## Child Requirements ({len(child_requirements)})\n"
                 for i, child in enumerate(child_requirements, 1):
                     report += f"{i}. {child['id']}: {child['title']} [{child['status']}]\n"
-                    report += f"   Priority: {child['priority']} | Progress: {child['tasks_completed']}/{child['task_count']} tasks\n"
+                    progress = f"{child['tasks_completed']}/{child['task_count']}"
+                    report += f"   Priority: {child['priority']} | Progress: {progress} tasks\n"
                 
                 # Calculate overall decomposition progress
                 if child_requirements:
                     total_child_tasks = sum(child['task_count'] for child in child_requirements)
                     completed_child_tasks = sum(child['tasks_completed'] for child in child_requirements)
                     decomp_progress = (completed_child_tasks / total_child_tasks * 100) if total_child_tasks > 0 else 0
-                    report += f"\n**Overall Decomposition Progress**: {completed_child_tasks}/{total_child_tasks} tasks ({decomp_progress:.1f}%)\n"
+                    progress_text = f"{completed_child_tasks}/{total_child_tasks}"
+                    report += f"\n**Overall Decomposition Progress**: {progress_text} tasks ({decomp_progress:.1f}%)\n"
 
             report += f"\n## Implementation Tasks ({len(tasks)})\n"
             for task in tasks:
@@ -746,7 +766,8 @@ Guidelines:
             elif child_requirements:
                 decomp_info = f" | Parent to {len(child_requirements)} children"
             
-            action_info = f"🔍 {req['title']} | {len(tasks)} tasks | {len(architecture) if architecture else 0} architecture{decomp_info}"
+            arch_count = len(architecture) if architecture else 0
+            action_info = f"🔍 {req['title']} | {len(tasks)} tasks | {arch_count} architecture{decomp_info}"
             return self._create_above_fold_response("INFO", key_info, action_info, report)
             
         except Exception as e:

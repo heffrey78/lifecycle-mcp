@@ -5,9 +5,9 @@ Handles export and diagram generation operations
 """
 
 import os
-import json
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
 from mcp.types import TextContent
 
 from .base_handler import BaseHandler
@@ -39,12 +39,34 @@ class ExportHandler(BaseHandler):
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "diagram_type": {"type": "string", "enum": ["requirements", "tasks", "architecture", "full_project", "directory_structure", "dependencies"]},
-                        "requirement_ids": {"type": "array", "items": {"type": "string"}, "description": "Specific requirements to include"},
+                        "diagram_type": {
+                            "type": "string",
+                            "enum": [
+                                "requirements", "tasks", "architecture", 
+                                "full_project", "directory_structure", "dependencies"
+                            ]
+                        },
+                        "requirement_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Specific requirements to include"
+                        },
                         "include_relationships": {"type": "boolean", "default": True},
-                        "output_format": {"type": "string", "enum": ["mermaid", "markdown_with_mermaid"], "default": "mermaid"},
-                        "interactive": {"type": "boolean", "default": False, "description": "Start interactive conversation for complex diagrams"},
-                        "output_path": {"type": "string", "default": "exports", "description": "Directory path to save diagram files (defaults to 'exports')"}
+                        "output_format": {
+                            "type": "string",
+                            "enum": ["mermaid", "markdown_with_mermaid"],
+                            "default": "mermaid"
+                        },
+                        "interactive": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Start interactive conversation for complex diagrams"
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "default": "exports",
+                            "description": "Directory path to save diagram files (defaults to 'exports')"
+                        }
                     }
                 }
             }
@@ -89,7 +111,10 @@ class ExportHandler(BaseHandler):
                 details = "\n".join(f"- {f}" for f in exported_files)
                 return self._create_above_fold_response("SUCCESS", key_info, action_info, details)
             else:
-                return self._create_above_fold_response("INFO", "No data found to export", "Check if requirements, tasks, or architecture exist")
+                return self._create_above_fold_response(
+                    "INFO", "No data found to export", 
+                    "Check if requirements, tasks, or architecture exist"
+                )
                 
         except Exception as e:
             return self._create_error_response("Failed to export project documentation", e)
@@ -324,9 +349,14 @@ class ExportHandler(BaseHandler):
             output_path = params.get("output_path", "exports")
             
             # Validate diagram type
-            valid_types = ["requirements", "tasks", "architecture", "full_project", "directory_structure", "dependencies"]
+            valid_types = [
+                "requirements", "tasks", "architecture", "full_project", 
+                "directory_structure", "dependencies"
+            ]
             if diagram_type not in valid_types:
-                return self._create_error_response(f"Invalid diagram type: {diagram_type}. Valid types are: {', '.join(valid_types)}")
+                return self._create_error_response(
+                    f"Invalid diagram type: {diagram_type}. Valid types are: {', '.join(valid_types)}"
+                )
             
             mermaid_content = ""
             requirement_ids = params.get("requirement_ids", [])
@@ -345,7 +375,10 @@ class ExportHandler(BaseHandler):
                 mermaid_content = self._generate_dependencies_diagram(requirement_ids)
             
             if not mermaid_content:
-                return self._create_above_fold_response("INFO", "No data found for diagram", f"Check if {diagram_type} data exists in the system")
+                return self._create_above_fold_response(
+                    "INFO", "No data found for diagram", 
+                    f"Check if {diagram_type} data exists in the system"
+                )
             
             # Prepare content for output
             if output_format == "markdown_with_mermaid":
@@ -689,5 +722,5 @@ class ExportHandler(BaseHandler):
         try:
             os.makedirs(output_path, exist_ok=True)
             return True
-        except (OSError, PermissionError) as e:
+        except (OSError, PermissionError):
             return False

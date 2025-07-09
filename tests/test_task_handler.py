@@ -2,10 +2,8 @@
 Unit tests for TaskHandler
 """
 
-import pytest
-import json
 
-from lifecycle_mcp.handlers.task_handler import TaskHandler
+import pytest
 
 
 @pytest.mark.unit
@@ -29,7 +27,9 @@ class TestTaskHandler:
         assert all(tool in tool_names for tool in expected_tools)
     
     @pytest.mark.asyncio
-    async def test_create_task_success(self, task_handler, requirement_handler, sample_requirement_data, sample_task_data):
+    async def test_create_task_success(
+        self, task_handler, requirement_handler, sample_requirement_data, sample_task_data
+    ):
         """Test successful task creation"""
         # Create requirement and approve it first
         await requirement_handler._create_requirement(**sample_requirement_data)
@@ -81,7 +81,9 @@ class TestTaskHandler:
         assert "Missing required parameters" in result[0].text
     
     @pytest.mark.asyncio
-    async def test_update_task_status_success(self, task_handler, requirement_handler, sample_requirement_data, sample_task_data):
+    async def test_update_task_status_success(
+        self, task_handler, requirement_handler, sample_requirement_data, sample_task_data
+    ):
         """Test successful task status update"""
         # Create requirement and approve it first
         await requirement_handler._create_requirement(**sample_requirement_data)
@@ -145,7 +147,9 @@ class TestTaskHandler:
         assert "Task not found" in result[0].text
     
     @pytest.mark.asyncio
-    async def test_handle_tool_call_routing(self, task_handler, requirement_handler, sample_requirement_data, sample_task_data):
+    async def test_handle_tool_call_routing(
+        self, task_handler, requirement_handler, sample_requirement_data, sample_task_data
+    ):
         """Test that handle_tool_call routes correctly"""
         # Create requirement and approve it
         await requirement_handler._create_requirement(**sample_requirement_data)
@@ -170,7 +174,9 @@ class TestTaskHandler:
         assert "Unknown tool: unknown_tool" in result[0].text
     
     @pytest.mark.asyncio
-    async def test_create_task_blocks_draft_requirement(self, task_handler, requirement_handler, sample_requirement_data, sample_task_data):
+    async def test_create_task_blocks_draft_requirement(
+        self, task_handler, requirement_handler, sample_requirement_data, sample_task_data
+    ):
         """Test that task creation is blocked for draft requirements"""
         # Create requirement in Draft status (default)
         await requirement_handler._create_requirement(**sample_requirement_data)

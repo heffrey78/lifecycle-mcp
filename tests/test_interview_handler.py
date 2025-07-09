@@ -2,11 +2,8 @@
 Unit tests for InterviewHandler
 """
 
-import pytest
-import json
-from unittest.mock import Mock, patch
 
-from lifecycle_mcp.handlers.interview_handler import InterviewHandler
+import pytest
 
 
 @pytest.mark.unit
@@ -306,7 +303,7 @@ class TestInterviewHandler:
             context, role = contexts[i]
             assert "?" in question_set, f"No questions generated for {context}"
             assert "Session ID" in question_set, f"No session ID in response for {context}"
-            assert context in question_set, f"Context not reflected in response"
+            assert context in question_set, "Context not reflected in response"
         
         # Each interview should have unique session ID
         session_ids = []

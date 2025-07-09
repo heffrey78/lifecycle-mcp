@@ -2,12 +2,10 @@
 Unit tests for ExportHandler
 """
 
-import pytest
 import tempfile
-import os
 from pathlib import Path
 
-from lifecycle_mcp.handlers.export_handler import ExportHandler
+import pytest
 
 
 @pytest.mark.unit
@@ -93,7 +91,9 @@ class TestExportHandler:
             assert "Test Architecture Decision" in content
     
     @pytest.mark.asyncio
-    async def test_export_project_documentation_selective(self, export_handler, requirement_handler, sample_requirement_data):
+    async def test_export_project_documentation_selective(
+        self, export_handler, requirement_handler, sample_requirement_data
+    ):
         """Test selective export of documentation"""
         # Create test data
         await requirement_handler._create_requirement(**sample_requirement_data)

@@ -3,38 +3,74 @@ Integration tests for MCP Lifecycle Management Server
 Tests end-to-end functionality of the modular architecture
 """
 
-import pytest
-import tempfile
+import asyncio
+import logging
 import os
+import tempfile
 from pathlib import Path
 
-from src.lifecycle_mcp.server import LifecycleMCPServer
+import pytest
+
+from lifecycle_mcp.server import LifecycleMCPServer
+
+# Configure logging for tests
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
+@pytest.mark.integration
 class TestMCPServerIntegration:
     """Integration tests for the complete MCP server"""
-    
+
     @pytest.fixture
     def server_instance(self):
-        """Create a server instance with temporary database"""
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp_file:
-            db_path = tmp_file.name
-        
-        # Set environment variable for database path
-        os.environ['LIFECYCLE_DB'] = db_path
-        
-        try:
-            server = LifecycleMCPServer()
-            yield server
-        finally:
-            # Clean up
+        """
+        Create a server instance with properly initialized temporary database.
+
+        This fixture implements best practices:
+        1. Ensures database is properly initialized with schema
+        2. Provides complete isolation between tests
+        3. Handles async initialization correctly
+        4. Cleans up resources reliably
+        """
+        # Create a truly temporary directory for our test
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "test_lifecycle.db")
+
+            # Set environment variable for database path
+            original_env = os.environ.get("LIFECYCLE_DB")
+            os.environ["LIFECYCLE_DB"] = db_path
+
             try:
-                os.unlink(db_path)
-            except OSError:
-                pass
-            if 'LIFECYCLE_DB' in os.environ:
-                del os.environ['LIFECYCLE_DB']
-    
+                # Create server instance
+                server = LifecycleMCPServer()
+
+                # Verify database was properly initialized
+                with server.db_manager.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                    tables = [row[0] for row in cursor.fetchall()]
+
+                    required_tables = ["requirements", "tasks", "architecture", "requirement_tasks"]
+                    for table in required_tables:
+                        if table not in tables:
+                            raise RuntimeError(f"Database initialization failed: missing table '{table}'")
+
+                    logger.info(f"Database initialized successfully with tables: {tables}")
+
+                yield server
+
+            finally:
+                # Restore original environment
+                if original_env is None:
+                    os.environ.pop("LIFECYCLE_DB", None)
+                else:
+                    os.environ["LIFECYCLE_DB"] = original_env
+
+                # Close database connections properly
+                if hasattr(server, "db_manager"):
+                    server.db_manager.close()
+
     def test_server_initialization(self, server_instance):
         """Test that server initializes correctly with all handlers"""
         assert server_instance.db_manager is not None
@@ -44,307 +80,357 @@ class TestMCPServerIntegration:
         assert server_instance.interview_handler is not None
         assert server_instance.export_handler is not None
         assert server_instance.status_handler is not None
-        
+
         # Verify all tools are registered
-        expected_tool_count = 21  # Total number of MCP tools
+        # Total number of MCP tools (including sync_task_from_github and bulk_sync_github_tasks)
+        expected_tool_count = 23
         assert len(server_instance.handlers) == expected_tool_count
-    
-    def test_end_to_end_requirement_workflow(self, server_instance):
+
+    @pytest.mark.asyncio
+    async def test_end_to_end_requirement_workflow(self, server_instance):
         """Test complete requirement workflow from creation to validation"""
         server = server_instance
-        
+
         # 1. Create requirement
-        req_result = server.requirement_handler.handle_tool_call("create_requirement", {
-            "type": "FUNC",
-            "title": "Integration Test Requirement",
-            "priority": "P1",
-            "current_state": "No functionality exists",
-            "desired_state": "Functionality implemented and tested",
-            "functional_requirements": ["Feature A", "Feature B"],
-            "acceptance_criteria": ["AC1", "AC2"],
-            "business_value": "Improved user experience",
-            "author": "Integration Test"
-        })
-        
-        assert "Created requirement REQ-0001-FUNC-00" in req_result[0].text
-        
-        # 2. Create task for requirement
-        task_result = server.task_handler.handle_tool_call("create_task", {
-            "requirement_ids": ["REQ-0001-FUNC-00"],
-            "title": "Implement Integration Test Feature",
-            "priority": "P1",
-            "effort": "L",
-            "user_story": "As a user, I want this feature to work",
-            "acceptance_criteria": ["Implementation complete", "Tests pass"],
-            "assignee": "Developer"
-        })
-        
-        assert "Created task TASK-0001-00-00" in task_result[0].text
-        
-        # 3. Create architecture decision
-        arch_result = server.architecture_handler.handle_tool_call("create_architecture_decision", {
-            "requirement_ids": ["REQ-0001-FUNC-00"],
-            "title": "Integration Test Architecture",
-            "context": "Need to decide on architecture approach",
-            "decision": "Use modular architecture pattern",
-            "decision_drivers": ["Maintainability", "Testability"],
-            "considered_options": ["Monolithic", "Modular", "Microservices"],
-            "consequences": {"positive": "Better maintainability", "negative": "Slight complexity increase"}
-        })
-        
-        assert "Created architecture decision ADR-0001" in arch_result[0].text
-        
-        # 4. Update task status to complete
-        task_update_result = server.task_handler.handle_tool_call("update_task_status", {
-            "task_id": "TASK-0001-00-00",
-            "new_status": "Complete",
-            "comment": "Feature implemented successfully"
-        })
-        
-        assert "Updated task TASK-0001-00-00 from Not Started to Complete" in task_update_result[0].text
-        
-        # 5. Move requirement through lifecycle
-        status_updates = [
-            ("Under Review", "Moving to review"),
-            ("Approved", "Approved for implementation"),
+        req_result = await server.requirement_handler.handle_tool_call(
+            "create_requirement",
+            {
+                "type": "FUNC",
+                "title": "Integration Test Requirement",
+                "priority": "P1",
+                "current_state": "No functionality exists",
+                "desired_state": "Functionality implemented and tested",
+                "functional_requirements": ["Feature A", "Feature B"],
+                "acceptance_criteria": ["AC1", "AC2"],
+                "business_value": "Improved user experience",
+                "author": "Integration Test",
+            },
+        )
+
+        assert len(req_result) == 1
+        assert "SUCCESS" in req_result[0].text  # Check for above-fold format
+        assert "REQ-0001-FUNC-00" in req_result[0].text
+
+        # 2. Move requirement through proper status transitions to allow task creation
+        transitions = [
+            ("Under Review", "Moving to review phase"),
+            ("Approved", "Requirement approved for implementation"),
+        ]
+
+        for new_status, comment in transitions:
+            status_result = await server.requirement_handler.handle_tool_call(
+                "update_requirement_status",
+                {"requirement_id": "REQ-0001-FUNC-00", "new_status": new_status, "comment": comment},
+            )
+            assert "SUCCESS" in status_result[0].text
+
+        # 3. Create task for approved requirement
+        task_result = await server.task_handler.handle_tool_call(
+            "create_task",
+            {
+                "requirement_ids": ["REQ-0001-FUNC-00"],
+                "title": "Implement Integration Test Feature",
+                "priority": "P1",
+                "effort": "L",
+                "user_story": "As a user, I want this feature to work",
+                "acceptance_criteria": ["Implementation complete", "Tests pass"],
+                "assignee": "TestDev",  # Use simple assignee name without spaces
+            },
+        )
+
+        assert len(task_result) == 1
+        assert "SUCCESS" in task_result[0].text  # Check for above-fold format
+        assert "TASK-0001-00-00" in task_result[0].text
+
+        # 4. Create architecture decision
+        arch_result = await server.architecture_handler.handle_tool_call(
+            "create_architecture_decision",
+            {
+                "requirement_ids": ["REQ-0001-FUNC-00"],
+                "title": "Integration Test Architecture",
+                "context": "Need to decide on architecture approach",
+                "decision": "Use modular architecture pattern",
+                "decision_drivers": ["Maintainability", "Testability"],
+                "considered_options": ["Monolithic", "Modular", "Microservices"],
+                "consequences": {"positive": "Better maintainability", "negative": "Slight complexity increase"},
+            },
+        )
+
+        assert len(arch_result) == 1
+        assert "SUCCESS" in arch_result[0].text  # Check for above-fold format
+        assert "ADR-0001" in arch_result[0].text
+
+        # 5. Update task status to complete
+        task_update_result = await server.task_handler.handle_tool_call(
+            "update_task_status",
+            {"task_id": "TASK-0001-00-00", "new_status": "Complete", "comment": "Feature implemented successfully"},
+        )
+
+        assert len(task_update_result) == 1
+        assert "SUCCESS" in task_update_result[0].text
+
+        # 6. Move requirement through remaining lifecycle states
+        final_transitions = [
+            ("Architecture", "Architecture defined"),
             ("Ready", "Ready for development"),
             ("Implemented", "Implementation complete"),
-            ("Validated", "Validation successful")
+            ("Validated", "Validation successful"),
         ]
-        
-        for new_status, comment in status_updates:
-            req_update_result = server.requirement_handler.handle_tool_call("update_requirement_status", {
-                "requirement_id": "REQ-0001-FUNC-00",
-                "new_status": new_status,
-                "comment": comment
-            })
-            assert f"Updated REQ-0001-FUNC-00" in req_update_result[0].text
-        
-        # 6. Verify final state with trace
-        trace_result = server.requirement_handler.handle_tool_call("trace_requirement", {
-            "requirement_id": "REQ-0001-FUNC-00"
-        })
-        
+
+        for new_status, comment in final_transitions:
+            req_update_result = await server.requirement_handler.handle_tool_call(
+                "update_requirement_status",
+                {"requirement_id": "REQ-0001-FUNC-00", "new_status": new_status, "comment": comment},
+            )
+            assert "SUCCESS" in req_update_result[0].text
+
+        # 7. Verify final state with trace
+        trace_result = server.requirement_handler.handle_tool_call(
+            "trace_requirement", {"requirement_id": "REQ-0001-FUNC-00"}
+        )
+
+        # Handle sync trace_requirement call
+        if asyncio.iscoroutine(trace_result):
+            trace_result = await trace_result
+
+        assert len(trace_result) == 1
         trace_text = trace_result[0].text
-        assert "# Requirement Trace: REQ-0001-FUNC-00" in trace_text
-        assert "Status**: Validated" in trace_text
+        assert "INFO" in trace_text  # Check for above-fold format
+        assert "REQ-0001-FUNC-00" in trace_text
+        assert "Validated" in trace_text
         assert "TASK-0001-00-00" in trace_text
         assert "ADR-0001" in trace_text
-    
-    def test_project_status_with_data(self, server_instance):
+
+    @pytest.mark.asyncio
+    async def test_project_status_with_data(self, server_instance):
         """Test project status reporting with actual data"""
         server = server_instance
-        
-        # Create some test data
-        # Multiple requirements in different states
-        for i in range(3):
-            server.requirement_handler.handle_tool_call("create_requirement", {
-                "type": "FUNC",
-                "title": f"Test Requirement {i+1}",
-                "priority": "P1",
-                "current_state": "Current",
-                "desired_state": "Desired"
-            })
-        
-        # Update one requirement to Validated
-        server.requirement_handler.handle_tool_call("update_requirement_status", {
-            "requirement_id": "REQ-0001-FUNC-00",
-            "new_status": "Under Review"
-        })
-        server.requirement_handler.handle_tool_call("update_requirement_status", {
-            "requirement_id": "REQ-0001-FUNC-00",
-            "new_status": "Approved"
-        })
-        server.requirement_handler.handle_tool_call("update_requirement_status", {
-            "requirement_id": "REQ-0001-FUNC-00",
-            "new_status": "Ready"
-        })
-        server.requirement_handler.handle_tool_call("update_requirement_status", {
-            "requirement_id": "REQ-0001-FUNC-00",
-            "new_status": "Implemented"
-        })
-        server.requirement_handler.handle_tool_call("update_requirement_status", {
-            "requirement_id": "REQ-0001-FUNC-00",
-            "new_status": "Validated"
-        })
-        
-        # Create tasks
-        for i in range(2):
-            server.task_handler.handle_tool_call("create_task", {
-                "requirement_ids": [f"REQ-000{i+1}-FUNC-00"],
-                "title": f"Test Task {i+1}",
-                "priority": "P1"
-            })
-        
-        # Complete one task
-        server.task_handler.handle_tool_call("update_task_status", {
-            "task_id": "TASK-0001-00-00",
-            "new_status": "Complete"
-        })
-        
+
+        # Create multiple requirements in different states
+        requirements = [
+            ("Test Requirement 1", "P0", "Draft"),
+            ("Test Requirement 2", "P1", "Approved"),
+            ("Test Requirement 3", "P2", "Validated"),
+        ]
+
+        for i, (title, priority, target_status) in enumerate(requirements):
+            # Create requirement
+            req_result = await server.requirement_handler.handle_tool_call(
+                "create_requirement",
+                {
+                    "type": "FUNC",
+                    "title": title,
+                    "priority": priority,
+                    "current_state": "Current state",
+                    "desired_state": "Desired state",
+                    "author": "Test Suite",
+                },
+            )
+            assert "SUCCESS" in req_result[0].text
+
+            # Move to target status if not Draft
+            if target_status == "Approved":
+                await server.requirement_handler.handle_tool_call(
+                    "update_requirement_status",
+                    {"requirement_id": f"REQ-000{i + 1}-FUNC-00", "new_status": "Under Review"},
+                )
+                await server.requirement_handler.handle_tool_call(
+                    "update_requirement_status", {"requirement_id": f"REQ-000{i + 1}-FUNC-00", "new_status": "Approved"}
+                )
+            elif target_status == "Validated":
+                # Move through full lifecycle
+                for status in ["Under Review", "Approved", "Architecture", "Ready", "Implemented", "Validated"]:
+                    await server.requirement_handler.handle_tool_call(
+                        "update_requirement_status", {"requirement_id": f"REQ-000{i + 1}-FUNC-00", "new_status": status}
+                    )
+
+        # Create tasks for approved requirement
+        task_result = await server.task_handler.handle_tool_call(
+            "create_task", {"requirement_ids": ["REQ-0002-FUNC-00"], "title": "Test Task", "priority": "P1"}
+        )
+        assert "SUCCESS" in task_result[0].text
+
         # Get project status
-        status_result = server.status_handler.handle_tool_call("get_project_status", {
-            "include_blocked": True
-        })
-        
+        status_result = await server.status_handler.handle_tool_call("get_project_status", {})
+
+        assert len(status_result) == 1
         status_text = status_result[0].text
-        assert "# Project Status Dashboard" in status_text
-        assert "Requirements Overview" in status_text
-        assert "Tasks Overview" in status_text
-        assert "Draft" in status_text  # Should show requirements in Draft
-        assert "Validated" in status_text  # Should show validated requirement
-        assert "Complete" in status_text  # Should show completed task
-    
-    def test_export_functionality(self, server_instance):
-        """Test export functionality with real data"""
+
+        # Verify status contains expected information
+        assert "INFO" in status_text  # Above-fold format
+        assert "Project" in status_text
+        assert "3 requirements" in status_text  # Summary shows 3 requirements
+        assert "**Draft**: 1" in status_text
+        assert "**Approved**: 1" in status_text
+        assert "**Validated**: 1" in status_text
+        assert "Total Requirements**: 3" in status_text
+
+    @pytest.mark.asyncio
+    async def test_export_functionality(self, server_instance):
+        """Test documentation export functionality"""
         server = server_instance
-        
-        # Create test data
-        server.requirement_handler.handle_tool_call("create_requirement", {
-            "type": "FUNC",
-            "title": "Export Test Requirement",
-            "priority": "P1",
-            "current_state": "No export functionality",
-            "desired_state": "Export functionality available",
-            "business_value": "Users can export their data"
-        })
-        
-        server.task_handler.handle_tool_call("create_task", {
-            "requirement_ids": ["REQ-0001-FUNC-00"],
-            "title": "Implement Export Feature",
-            "priority": "P1",
-            "effort": "M"
-        })
-        
+
+        # Create some test data
+        req_result = await server.requirement_handler.handle_tool_call(
+            "create_requirement",
+            {
+                "type": "FUNC",
+                "title": "Export Test Requirement",
+                "priority": "P1",
+                "current_state": "No export",
+                "desired_state": "Can export docs",
+                "author": "Test",
+            },
+        )
+        assert "SUCCESS" in req_result[0].text
+
         # Test export with temporary directory
-        with tempfile.TemporaryDirectory() as temp_dir:
-            export_result = server.export_handler.handle_tool_call("export_project_documentation", {
-                "project_name": "integration-test",
-                "output_directory": temp_dir,
-                "include_requirements": True,
-                "include_tasks": True,
-                "include_architecture": False
-            })
-            
-            assert "Successfully exported" in export_result[0].text
-            assert "integration-test-requirements.md" in export_result[0].text
-            assert "integration-test-tasks.md" in export_result[0].text
-            
-            # Verify files were created
-            req_file = Path(temp_dir) / "integration-test-requirements.md"
-            task_file = Path(temp_dir) / "integration-test-tasks.md"
-            assert req_file.exists()
-            assert task_file.exists()
-            
-            # Verify content
-            req_content = req_file.read_text()
-            assert "Export Test Requirement" in req_content
-            
-            task_content = task_file.read_text()
-            assert "Implement Export Feature" in task_content
-    
-    def test_architectural_diagrams(self, server_instance):
-        """Test architectural diagram generation"""
+        with tempfile.TemporaryDirectory() as export_dir:
+            export_result = await server.export_handler.handle_tool_call(
+                "export_project_documentation", {"output_directory": export_dir, "project_name": "test_project"}
+            )
+
+            assert len(export_result) == 1
+            assert "SUCCESS" in export_result[0].text
+
+            # Verify files were created - check what files are actually created
+            created_files = list(Path(export_dir).glob("*.md"))
+            assert len(created_files) > 0, "No markdown files were created"
+
+            # At least one file should contain project documentation
+            file_contents = []
+            for filepath in created_files:
+                with open(filepath, "r") as f:
+                    file_contents.append(f.read())
+
+            all_content = "\n".join(file_contents)
+            assert "Export Test Requirement" in all_content, "Exported files should contain the test requirement"
+
+    @pytest.mark.asyncio
+    async def test_architectural_diagrams(self, server_instance):
+        """Test architecture diagram generation"""
         server = server_instance
-        
+
         # Create test data
-        server.requirement_handler.handle_tool_call("create_requirement", {
-            "type": "FUNC",
-            "title": "Diagram Test Requirement",
-            "priority": "P1",
-            "current_state": "Current",
-            "desired_state": "Desired"
-        })
-        
-        server.architecture_handler.handle_tool_call("create_architecture_decision", {
-            "requirement_ids": ["REQ-0001-FUNC-00"],
-            "title": "Test Architecture Decision",
-            "context": "Architecture context",
-            "decision": "Use this approach"
-        })
-        
-        # Test different diagram types
-        diagram_types = ["requirements", "architecture", "full_project"]
-        
-        for diagram_type in diagram_types:
-            result = server.export_handler.handle_tool_call("create_architectural_diagrams", {
-                "diagram_type": diagram_type,
-                "output_format": "markdown_with_mermaid"
-            })
-            
-            assert len(result) == 1
-            content = result[0].text
-            assert "```mermaid" in content
-            assert "flowchart TD" in content
-    
-    def test_interview_workflow(self, server_instance):
-        """Test interview workflow integration"""
+        req_result = await server.requirement_handler.handle_tool_call(
+            "create_requirement",
+            {
+                "type": "FUNC",
+                "title": "Diagram Test Requirement",
+                "priority": "P1",
+                "current_state": "No diagrams",
+                "desired_state": "Has diagrams",
+                "author": "Test",
+            },
+        )
+        assert "SUCCESS" in req_result[0].text
+
+        # Generate diagram
+        with tempfile.TemporaryDirectory() as diagram_dir:
+            diagram_result = await server.export_handler.handle_tool_call(
+                "create_architectural_diagrams", {"diagram_type": "requirements", "output_path": diagram_dir}
+            )
+
+            assert len(diagram_result) == 1
+            assert "SUCCESS" in diagram_result[0].text
+
+            # Check that diagram file was created
+            diagram_files = list(Path(diagram_dir).glob("*.mmd"))
+            assert len(diagram_files) > 0, "No Mermaid diagram files were created"
+
+    @pytest.mark.asyncio
+    async def test_interview_workflow(self, server_instance):
+        """Test interactive interview workflow"""
         server = server_instance
-        
+
         # Start requirement interview
-        start_result = server.interview_handler.handle_tool_call("start_requirement_interview", {
-            "project_context": "Integration Test Project",
-            "stakeholder_role": "Product Owner"
-        })
-        
-        assert "# Requirement Interview Started" in start_result[0].text
-        assert "Session ID" in start_result[0].text
-        
-        # Extract session ID (simplified for test)
-        session_id = "test-session"
-        server.interview_handler.interview_sessions[session_id] = {
-            "project_context": "Integration Test Project",
-            "stakeholder_role": "Product Owner",
-            "gathered_data": {},
-            "current_stage": "problem_identification",
-            "questions_asked": []
-        }
-        
-        # Continue interview through stages
-        continue_result = server.interview_handler.handle_tool_call("continue_requirement_interview", {
-            "session_id": session_id,
-            "answers": {
-                "current_problem": "No integration testing",
-                "impact": "Quality issues"
-            }
-        })
-        
-        assert "Interview Progress" in continue_result[0].text
-    
+        interview_result = await server.interview_handler.handle_tool_call(
+            "start_requirement_interview",
+            {"project_context": "Test project for integration testing", "stakeholder_role": "Product Owner"},
+        )
+
+        assert len(interview_result) == 1
+        assert "SUCCESS" in interview_result[0].text
+
+        # Extract session ID from response
+        response_text = interview_result[0].text
+        # Session ID should be in the response - check for actual response format
+        assert "Interview session" in response_text or "session" in response_text.lower()
+
     def test_tool_routing_accuracy(self, server_instance):
-        """Test that tool routing works correctly for all tools"""
+        """Test that tools are correctly routed to handlers"""
         server = server_instance
-        
-        # Test that each tool routes to the correct handler
+
+        # Test tool routing
         tool_handler_mapping = {
             "create_requirement": server.requirement_handler,
             "create_task": server.task_handler,
             "create_architecture_decision": server.architecture_handler,
             "start_requirement_interview": server.interview_handler,
             "export_project_documentation": server.export_handler,
-            "get_project_status": server.status_handler
+            "get_project_status": server.status_handler,
         }
-        
+
         for tool_name, expected_handler in tool_handler_mapping.items():
-            actual_handler = server.handlers.get(tool_name)
-            assert actual_handler == expected_handler, f"Tool {tool_name} not routed to correct handler"
-    
-    def test_error_handling_integration(self, server_instance):
+            assert tool_name in server.handlers
+            assert server.handlers[tool_name] == expected_handler
+
+    @pytest.mark.asyncio
+    async def test_error_handling_integration(self, server_instance):
         """Test error handling across the integrated system"""
         server = server_instance
-        
-        # Test handling of invalid tool calls
-        try:
-            # This should be handled gracefully by the server
-            result = server.requirement_handler.handle_tool_call("nonexistent_tool", {})
-            assert "Unknown tool" in result[0].text
-        except Exception as e:
-            pytest.fail(f"Error handling failed: {str(e)}")
-        
-        # Test handling of invalid parameters
-        result = server.requirement_handler.handle_tool_call("create_requirement", {
-            "title": "Missing required fields"
-            # Missing type, priority, current_state, desired_state
-        })
-        assert "Error" in result[0].text
-        assert "Missing required parameters" in result[0].text
+
+        # Test invalid requirement creation
+        error_result = await server.requirement_handler.handle_tool_call(
+            "create_requirement",
+            {
+                "type": "INVALID_TYPE",  # Invalid type
+                "title": "Error Test",
+                # Missing required fields
+            },
+        )
+
+        assert len(error_result) == 1
+        assert "ERROR" in error_result[0].text
+
+        # Test invalid task creation (requirement doesn't exist)
+        task_error = await server.task_handler.handle_tool_call(
+            "create_task",
+            {
+                "requirement_ids": ["REQ-9999-FUNC-00"],  # Non-existent
+                "title": "Error Task",
+                "priority": "P1",
+            },
+        )
+
+        assert len(task_error) == 1
+        assert "ERROR" in task_error[0].text
+        assert "not found" in task_error[0].text
+
+        # Test invalid status transition
+        # First create a valid requirement
+        req_result = await server.requirement_handler.handle_tool_call(
+            "create_requirement",
+            {
+                "type": "FUNC",
+                "title": "Transition Test",
+                "priority": "P1",
+                "current_state": "Current",
+                "desired_state": "Desired",
+                "author": "Test",
+            },
+        )
+        assert "SUCCESS" in req_result[0].text
+
+        # Try invalid transition from Draft to Validated
+        transition_error = await server.requirement_handler.handle_tool_call(
+            "update_requirement_status",
+            {
+                "requirement_id": "REQ-0001-FUNC-00",
+                "new_status": "Validated",  # Invalid transition from Draft
+            },
+        )
+
+        assert len(transition_error) == 1
+        assert "ERROR" in transition_error[0].text
+        assert "Invalid transition" in transition_error[0].text

@@ -1,0 +1,4 @@
+[bandit]
+exclude_dirs = /tests,/build,/dist,.git,.tox,__pycache__,.eggs
+skips = B101,B601
+severity = medium

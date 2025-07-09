@@ -2,51 +2,89 @@
 Test configuration and fixtures for MCP Lifecycle Management Server
 """
 
-import pytest
-import tempfile
+import asyncio
+import logging
 import os
+import tempfile
+import time
 from pathlib import Path
 from unittest.mock import Mock
 
-from src.lifecycle_mcp.database_manager import DatabaseManager
-from src.lifecycle_mcp.handlers import (
-    RequirementHandler,
-    TaskHandler,
+import pytest
+
+from lifecycle_mcp.database_manager import DatabaseManager
+from lifecycle_mcp.handlers import (
     ArchitectureHandler,
-    InterviewHandler,
     ExportHandler,
-    StatusHandler
+    InterviewHandler,
+    RequirementHandler,
+    StatusHandler,
+    TaskHandler,
 )
+
+# Configure pytest-asyncio to avoid deprecation warnings
+pytest_plugins = ("pytest_asyncio",)
+
+# Configure logging for tests
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
+
+def pytest_configure(config):
+    """Configure pytest with asyncio settings"""
+    # This addresses the deprecation warning about asyncio_default_fixture_loop_scope
+    config.option.asyncio_default_fixture_loop_scope = "function"
+
+
+@pytest.fixture(scope="function")
+def event_loop():
+    """Create an instance of the default event loop for each test function."""
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
 
 
 @pytest.fixture
 def temp_db():
     """Create a temporary database for testing"""
-    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp_file:
-        db_path = tmp_file.name
-    
+    # Use a unique temp file to avoid conflicts
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)  # Close the file descriptor immediately
+
     # Create schema
     schema_path = Path(__file__).parent.parent / "src" / "lifecycle_mcp" / "lifecycle-schema.sql"
+    # Ensure path works on Windows
+    schema_path = schema_path.resolve()
     if schema_path.exists():
         import sqlite3
+
         conn = sqlite3.connect(db_path)
-        with open(schema_path, 'r') as f:
-            conn.executescript(f.read())
-        conn.close()
-    
+        try:
+            with open(schema_path, "r", encoding="utf-8") as f:
+                conn.executescript(f.read())
+        finally:
+            conn.close()
+
     yield db_path
-    
-    # Clean up
-    try:
-        os.unlink(db_path)
-    except OSError:
-        pass
+
+    # Clean up - retry on Windows if file is locked
+    for attempt in range(3):
+        try:
+            os.unlink(db_path)
+            break
+        except OSError:
+            if attempt < 2:
+                time.sleep(0.1)  # Give Windows time to release the file
+            else:
+                pass  # Give up after 3 attempts
 
 
 @pytest.fixture
 def db_manager(temp_db):
     """Create a DatabaseManager instance with temporary database"""
-    return DatabaseManager(temp_db)
+    manager = DatabaseManager(temp_db)
+    yield manager
+    # Ensure all connections are closed before cleanup
+    manager.close()
 
 
 @pytest.fixture
@@ -98,7 +136,7 @@ def sample_requirement_data():
         "acceptance_criteria": ["Acceptance criteria 1", "Acceptance criteria 2"],
         "business_value": "Test business value",
         "risk_level": "Medium",
-        "author": "Test Author"
+        "author": "Test Author",
     }
 
 
@@ -112,7 +150,7 @@ def sample_task_data():
         "effort": "M",
         "user_story": "As a user, I want to test this functionality",
         "acceptance_criteria": ["Task acceptance criteria 1", "Task acceptance criteria 2"],
-        "assignee": "Test Assignee"
+        "assignee": "Test Assignee",
     }
 
 
@@ -127,16 +165,18 @@ def sample_architecture_data():
         "decision_drivers": ["Driver 1", "Driver 2"],
         "considered_options": ["Option 1", "Option 2"],
         "consequences": {"positive": "Good outcome", "negative": "Some trade-offs"},
-        "authors": ["Test Architect"]
+        "authors": ["Test Architect"],
     }
 
 
 @pytest.fixture
 def mock_text_content():
     """Mock TextContent for testing"""
+
     def _create_mock(text):
         mock = Mock()
         mock.type = "text"
         mock.text = text
         return mock
+
     return _create_mock

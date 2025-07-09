@@ -22,3 +22,114 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 lifecycle_mcp = ["*.sql"]
+
+[project.optional-dependencies]
+test = [
+    "pytest~=8.3",
+    "pytest-asyncio~=0.24",
+    "pytest-cov~=5.0",
+    "pytest-xdist~=3.6",
+    "pytest-mock~=3.14",
+    "pytest-randomly~=3.15",
+    "hypothesis~=6.118",
+]
+dev = [
+    "ruff~=0.8",
+    "mypy~=1.13",
+    "coverage[toml]~=7.6",
+]
+all = ["lifecycle-mcp[test,dev]"]
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/test_*.py",
+]
+
+[tool.coverage.report]
+fail_under = 50
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+fix = true
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "UP",    # pyupgrade
+    "N",     # pep8-naming
+    "SIM",   # flake8-simplify
+    "ASYNC", # flake8-async
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+    "B008",  # do not perform function calls in argument defaults
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "PLR2004", "PLR0913"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["lifecycle_mcp"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+namespace_packages = true
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = [
+    "mcp.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]

@@ -50,7 +50,7 @@ jobs:
     
     - name: Run tests with coverage
       run: |
-        python -m pytest tests/ -k "not (property or performance)" --cov=src/lifecycle_mcp --cov-report=xml --cov-report=html --cov-report=term --cov-fail-under=50
+        python -m pytest tests/ --deselect=tests/test_property_based.py --deselect=tests/test_performance_benchmarks.py --cov=src/lifecycle_mcp --cov-report=xml --cov-report=html --cov-report=term --cov-fail-under=50
       env:
         PYTHONIOENCODING: utf-8
         PYTHONUTF8: 1

@@ -100,6 +100,12 @@ jobs:
       with:
         recreate: true
         path: code-coverage-results.md
+        message: |
+          ## Coverage Report
+          
+          Coverage analysis completed on ${{ runner.os }} runner.
+          
+          Please check the full coverage report in the build artifacts.
     
     - name: Store test results
       if: always()

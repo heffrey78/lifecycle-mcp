@@ -7,7 +7,7 @@ Provides GitHub CLI integration for issue management
 import asyncio
 import json
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 

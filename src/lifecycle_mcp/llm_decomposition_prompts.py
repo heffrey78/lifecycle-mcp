@@ -3,9 +3,10 @@ LLM prompts and strategies for requirement decomposition analysis.
 Used by RequirementHandler to determine when and how to decompose requirements.
 """
 
-from typing import Dict, List, Any, Optional
 import json
 import re
+from typing import Any, Dict, List, Optional
+
 
 class DecompositionPromptGenerator:
     """Generates prompts for LLM-based requirement decomposition analysis."""
@@ -97,7 +98,9 @@ Analyze now:"""
 **PARENT REQUIREMENT:**
 Title: {parent_requirement.get('title', 'N/A')}
 Type: {parent_requirement.get('type', 'N/A')}
-Functional Requirements: {DecompositionPromptGenerator._format_json_list(parent_requirement.get('functional_requirements'))}
+Functional Requirements: {DecompositionPromptGenerator._format_json_list(
+    parent_requirement.get('functional_requirements')
+)}
 
 **PROPOSED SUB-REQUIREMENTS:**
 {children_summary}

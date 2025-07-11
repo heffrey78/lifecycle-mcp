@@ -214,7 +214,7 @@ class TaskHandler(BaseHandler):
                                 "github_issue_number": issue_number,
                                 "github_issue_url": github_url,
                                 "github_last_sync": datetime.now(timezone.utc).isoformat(),
-                                "github_etag": github_issue.get('etag') if github_issue else None
+                                "github_etag": github_issue.get("etag") if github_issue else None,
                             }
 
                             self.db.update_record("tasks", github_data, "id = ?", [task_id])
@@ -456,7 +456,7 @@ class TaskHandler(BaseHandler):
                         {
                             "status": new_status,
                             "github_last_sync": datetime.now(timezone.utc).isoformat(),
-                            "github_etag": github_issue.get('etag')
+                            "github_etag": github_issue.get("etag"),
                         },
                         "id = ?",
                         [task_id],
@@ -534,7 +534,7 @@ class TaskHandler(BaseHandler):
 
                             update_data = {
                                 "github_last_sync": datetime.now(timezone.utc).isoformat(),
-                                "github_etag": github_issue.get('etag')
+                                "github_etag": github_issue.get("etag"),
                             }
 
                             if new_status:
@@ -612,17 +612,17 @@ class TaskHandler(BaseHandler):
             task_info = f"""# Task Details: {task["id"]}
 
 ## Basic Information
-- **Title**: {task['title']}
-- **Status**: {task['status']}
-- **Priority**: {task['priority']}
-- **Effort**: {task['effort'] or 'Not specified'}
-- **Assignee**: {task['assignee'] or 'Unassigned'}
-- **Created**: {task['created_at']}
-- **Updated**: {task['updated_at']}"""
-            
-            if task['github_issue_number']:
+- **Title**: {task["title"]}
+- **Status**: {task["status"]}
+- **Priority**: {task["priority"]}
+- **Effort**: {task["effort"] or "Not specified"}
+- **Assignee**: {task["assignee"] or "Unassigned"}
+- **Created**: {task["created_at"]}
+- **Updated**: {task["updated_at"]}"""
+
+            if task["github_issue_number"]:
                 task_info += f"\n- **GitHub Issue**: #{task['github_issue_number']} - {task['github_issue_url']}"
-                
+
             task_info += f"""
 
 ## Description

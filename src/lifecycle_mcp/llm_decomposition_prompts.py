@@ -10,27 +10,27 @@ from typing import Any, Dict, List, Optional
 
 class DecompositionPromptGenerator:
     """Generates prompts for LLM-based requirement decomposition analysis."""
-    
+
     @staticmethod
     def create_complexity_analysis_prompt(requirement_data: Dict[str, Any]) -> str:
         """Create prompt for analyzing requirement complexity and decomposition needs."""
-        
+
         prompt = f"""Analyze this software requirement for complexity and decomposition needs:
 
-**Requirement Title:** {requirement_data.get('title', 'N/A')}
-**Type:** {requirement_data.get('type', 'N/A')}
-**Priority:** {requirement_data.get('priority', 'N/A')}
+**Requirement Title:** {requirement_data.get("title", "N/A")}
+**Type:** {requirement_data.get("type", "N/A")}
+**Priority:** {requirement_data.get("priority", "N/A")}
 
-**Current State:** {requirement_data.get('current_state', 'N/A')}
-**Desired State:** {requirement_data.get('desired_state', 'N/A')}
+**Current State:** {requirement_data.get("current_state", "N/A")}
+**Desired State:** {requirement_data.get("desired_state", "N/A")}
 
 **Functional Requirements:**
-{DecompositionPromptGenerator._format_json_list(requirement_data.get('functional_requirements'))}
+{DecompositionPromptGenerator._format_json_list(requirement_data.get("functional_requirements"))}
 
 **Acceptance Criteria:**
-{DecompositionPromptGenerator._format_json_list(requirement_data.get('acceptance_criteria'))}
+{DecompositionPromptGenerator._format_json_list(requirement_data.get("acceptance_criteria"))}
 
-**Business Value:** {requirement_data.get('business_value', 'N/A')}
+**Business Value:** {requirement_data.get("business_value", "N/A")}
 
 ---
 
@@ -78,29 +78,27 @@ class DecompositionPromptGenerator:
 }}
 
 Analyze now:"""
-        
+
         return prompt
-    
+
     @staticmethod
     def create_decomposition_validation_prompt(
-        parent_requirement: Dict[str, Any], 
-        proposed_children: List[Dict[str, Any]]
+        parent_requirement: Dict[str, Any], proposed_children: List[Dict[str, Any]]
     ) -> str:
         """Create prompt for validating proposed requirement decomposition."""
-        
-        children_summary = "\n".join([
-            f"- {child.get('title', 'N/A')} ({child.get('type', 'N/A')})"
-            for child in proposed_children
-        ])
-        
+
+        children_summary = "\n".join(
+            [f"- {child.get('title', 'N/A')} ({child.get('type', 'N/A')})" for child in proposed_children]
+        )
+
         prompt = f"""Validate this requirement decomposition:
 
 **PARENT REQUIREMENT:**
-Title: {parent_requirement.get('title', 'N/A')}
-Type: {parent_requirement.get('type', 'N/A')}
-Functional Requirements: {DecompositionPromptGenerator._format_json_list(
-    parent_requirement.get('functional_requirements')
-)}
+Title: {parent_requirement.get("title", "N/A")}
+Type: {parent_requirement.get("type", "N/A")}
+Functional Requirements: {
+            DecompositionPromptGenerator._format_json_list(parent_requirement.get("functional_requirements"))
+        }
 
 **PROPOSED SUB-REQUIREMENTS:**
 {children_summary}
@@ -135,23 +133,22 @@ Functional Requirements: {DecompositionPromptGenerator._format_json_list(
 }}
 
 Validate now:"""
-        
+
         return prompt
-    
+
     @staticmethod
     def create_interactive_decomposition_prompt(
-        requirement_data: Dict[str, Any],
-        user_responses: Dict[str, Any] = None
+        requirement_data: Dict[str, Any], user_responses: Dict[str, Any] = None
     ) -> str:
         """Create prompt for interactive decomposition conversation."""
-        
+
         if not user_responses:
             # Initial decomposition interview
             prompt = f"""Start an interactive decomposition interview for this requirement:
 
-**Requirement:** {requirement_data.get('title', 'N/A')}
-**Current State:** {requirement_data.get('current_state', 'N/A')}
-**Desired State:** {requirement_data.get('desired_state', 'N/A')}
+**Requirement:** {requirement_data.get("title", "N/A")}
+**Current State:** {requirement_data.get("current_state", "N/A")}
+**Desired State:** {requirement_data.get("desired_state", "N/A")}
 
 Ask 3-5 clarifying questions to understand decomposition needs. Focus on:
 1. User journey boundaries
@@ -177,14 +174,11 @@ Ask 3-5 clarifying questions to understand decomposition needs. Focus on:
 Generate questions now:"""
         else:
             # Continue with responses
-            responses_summary = "\n".join([
-                f"Q: {q_id}\nA: {response}"
-                for q_id, response in user_responses.items()
-            ])
-            
+            responses_summary = "\n".join([f"Q: {q_id}\nA: {response}" for q_id, response in user_responses.items()])
+
             prompt = f"""Continue decomposition interview with user responses:
 
-**Original Requirement:** {requirement_data.get('title', 'N/A')}
+**Original Requirement:** {requirement_data.get("title", "N/A")}
 
 **User Responses:**
 {responses_summary}
@@ -209,15 +203,15 @@ Based on responses, either:
 }}
 
 Continue interview:"""
-        
+
         return prompt
-    
+
     @staticmethod
     def _format_json_list(json_str: Optional[str]) -> str:
         """Format JSON list/array for display in prompts."""
         if not json_str:
             return "None specified"
-        
+
         try:
             items = json.loads(json_str)
             if isinstance(items, list):
@@ -228,96 +222,98 @@ Continue interview:"""
                 return str(items)
         except (json.JSONDecodeError, TypeError):
             return json_str
-    
+
     @staticmethod
     def extract_decomposition_indicators(requirement_text: str) -> Dict[str, Any]:
         """Extract linguistic indicators that suggest decomposition needs."""
-        
+
         indicators = {
             "title_keywords": [],
             "conjunction_count": 0,
             "multiple_entities": [],
             "workflow_indicators": [],
-            "scope_indicators": []
+            "scope_indicators": [],
         }
-        
+
         text_lower = requirement_text.lower()
-        
+
         # Title keywords suggesting multiple features
         title_keywords = ["and", "multiple", "various", "all", "comprehensive", "full", "complete"]
         indicators["title_keywords"] = [kw for kw in title_keywords if kw in text_lower]
-        
+
         # Count conjunctions
         conjunctions = ["and", "or", "also", "plus", "including", "with"]
         indicators["conjunction_count"] = sum(text_lower.count(conj) for conj in conjunctions)
-        
+
         # Multiple entity indicators
         entity_patterns = [
             r"\b(users?|customers?|admins?|managers?)\b.*\b(users?|customers?|admins?|managers?)\b",
             r"\b(create|read|update|delete)\b.*\b(create|read|update|delete)\b",
-            r"\b(view|edit|manage|configure)\b.*\b(view|edit|manage|configure)\b"
+            r"\b(view|edit|manage|configure)\b.*\b(view|edit|manage|configure)\b",
         ]
-        
+
         for pattern in entity_patterns:
             if re.search(pattern, text_lower):
                 indicators["multiple_entities"].append(pattern)
-        
+
         # Workflow indicators
         workflow_words = ["workflow", "process", "journey", "flow", "pipeline", "sequence"]
         indicators["workflow_indicators"] = [w for w in workflow_words if w in text_lower]
-        
+
         # Scope indicators
         scope_words = ["system", "platform", "framework", "suite", "solution", "application"]
         indicators["scope_indicators"] = [w for w in scope_words if w in text_lower]
-        
+
         return indicators
+
 
 class DecompositionStrategy:
     """Strategies for different types of requirement decomposition."""
-    
+
     STRATEGIES = {
         "feature_based": {
             "description": "Decompose by distinct features/capabilities",
             "suitable_for": ["FUNC", "BUS"],
-            "indicators": ["multiple user actions", "different screens/interfaces"]
+            "indicators": ["multiple user actions", "different screens/interfaces"],
         },
         "user_journey": {
             "description": "Decompose by user journey stages",
             "suitable_for": ["FUNC", "BUS"],
-            "indicators": ["workflow", "process", "journey", "sequence"]
+            "indicators": ["workflow", "process", "journey", "sequence"],
         },
         "technical_layer": {
             "description": "Decompose by technical architecture layers",
             "suitable_for": ["TECH", "NFUNC"],
-            "indicators": ["system components", "integration points", "APIs"]
+            "indicators": ["system components", "integration points", "APIs"],
         },
         "stakeholder_based": {
             "description": "Decompose by different user roles/stakeholders",
             "suitable_for": ["FUNC", "BUS", "INTF"],
-            "indicators": ["multiple user types", "different permissions", "role-based"]
+            "indicators": ["multiple user types", "different permissions", "role-based"],
         },
         "implementation_phase": {
             "description": "Decompose by implementation/delivery phases",
             "suitable_for": ["FUNC", "TECH", "BUS"],
-            "indicators": ["MVP", "phases", "iterations", "releases"]
-        }
+            "indicators": ["MVP", "phases", "iterations", "releases"],
+        },
     }
-    
+
     @classmethod
     def recommend_strategy(cls, requirement_data: Dict[str, Any]) -> List[str]:
         """Recommend decomposition strategies based on requirement characteristics."""
-        
-        req_type = requirement_data.get('type', '')
-        title = requirement_data.get('title', '').lower()
-        functional_reqs = requirement_data.get('functional_requirements', '')
-        
+
+        req_type = requirement_data.get("type", "")
+        title = requirement_data.get("title", "").lower()
+        functional_reqs = requirement_data.get("functional_requirements", "")
+
         recommended = []
-        
+
         for strategy, details in cls.STRATEGIES.items():
             if req_type in details["suitable_for"]:
                 # Check if indicators are present
-                if any(indicator in title or indicator in functional_reqs.lower() 
-                       for indicator in details["indicators"]):
+                if any(
+                    indicator in title or indicator in functional_reqs.lower() for indicator in details["indicators"]
+                ):
                     recommended.append(strategy)
-        
+
         return recommended if recommended else ["feature_based"]  # Default strategy

@@ -168,8 +168,8 @@ class GitHubUtils:
             if process.returncode == 0:
                 issue_data = json.loads(stdout.decode())
                 # Add sync metadata
-                issue_data['sync_timestamp'] = datetime.now(timezone.utc).isoformat()
-                issue_data['etag'] = GitHubUtils._generate_etag(issue_data)
+                issue_data["sync_timestamp"] = datetime.now(timezone.utc).isoformat()
+                issue_data["etag"] = GitHubUtils._generate_etag(issue_data)
                 return issue_data
             else:
                 print(f"Error retrieving GitHub issue: {stderr.decode()}")
@@ -272,14 +272,14 @@ class GitHubUtils:
             if not force_sync and last_sync and github_updated:
                 try:
                     # Ensure both datetimes are timezone-aware for comparison
-                    last_sync_dt = datetime.fromisoformat(last_sync.replace('Z', '+00:00'))
+                    last_sync_dt = datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
                     if last_sync_dt.tzinfo is None:
                         last_sync_dt = last_sync_dt.replace(tzinfo=timezone.utc)
-                    
-                    github_updated_dt = datetime.fromisoformat(github_updated.replace('Z', '+00:00'))
+
+                    github_updated_dt = datetime.fromisoformat(github_updated.replace("Z", "+00:00"))
                     if github_updated_dt.tzinfo is None:
                         github_updated_dt = github_updated_dt.replace(tzinfo=timezone.utc)
-                    
+
                     if github_updated_dt <= last_sync_dt:
                         return True, "Already in sync", github_issue
                 except ValueError:

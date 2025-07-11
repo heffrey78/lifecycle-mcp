@@ -4,9 +4,9 @@ Task Handler for MCP Lifecycle Management Server
 Handles all task-related operations
 """
 
-from datetime import datetime
-from typing import Any, Dict, List
-
+import json
+from datetime import datetime, timezone
+from typing import List, Dict, Any
 from mcp.types import TextContent
 
 from ..github_utils import GitHubUtils
@@ -213,8 +213,8 @@ class TaskHandler(BaseHandler):
                             github_data = {
                                 "github_issue_number": issue_number,
                                 "github_issue_url": github_url,
-                                "github_last_sync": datetime.now().isoformat(),
-                                "github_etag": github_issue.get("etag") if github_issue else None,
+                                "github_last_sync": datetime.now(timezone.utc).isoformat(),
+                                "github_etag": github_issue.get('etag') if github_issue else None
                             }
 
                             self.db.update_record("tasks", github_data, "id = ?", [task_id])
@@ -455,8 +455,8 @@ class TaskHandler(BaseHandler):
                         "tasks",
                         {
                             "status": new_status,
-                            "github_last_sync": datetime.now().isoformat(),
-                            "github_etag": github_issue.get("etag"),
+                            "github_last_sync": datetime.now(timezone.utc).isoformat(),
+                            "github_etag": github_issue.get('etag')
                         },
                         "id = ?",
                         [task_id],
@@ -533,8 +533,8 @@ class TaskHandler(BaseHandler):
                                 new_status = "In Progress"
 
                             update_data = {
-                                "github_last_sync": datetime.now().isoformat(),
-                                "github_etag": github_issue.get("etag"),
+                                "github_last_sync": datetime.now(timezone.utc).isoformat(),
+                                "github_etag": github_issue.get('etag')
                             }
 
                             if new_status:
@@ -612,13 +612,13 @@ class TaskHandler(BaseHandler):
             report = f"""# Task Details: {task["id"]}
 
 ## Basic Information
-- **Title**: {task["title"]}
-- **Status**: {task["status"]}
-- **Priority**: {task["priority"]}
-- **Effort**: {task["effort"] or "Not specified"}
-- **Assignee**: {task["assignee"] or "Unassigned"}
-- **Created**: {task["created_at"]}
-- **Updated**: {task["updated_at"]}
+- **Title**: {task['title']}
+- **Status**: {task['status']}
+- **Priority**: {task['priority']}
+- **Effort**: {task['effort'] or 'Not specified'}
+- **Assignee**: {task['assignee'] or 'Unassigned'}
+- **Created**: {task['created_at']}
+- **Updated**: {task['updated_at']}""" + (f"\n- **GitHub Issue**: #{task['github_issue_number']} - {task['github_issue_url']}" if task['github_issue_number'] else "") + f"""
 
 ## Description
 {task["user_story"] or "No user story provided"}

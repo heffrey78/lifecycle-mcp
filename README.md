@@ -26,7 +26,7 @@ pip install -e .
 cd /path/to/your/project
 
 # 4. Add the MCP server to Claude
-claude mcp add lifecycle lifecycle-mcp -e LIFECYCLE_DB=./lifecycle.db
+claude mcp add lifecycle lifecycle-mcp -e LIFECYCLE_DB=/path/to/your/project/lifecycle.db
 
 # 5. Start using lifecycle tools in Claude!
 ```

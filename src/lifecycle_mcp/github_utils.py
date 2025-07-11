@@ -290,7 +290,7 @@ class GitHubUtils:
 
             # Check state conflicts
             task_status = task_data.get("status", "")
-            github_state = github_issue.get("state", "")
+            github_state = github_issue.get("state", "").lower()
 
             task_is_complete = task_status == "Complete"
             github_is_closed = github_state == "closed"
@@ -299,11 +299,12 @@ class GitHubUtils:
                 conflicts.append(f"Status mismatch: Task={task_status}, GitHub={github_state}")
 
             # Check assignee conflicts
-            task_assignee = task_data.get("assignee", "")
+            task_assignee = task_data.get("assignee") or ""
             github_assignees = [a.get("login", "") for a in github_issue.get("assignees", [])]
             github_assignee = github_assignees[0] if github_assignees else ""
 
-            if task_assignee != github_assignee:
+            # Only report assignee conflicts if there's an actual difference (not None vs "")
+            if task_assignee != github_assignee and not (not task_assignee and not github_assignee):
                 conflicts.append(f"Assignee mismatch: Task={task_assignee}, GitHub={github_assignee}")
 
             if conflicts:

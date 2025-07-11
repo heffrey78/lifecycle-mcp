@@ -130,6 +130,8 @@ dmypy.json
 
 # Database files
 *.db
+*s.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 

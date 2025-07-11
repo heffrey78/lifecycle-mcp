@@ -104,7 +104,10 @@ class TaskHandler(BaseHandler):
             elif tool_name == "get_task_details":
                 return self._get_task_details(**arguments)
             elif tool_name == "sync_task_from_github":
-                return await self._sync_from_github(arguments.get("task_id", ""))
+                task_id = arguments.get("task_id", "")
+                if not task_id:
+                    return self._create_error_response("task_id parameter required")
+                return await self._sync_from_github(task_id)
             elif tool_name == "bulk_sync_github_tasks":
                 return await self._bulk_sync_with_github(**arguments)
             else:
@@ -428,13 +431,14 @@ class TaskHandler(BaseHandler):
                 force_sync=False,  # task is already a dict
             )
 
-            if not success:
-                return self._create_error_response(f"GitHub sync failed: {sync_message}")
-
-            # If conflicts detected, return them for user resolution
-            if "conflicts detected" in sync_message.lower():
+            # Handle conflicts as warnings, not errors
+            if not success and "conflicts detected" in sync_message.lower():
                 key_info = f"Sync conflicts for task {task_id}"
                 return self._create_above_fold_response("WARNING", key_info, sync_message)
+
+            # Handle other failures as errors
+            if not success:
+                return self._create_error_response(f"GitHub sync failed: {sync_message}")
 
             # Apply GitHub changes to local task if needed
             updates_applied = []

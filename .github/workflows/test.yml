@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 env:
   PYTHON_VERSION: "3.12"
 
@@ -67,13 +72,34 @@ jobs:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       if: always()
     
-    - name: Generate coverage report comment
-      if: github.event_name == 'pull_request' && always()
+    - name: Generate coverage report comment (Linux only)
+      if: github.event_name == 'pull_request' && always() && runner.os == 'Linux'
       uses: py-cov-action/python-coverage-comment-action@v3
       with:
         GITHUB_TOKEN: ${{ github.token }}
         MINIMUM_GREEN: 50
         MINIMUM_ORANGE: 40
+    
+    - name: Generate coverage summary for macOS/Windows
+      if: github.event_name == 'pull_request' && always() && runner.os != 'Linux'
+      uses: irongut/CodeCoverageSummary@v1.3.0
+      with:
+        filename: coverage.xml
+        badge: true
+        fail_below_min: true
+        format: markdown
+        hide_branch_rate: false
+        hide_complexity: true
+        indicators: true
+        output: both
+        thresholds: '40 50'
+    
+    - name: Add coverage PR comment (macOS/Windows)
+      if: github.event_name == 'pull_request' && always() && runner.os != 'Linux'
+      uses: marocchino/sticky-pull-request-comment@v2
+      with:
+        recreate: true
+        path: code-coverage-results.md
     
     - name: Store test results
       if: always()

@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 env:
   PYTHON_VERSION: "3.12"
 
@@ -50,6 +55,7 @@ jobs:
         mypy src --ignore-missing-imports --no-strict-optional || true
     
     - name: Run tests with coverage
+      id: test
       run: |
         python -m pytest tests/ --deselect=tests/test_property_based.py --deselect=tests/test_performance_benchmarks.py --cov=src/lifecycle_mcp --cov-report=xml --cov-report=html --cov-report=term --cov-fail-under=50
       env:
@@ -67,13 +73,44 @@ jobs:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       if: always()
     
-    - name: Generate coverage report comment
-      if: github.event_name == 'pull_request' && always()
+    - name: Generate coverage report comment (Linux only)
+      if: github.event_name == 'pull_request' && steps.test.outcome == 'success' && runner.os == 'Linux'
       uses: py-cov-action/python-coverage-comment-action@v3
       with:
         GITHUB_TOKEN: ${{ github.token }}
         MINIMUM_GREEN: 50
         MINIMUM_ORANGE: 40
+      continue-on-error: true
+    
+    - name: Generate coverage summary for macOS/Windows
+      id: coverage
+      if: github.event_name == 'pull_request' && always() && runner.os != 'Linux'
+      uses: irongut/CodeCoverageSummary@v1.3.0
+      with:
+        filename: coverage.xml
+        badge: true
+        fail_below_min: false
+        format: markdown
+        hide_branch_rate: false
+        hide_complexity: true
+        indicators: true
+        output: both
+        thresholds: '40 50'
+      continue-on-error: true
+    
+    - name: Add coverage PR comment (macOS/Windows)
+      if: github.event_name == 'pull_request' && always() && runner.os != 'Linux'
+      uses: marocchino/sticky-pull-request-comment@v2
+      with:
+        recreate: true
+        message: |
+          ## Coverage Report (${{ runner.os }})
+          
+          Coverage analysis completed on ${{ runner.os }} runner.
+          
+          ${{ steps.coverage.outcome == 'success' && 'Coverage report generated successfully.' || 'Coverage data not available - tests may not have run completely.' }}
+          
+          Please check the full coverage report in the build artifacts.
     
     - name: Store test results
       if: always()

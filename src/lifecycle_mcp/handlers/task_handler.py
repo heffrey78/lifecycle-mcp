@@ -4,7 +4,7 @@ Task Handler for MCP Lifecycle Management Server
 Handles all task-related operations
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from mcp.types import TextContent
@@ -104,7 +104,10 @@ class TaskHandler(BaseHandler):
             elif tool_name == "get_task_details":
                 return self._get_task_details(**arguments)
             elif tool_name == "sync_task_from_github":
-                return await self._sync_from_github(arguments.get("task_id", ""))
+                task_id = arguments.get("task_id", "")
+                if not task_id:
+                    return self._create_error_response("task_id parameter required")
+                return await self._sync_from_github(task_id)
             elif tool_name == "bulk_sync_github_tasks":
                 return await self._bulk_sync_with_github(**arguments)
             else:
@@ -213,7 +216,7 @@ class TaskHandler(BaseHandler):
                             github_data = {
                                 "github_issue_number": issue_number,
                                 "github_issue_url": github_url,
-                                "github_last_sync": datetime.now().isoformat(),
+                                "github_last_sync": datetime.now(timezone.utc).isoformat(),
                                 "github_etag": github_issue.get("etag") if github_issue else None,
                             }
 
@@ -428,13 +431,14 @@ class TaskHandler(BaseHandler):
                 force_sync=False,  # task is already a dict
             )
 
-            if not success:
-                return self._create_error_response(f"GitHub sync failed: {sync_message}")
-
-            # If conflicts detected, return them for user resolution
-            if "conflicts detected" in sync_message.lower():
+            # Handle conflicts as warnings, not errors
+            if not success and "conflicts detected" in sync_message.lower():
                 key_info = f"Sync conflicts for task {task_id}"
                 return self._create_above_fold_response("WARNING", key_info, sync_message)
+
+            # Handle other failures as errors
+            if not success:
+                return self._create_error_response(f"GitHub sync failed: {sync_message}")
 
             # Apply GitHub changes to local task if needed
             updates_applied = []
@@ -455,7 +459,7 @@ class TaskHandler(BaseHandler):
                         "tasks",
                         {
                             "status": new_status,
-                            "github_last_sync": datetime.now().isoformat(),
+                            "github_last_sync": datetime.now(timezone.utc).isoformat(),
                             "github_etag": github_issue.get("etag"),
                         },
                         "id = ?",
@@ -533,7 +537,7 @@ class TaskHandler(BaseHandler):
                                 new_status = "In Progress"
 
                             update_data = {
-                                "github_last_sync": datetime.now().isoformat(),
+                                "github_last_sync": datetime.now(timezone.utc).isoformat(),
                                 "github_etag": github_issue.get("etag"),
                             }
 
@@ -609,7 +613,7 @@ class TaskHandler(BaseHandler):
             task = dict(tasks[0])  # Convert Row to dict for .get() method
 
             # Build report
-            report = f"""# Task Details: {task["id"]}
+            task_info = f"""# Task Details: {task["id"]}
 
 ## Basic Information
 - **Title**: {task["title"]}
@@ -618,7 +622,12 @@ class TaskHandler(BaseHandler):
 - **Effort**: {task["effort"] or "Not specified"}
 - **Assignee**: {task["assignee"] or "Unassigned"}
 - **Created**: {task["created_at"]}
-- **Updated**: {task["updated_at"]}
+- **Updated**: {task["updated_at"]}"""
+
+            if task["github_issue_number"]:
+                task_info += f"\n- **GitHub Issue**: #{task['github_issue_number']} - {task['github_issue_url']}"
+
+            task_info += f"""
 
 ## Description
 {task["user_story"] or "No user story provided"}
@@ -630,11 +639,11 @@ class TaskHandler(BaseHandler):
                 criteria = self._safe_json_loads(task["acceptance_criteria"])
                 if criteria:
                     for criterion in criteria:
-                        report += f"- {criterion}\n"
+                        task_info += f"- {criterion}\n"
                 else:
-                    report += "No acceptance criteria defined\n"
+                    task_info += "No acceptance criteria defined\n"
             else:
-                report += "No acceptance criteria defined\n"
+                task_info += "No acceptance criteria defined\n"
 
             # Get linked requirements
             requirements = self.db.execute_query(
@@ -649,9 +658,9 @@ class TaskHandler(BaseHandler):
             )
 
             if requirements:
-                report += f"\n## Linked Requirements ({len(requirements)})\n"
+                task_info += f"\n## Linked Requirements ({len(requirements)})\n"
                 for req in requirements:
-                    report += f"- {req['id']}: {req['title']}\n"
+                    task_info += f"- {req['id']}: {req['title']}\n"
 
             # Get subtasks if this is a parent task
             subtasks = self.db.get_records(
@@ -659,9 +668,9 @@ class TaskHandler(BaseHandler):
             )
 
             if subtasks:
-                report += f"\n## Subtasks ({len(subtasks)})\n"
+                task_info += f"\n## Subtasks ({len(subtasks)})\n"
                 for subtask in subtasks:
-                    report += f"- {subtask['id']}: {subtask['title']} [{subtask['status']}]\n"
+                    task_info += f"- {subtask['id']}: {subtask['title']} [{subtask['status']}]\n"
 
             # Show parent task if this is a subtask
             if task["parent_task_id"]:
@@ -669,8 +678,8 @@ class TaskHandler(BaseHandler):
 
                 if parent_tasks:
                     parent = dict(parent_tasks[0])  # Convert Row to dict for consistency
-                    report += "\n## Parent Task\n"
-                    report += f"- {parent['id']}: {parent['title']} [{parent['status']}]\n"
+                    task_info += "\n## Parent Task\n"
+                    task_info += f"- {parent['id']}: {parent['title']} [{parent['status']}]\n"
 
             # Create above-the-fold summary
             key_info = self._format_status_summary("Task", task["id"], task["status"])
@@ -678,7 +687,7 @@ class TaskHandler(BaseHandler):
             if task["assignee"]:
                 action_info += f" | 👤 {task['assignee']}"
 
-            return self._create_above_fold_response("INFO", key_info, action_info, report)
+            return self._create_above_fold_response("INFO", key_info, action_info, task_info)
 
         except Exception as e:
             return self._create_error_response("Failed to get task details", e)

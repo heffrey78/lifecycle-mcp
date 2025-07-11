@@ -11,8 +11,10 @@ def apply_github_integration_migration(db_path: str) -> bool:
     """
     Apply migration to add GitHub integration fields to tasks table
 
+
     Args:
         db_path: Path to the SQLite database
+
 
     Returns:
         True if migration was applied successfully, False otherwise
@@ -20,12 +22,6 @@ def apply_github_integration_migration(db_path: str) -> bool:
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-
-        # First check if tasks table exists
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'")
-        if not cursor.fetchone():
-            print("Tasks table does not exist yet, skipping GitHub integration migration")
-            return True
 
         # Check if github_issue_number column already exists
         cursor.execute("PRAGMA table_info(tasks)")
@@ -117,8 +113,10 @@ def apply_github_sync_metadata_migration(db_path: str) -> bool:
     """
     Apply migration to add GitHub sync metadata fields to tasks table
 
+
     Args:
         db_path: Path to the SQLite database
+
 
     Returns:
         True if migration was applied successfully, False otherwise
@@ -126,12 +124,6 @@ def apply_github_sync_metadata_migration(db_path: str) -> bool:
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-
-        # First check if tasks table exists
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'")
-        if not cursor.fetchone():
-            print("Tasks table does not exist yet, skipping GitHub sync metadata migration")
-            return True
 
         # Check if github_etag column already exists
         cursor.execute("PRAGMA table_info(tasks)")
@@ -157,6 +149,208 @@ def apply_github_sync_metadata_migration(db_path: str) -> bool:
             conn.close()
 
 
+def apply_decomposition_extension_migration(db_path: str) -> bool:
+    """
+    Apply migration to add requirement decomposition extensions
+
+    Args:
+        db_path: Path to the SQLite database
+
+    Returns:
+        True if migration was applied successfully, False otherwise
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # Check if decomposition_metadata column already exists
+        cursor.execute("PRAGMA table_info(requirements)")
+        columns = [column[1] for column in cursor.fetchall()]
+
+        if "decomposition_metadata" not in columns:
+            # Add decomposition-specific metadata to requirements table
+            # JSON for LLM analysis results
+            cursor.execute("ALTER TABLE requirements ADD COLUMN decomposition_metadata TEXT")
+            cursor.execute(
+                "ALTER TABLE requirements ADD COLUMN decomposition_source TEXT "
+                "CHECK (decomposition_source IN "
+                "('manual', 'llm_automatic', 'llm_suggested'))"
+            )
+            cursor.execute(
+                "ALTER TABLE requirements ADD COLUMN complexity_score INTEGER CHECK (complexity_score BETWEEN 1 AND 10)"
+            )
+            cursor.execute(
+                "ALTER TABLE requirements ADD COLUMN scope_assessment TEXT "
+                "CHECK (scope_assessment IN "
+                "('single_feature', 'multiple_features', 'complex_workflow', 'epic'))"
+            )
+            # Max 3 levels
+            cursor.execute(
+                "ALTER TABLE requirements ADD COLUMN decomposition_level INTEGER "
+                "DEFAULT 0 CHECK (decomposition_level BETWEEN 0 AND 3)"
+            )
+
+            # Create requirement hierarchy view
+            cursor.execute("""
+            CREATE VIEW IF NOT EXISTS requirement_hierarchy AS
+            WITH RECURSIVE requirement_tree AS (
+                -- Base case: top-level requirements (no parent)
+                SELECT
+                    r.id,
+                    r.title,
+                    r.status,
+                    r.priority,
+                    r.decomposition_level,
+                    r.complexity_score,
+                    r.scope_assessment,
+                    NULL as parent_requirement_id,
+                    0 as hierarchy_level,
+                    r.id as root_requirement_id,
+                    r.type || '-' || CAST(r.requirement_number AS TEXT) as path
+                FROM requirements r
+                WHERE r.id NOT IN (
+                    SELECT rd.requirement_id
+                    FROM requirement_dependencies rd
+                    WHERE rd.dependency_type = 'parent'
+                )
+
+                UNION ALL
+
+                -- Recursive case: child requirements
+                SELECT
+                    r.id,
+                    r.title,
+                    r.status,
+                    r.priority,
+                    r.decomposition_level,
+                    r.complexity_score,
+                    r.scope_assessment,
+                    rd.depends_on_requirement_id as parent_requirement_id,
+                    rt.hierarchy_level + 1,
+                    rt.root_requirement_id,
+                    rt.path || ' > ' || r.type || '-' || 
+                    CAST(r.requirement_number AS TEXT)
+                FROM requirements r
+                JOIN requirement_dependencies rd ON r.id = rd.requirement_id
+                JOIN requirement_tree rt ON rd.depends_on_requirement_id = rt.id
+                WHERE rd.dependency_type = 'parent' AND rt.hierarchy_level < 3
+            )
+            SELECT * FROM requirement_tree
+            """)
+
+            # Create decomposition candidates view
+            cursor.execute("""
+            CREATE VIEW IF NOT EXISTS decomposition_candidates AS
+            SELECT
+                r.id,
+                r.title,
+                r.status,
+                r.complexity_score,
+                r.scope_assessment,
+                r.decomposition_level,
+                (LENGTH(r.functional_requirements) - 
+                 LENGTH(REPLACE(r.functional_requirements, ',', '')) + 1) 
+                 as functional_req_count,
+                (LENGTH(r.acceptance_criteria) - 
+                 LENGTH(REPLACE(r.acceptance_criteria, ',', '')) + 1) 
+                 as acceptance_criteria_count,
+                CASE
+                    WHEN r.complexity_score >= 7 THEN 'High'
+                    WHEN r.complexity_score >= 5 THEN 'Medium'
+                    ELSE 'Low'
+                END as decomposition_priority
+            FROM requirements r
+            WHERE r.status IN ('Draft', 'Under Review')
+                AND r.decomposition_level < 3
+                AND (
+                    r.complexity_score >= 5
+                    OR r.scope_assessment IN 
+                    ('multiple_features', 'complex_workflow', 'epic')
+                    OR (LENGTH(r.functional_requirements) - 
+                        LENGTH(REPLACE(r.functional_requirements, ',', '')) + 1) > 5
+                )
+            """)
+
+            # Add indexes for decomposition queries
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_requirement_dependencies_parent "
+                "ON requirement_dependencies(depends_on_requirement_id, dependency_type)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_requirements_decomposition "
+                "ON requirements(decomposition_level, complexity_score, scope_assessment)"
+            )
+
+            # Add triggers for decomposition validation
+            cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS validate_decomposition_level
+            BEFORE INSERT ON requirement_dependencies
+            WHEN NEW.dependency_type = 'parent'
+            BEGIN
+                SELECT CASE
+                    WHEN (
+                        SELECT decomposition_level
+                        FROM requirements
+                        WHERE id = NEW.depends_on_requirement_id
+                    ) >= 3
+                    THEN RAISE(ABORT, 'Maximum decomposition depth of 3 levels exceeded')
+                END;
+            END
+            """)
+
+            cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS set_decomposition_level
+            AFTER INSERT ON requirement_dependencies
+            WHEN NEW.dependency_type = 'parent'
+            BEGIN
+                UPDATE requirements
+                SET decomposition_level = (
+                    SELECT COALESCE(parent_req.decomposition_level, 0) + 1
+                    FROM requirements parent_req
+                    WHERE parent_req.id = NEW.depends_on_requirement_id
+                )
+                WHERE id = NEW.requirement_id;
+            END
+            """)
+
+            cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS prevent_circular_dependencies
+            BEFORE INSERT ON requirement_dependencies
+            WHEN NEW.dependency_type = 'parent'
+            BEGIN
+                SELECT CASE
+                    WHEN EXISTS (
+                        WITH RECURSIVE circular_check AS (
+                            SELECT NEW.depends_on_requirement_id as ancestor_id
+                            UNION ALL
+                            SELECT rd.depends_on_requirement_id
+                            FROM requirement_dependencies rd
+                            JOIN circular_check cc ON rd.requirement_id = cc.ancestor_id
+                            WHERE rd.dependency_type = 'parent'
+                        )
+                        SELECT 1 FROM circular_check 
+                        WHERE ancestor_id = NEW.requirement_id
+                    )
+                    THEN RAISE(ABORT, 'Circular dependency detected in parent-child relationship')
+                END;
+            END
+            """)
+
+            conn.commit()
+            print("Decomposition extension migration applied successfully")
+            return True
+        else:
+            print("Decomposition extension migration already applied")
+            return True
+
+    except Exception as e:
+        print(f"Error applying decomposition extension migration: {e}")
+        return False
+    finally:
+        if "conn" in locals():
+            conn.close()
+
+
 def apply_all_migrations(db_path: str) -> bool:
     """Apply all pending migrations to the database"""
     current_version = get_schema_version(db_path)
@@ -164,6 +358,7 @@ def apply_all_migrations(db_path: str) -> bool:
     migrations = [
         (1, "GitHub integration fields", apply_github_integration_migration),
         (2, "GitHub sync metadata fields", apply_github_sync_metadata_migration),
+        (3, "Requirement decomposition extension", apply_decomposition_extension_migration),
     ]
 
     for version, description, migration_func in migrations:

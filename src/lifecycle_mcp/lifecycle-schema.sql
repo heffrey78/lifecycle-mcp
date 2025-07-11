@@ -2,7 +2,7 @@
 -- Designed for MCP server integration with Claude Code and human interfaces
 
 -- Requirements table - the source of truth for what needs to be built
-CREATE TABLE requirements (
+CREATE TABLE IF NOT EXISTS requirements (
     id TEXT PRIMARY KEY, -- REQ-XXXX-TYPE-VV format
     requirement_number INTEGER NOT NULL, -- XXXX part for queries
     type TEXT NOT NULL CHECK (type IN ('FUNC', 'NFUNC', 'TECH', 'BUS', 'INTF')),
@@ -44,7 +44,7 @@ CREATE TABLE requirements (
 );
 
 -- Tasks table - implementation work items
-CREATE TABLE tasks (
+CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY, -- TASK-XXXX-YY-ZZ format
     task_number INTEGER NOT NULL, -- XXXX part
     subtask_number INTEGER NOT NULL DEFAULT 0, -- YY part
@@ -82,7 +82,7 @@ CREATE TABLE tasks (
 );
 
 -- Architecture artifacts
-CREATE TABLE architecture (
+CREATE TABLE IF NOT EXISTS architecture (
     id TEXT PRIMARY KEY, -- ADR-XXXX or TDD-XXXX-Component-VV
     type TEXT NOT NULL CHECK (type IN ('ADR', 'TDD', 'INTG')),
     title TEXT NOT NULL,
@@ -117,28 +117,28 @@ CREATE TABLE architecture (
 );
 
 -- Link tables for many-to-many relationships
-CREATE TABLE requirement_tasks (
+CREATE TABLE IF NOT EXISTS requirement_tasks (
     requirement_id TEXT NOT NULL REFERENCES requirements(id),
     task_id TEXT NOT NULL REFERENCES tasks(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (requirement_id, task_id)
 );
 
-CREATE TABLE requirement_architecture (
+CREATE TABLE IF NOT EXISTS requirement_architecture (
     requirement_id TEXT NOT NULL REFERENCES requirements(id),
     architecture_id TEXT NOT NULL REFERENCES architecture(id),
     relationship_type TEXT, -- 'addresses', 'modifies', 'implements'
     PRIMARY KEY (requirement_id, architecture_id)
 );
 
-CREATE TABLE task_dependencies (
+CREATE TABLE IF NOT EXISTS task_dependencies (
     task_id TEXT NOT NULL REFERENCES tasks(id),
     depends_on_task_id TEXT NOT NULL REFERENCES tasks(id),
     dependency_type TEXT CHECK (dependency_type IN ('blocks', 'informs', 'requires')),
     PRIMARY KEY (task_id, depends_on_task_id)
 );
 
-CREATE TABLE requirement_dependencies (
+CREATE TABLE IF NOT EXISTS requirement_dependencies (
     requirement_id TEXT NOT NULL REFERENCES requirements(id),
     depends_on_requirement_id TEXT NOT NULL REFERENCES requirements(id),
     dependency_type TEXT, -- 'parent', 'refines', 'conflicts', 'relates'
@@ -146,7 +146,7 @@ CREATE TABLE requirement_dependencies (
 );
 
 -- Approvals tracking
-CREATE TABLE approvals (
+CREATE TABLE IF NOT EXISTS approvals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     entity_type TEXT NOT NULL CHECK (entity_type IN ('requirement', 'architecture')),
     entity_id TEXT NOT NULL,
@@ -158,7 +158,7 @@ CREATE TABLE approvals (
 );
 
 -- Review comments and discussions
-CREATE TABLE reviews (
+CREATE TABLE IF NOT EXISTS reviews (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     entity_type TEXT NOT NULL CHECK (entity_type IN ('requirement', 'task', 'architecture')),
     entity_id TEXT NOT NULL,
@@ -169,7 +169,7 @@ CREATE TABLE reviews (
 );
 
 -- Metrics and monitoring
-CREATE TABLE lifecycle_events (
+CREATE TABLE IF NOT EXISTS lifecycle_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     entity_type TEXT NOT NULL,
     entity_id TEXT NOT NULL,
@@ -181,7 +181,7 @@ CREATE TABLE lifecycle_events (
 );
 
 -- Views for common queries
-CREATE VIEW requirement_progress AS
+CREATE VIEW IF NOT EXISTS requirement_progress AS
 SELECT 
     r.id,
     r.title,
@@ -200,7 +200,7 @@ LEFT JOIN architecture a ON ra.architecture_id = a.id
 WHERE r.status != 'Deprecated'
 GROUP BY r.id;
 
-CREATE VIEW task_hierarchy AS
+CREATE VIEW IF NOT EXISTS task_hierarchy AS
 WITH RECURSIVE task_tree AS (
     -- Base case: top-level tasks
     SELECT 
@@ -228,7 +228,7 @@ WITH RECURSIVE task_tree AS (
 )
 SELECT * FROM task_tree;
 
-CREATE VIEW blocked_items AS
+CREATE VIEW IF NOT EXISTS blocked_items AS
 SELECT 
     'task' as item_type,
     t.id,
@@ -256,12 +256,12 @@ WHERE dr.status NOT IN ('Validated', 'Deprecated')
 GROUP BY r.id;
 
 -- Indexes for performance
-CREATE INDEX idx_requirements_status ON requirements(status);
-CREATE INDEX idx_requirements_priority ON requirements(priority);
-CREATE INDEX idx_tasks_status ON tasks(status);
-CREATE INDEX idx_tasks_assignee ON tasks(assignee);
-CREATE INDEX idx_lifecycle_events_entity ON lifecycle_events(entity_type, entity_id);
-CREATE INDEX idx_approvals_entity ON approvals(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_requirements_status ON requirements(status);
+CREATE INDEX IF NOT EXISTS idx_requirements_priority ON requirements(priority);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee);
+CREATE INDEX IF NOT EXISTS idx_lifecycle_events_entity ON lifecycle_events(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_approvals_entity ON approvals(entity_type, entity_id);
 
 -- Triggers for automatic updates
 CREATE TRIGGER update_requirement_timestamp 

@@ -37,7 +37,8 @@ async def test_github_integration():
         "priority": "P1",
         "current_state": "No GitHub integration",
         "desired_state": "GitHub integration working",
-        "author": "test@example.com"
+        "author": "test@example.com",
+        "status": "Approved"
     })
     
     print("Testing GitHub integration...")

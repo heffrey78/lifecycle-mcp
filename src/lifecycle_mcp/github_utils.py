@@ -7,7 +7,7 @@ Provides GitHub CLI integration for issue management
 import asyncio
 import json
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -168,7 +168,7 @@ class GitHubUtils:
             if process.returncode == 0:
                 issue_data = json.loads(stdout.decode())
                 # Add sync metadata
-                issue_data["sync_timestamp"] = datetime.now().isoformat()
+                issue_data["sync_timestamp"] = datetime.now(timezone.utc).isoformat()
                 issue_data["etag"] = GitHubUtils._generate_etag(issue_data)
                 return issue_data
             else:
@@ -271,8 +271,14 @@ class GitHubUtils:
 
             if not force_sync and last_sync and github_updated:
                 try:
+                    # Ensure both datetimes are timezone-aware for comparison
                     last_sync_dt = datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
+                    if last_sync_dt.tzinfo is None:
+                        last_sync_dt = last_sync_dt.replace(tzinfo=timezone.utc)
+
                     github_updated_dt = datetime.fromisoformat(github_updated.replace("Z", "+00:00"))
+                    if github_updated_dt.tzinfo is None:
+                        github_updated_dt = github_updated_dt.replace(tzinfo=timezone.utc)
 
                     if github_updated_dt <= last_sync_dt:
                         return True, "Already in sync", github_issue
@@ -284,7 +290,7 @@ class GitHubUtils:
 
             # Check state conflicts
             task_status = task_data.get("status", "")
-            github_state = github_issue.get("state", "")
+            github_state = github_issue.get("state", "").lower()
 
             task_is_complete = task_status == "Complete"
             github_is_closed = github_state == "closed"
@@ -293,11 +299,12 @@ class GitHubUtils:
                 conflicts.append(f"Status mismatch: Task={task_status}, GitHub={github_state}")
 
             # Check assignee conflicts
-            task_assignee = task_data.get("assignee", "")
+            task_assignee = task_data.get("assignee") or ""
             github_assignees = [a.get("login", "") for a in github_issue.get("assignees", [])]
             github_assignee = github_assignees[0] if github_assignees else ""
 
-            if task_assignee != github_assignee:
+            # Only report assignee conflicts if there's an actual difference (not None vs "")
+            if task_assignee != github_assignee and not (not task_assignee and not github_assignee):
                 conflicts.append(f"Assignee mismatch: Task={task_assignee}, GitHub={github_assignee}")
 
             if conflicts:

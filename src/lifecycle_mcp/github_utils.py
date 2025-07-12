@@ -209,9 +209,11 @@ class GitHubUtils:
 
                 # Update issue state (open/closed)
                 if "state" in updates:
-                    if updates["state"] == "closed" and current_issue["state"] == "open":
+                    current_state = current_issue["state"].lower()
+                    target_state = updates["state"].lower()
+                    if target_state == "closed" and current_state == "open":
                         success, error_msg = await GitHubUtils._close_issue(issue_number, updates.get("comment"))
-                    elif updates["state"] == "open" and current_issue["state"] == "closed":
+                    elif target_state == "open" and current_state == "closed":
                         success, error_msg = await GitHubUtils._reopen_issue(issue_number, updates.get("comment"))
 
                 # Update assignees

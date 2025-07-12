@@ -100,9 +100,9 @@ class TaskHandler(BaseHandler):
             elif tool_name == "update_task_status":
                 return await self._update_task_status(**arguments)
             elif tool_name == "query_tasks":
-                return self._query_tasks(**arguments)
+                return await self._query_tasks(**arguments)
             elif tool_name == "get_task_details":
-                return self._get_task_details(**arguments)
+                return await self._get_task_details(**arguments)
             elif tool_name == "sync_task_from_github":
                 task_id = arguments.get("task_id", "")
                 if not task_id:
@@ -344,8 +344,10 @@ class TaskHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to update task", e)
 
-    def _query_tasks(self, **params) -> List[TextContent]:
+    async def _query_tasks(self, **params) -> List[TextContent]:
         """Query tasks with filters"""
+        # DEBUG: Log when this method is actually called
+        print(f"DEBUG: _query_tasks called with params: {params}")
         try:
             where_clauses = []
             where_params = []
@@ -412,6 +414,8 @@ class TaskHandler(BaseHandler):
 
     async def _sync_from_github(self, task_id: str) -> List[TextContent]:
         """Sync task from GitHub issue changes"""
+        # DEBUG: Log when this method is actually called
+        print(f"DEBUG: _sync_from_github called with task_id: {task_id}")
         try:
             # Get current task with GitHub info
             tasks = self.db.get_records("tasks", "*", "id = ?", [task_id])
@@ -596,7 +600,7 @@ class TaskHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to bulk sync with GitHub", e)
 
-    def _get_task_details(self, **params) -> List[TextContent]:
+    async def _get_task_details(self, **params) -> List[TextContent]:
         """Get full task details"""
         # Validate required parameters
         error = self._validate_required_params(params, ["task_id"])

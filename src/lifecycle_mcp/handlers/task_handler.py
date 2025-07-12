@@ -303,10 +303,9 @@ class TaskHandler(BaseHandler):
                     if params.get("assignee") and params["assignee"] != current_task.get("assignee"):
                         github_updates["assignees"] = [params["assignee"]] if params["assignee"] else []
 
-                    # Use sync-safe update with current ETag
-                    current_etag = current_task.get("github_etag")
+                    # Use sync-safe update without ETag (force update from MCP side)
                     success, error_msg, updated_issue = await GitHubUtils.update_github_issue_safe(
-                        str(current_task["github_issue_number"]), github_updates, expected_etag=current_etag
+                        str(current_task["github_issue_number"]), github_updates, expected_etag=None
                     )
 
                     if success and updated_issue:

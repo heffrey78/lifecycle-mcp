@@ -24,12 +24,54 @@ pip install -e .
 
 #### With uv (Recommended)
 ```bash
+# Basic usage (GitHub integration disabled by default)
 uv run server.py
+
+# With GitHub integration enabled
+GITHUB_INTEGRATION_ENABLED=true GITHUB_TOKEN=your_token GITHUB_REPO=owner/repo uv run server.py
 ```
 
 #### With pip installation
 ```bash
+# Basic usage
 lifecycle-mcp
+
+# With GitHub integration
+GITHUB_INTEGRATION_ENABLED=true GITHUB_TOKEN=your_token GITHUB_REPO=owner/repo lifecycle-mcp
+```
+
+### Configuration
+
+The server supports flexible configuration via environment variables and config files. 
+
+📖 **[Complete Configuration Guide](CONFIGURATION.md)** - Comprehensive setup instructions, deployment scenarios, and troubleshooting
+
+**Automated Setup:**
+```bash
+# Interactive setup script
+./setup-github.sh
+```
+
+**Quick Manual Setup:**
+```bash
+# Disable GitHub integration (default, safe)
+export GITHUB_INTEGRATION_ENABLED=false
+
+# Enable GitHub integration with GitHub CLI
+export GITHUB_INTEGRATION_ENABLED=true
+export GITHUB_TOKEN=$(gh auth token)
+export GITHUB_REPO="owner/repository-name"
+```
+
+**Configuration Verification:**
+```bash
+# Test your configuration
+uv run python3 -c "
+from src.lifecycle_mcp.github_utils import GitHubUtils
+import asyncio
+health = asyncio.run(GitHubUtils.check_github_health())
+print('✅ Ready!' if not health['error_messages'] else 'Issues:', health['error_messages'])
+"
 ```
 
 ### Testing the Server

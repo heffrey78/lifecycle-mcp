@@ -21,6 +21,8 @@ from .handlers import (
     StatusHandler,
     TaskHandler,
 )
+from .config import config
+from .github_utils import GitHubUtils
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,9 @@ class LifecycleMCPServer:
 
     def __init__(self):
         """Initialize server with database manager and handlers"""
+        # Validate configuration on startup
+        self._validate_configuration()
+        
         # Initialize database manager
         self.db_manager = DatabaseManager()
 
@@ -139,6 +144,26 @@ class LifecycleMCPServer:
             except Exception as e:
                 logger.error(f"Error handling tool '{name}': {str(e)}")
                 return [TextContent(type="text", text=f"Error handling {name}: {str(e)}")]
+
+    def _validate_configuration(self):
+        """Validate server configuration on startup"""
+        logger.info("Validating server configuration...")
+        
+        # Validate GitHub configuration if enabled
+        if config.is_github_integration_enabled():
+            logger.info("GitHub integration is enabled, validating configuration...")
+            is_valid, errors = GitHubUtils.validate_github_configuration()
+            
+            if not is_valid:
+                error_msg = "GitHub configuration validation failed:\n" + "\n".join(f"  - {error}" for error in errors)
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            logger.info("GitHub configuration validation passed")
+        else:
+            logger.info("GitHub integration is disabled")
+        
+        logger.info("Configuration validation completed successfully")
 
     async def run(self):
         """Run the MCP server"""

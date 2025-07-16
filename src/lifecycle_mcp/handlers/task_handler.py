@@ -4,6 +4,7 @@ Task Handler for MCP Lifecycle Management Server
 Handles all task-related operations
 """
 
+import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
@@ -221,6 +222,26 @@ class TaskHandler(BaseHandler):
                             }
 
                             self.db.update_record("tasks", github_data, "id = ?", [task_id])
+                            
+                            # Link to parent GitHub issue if this is a subtask
+                            if params.get("parent_task_id"):
+                                try:
+                                    parent_info = self.db.get_records("tasks", "github_issue_number", "id = ?", [params["parent_task_id"]])
+                                    if parent_info and parent_info[0].get("github_issue_number"):
+                                        parent_issue_number = str(parent_info[0]["github_issue_number"])
+                                        
+                                        # Create parent-child relationship in GitHub
+                                        success, error_msg = await GitHubUtils.create_sub_issue_relationship(
+                                            parent_issue_number, issue_number
+                                        )
+                                        
+                                        if success:
+                                            self.logger.info(f"Created GitHub parent-child link: #{parent_issue_number} -> #{issue_number}")
+                                        else:
+                                            self.logger.warning(f"Failed to create GitHub parent-child link: {error_msg}")
+                                            
+                                except Exception as e:
+                                    self.logger.warning(f"Error linking parent-child GitHub issues: {e}")
                     else:
                         github_error = "GitHub issue creation returned no URL"
 
@@ -413,6 +434,13 @@ class TaskHandler(BaseHandler):
 
     async def _sync_from_github(self, task_id: str) -> List[TextContent]:
         """Sync task from GitHub issue changes"""
+        # Check if GitHub integration is available/enabled
+        if not GitHubUtils.is_github_available():
+            return self._create_above_fold_response(
+                "INFO", "GitHub integration is disabled",
+                "To enable GitHub sync, set GITHUB_INTEGRATION_ENABLED=true and configure GITHUB_TOKEN and GITHUB_REPO"
+            )
+        
         # DEBUG: Log when this method is actually called
         print(f"DEBUG: _sync_from_github called with task_id: {task_id}")
         try:
@@ -446,7 +474,10 @@ class TaskHandler(BaseHandler):
             # Apply GitHub changes to local task if needed
             updates_applied = []
 
-            if github_issue:
+            # Only apply updates if GitHub has newer data
+            should_apply_updates = "updates available" in sync_message.lower()
+
+            if github_issue and should_apply_updates:
                 # Map GitHub state to task status
                 github_state = github_issue.get("state", "")
                 current_status = task.get("status", "")
@@ -479,6 +510,50 @@ class TaskHandler(BaseHandler):
                     self.db.update_record("tasks", {"assignee": github_assignee}, "id = ?", [task_id])
                     updates_applied.append(f"Assignee: {current_assignee or 'None'} → {github_assignee or 'None'}")
 
+                # Update title if changed (extract from GitHub title, removing task ID prefix)
+                github_title = github_issue.get("title", "")
+                current_title = task.get("title", "")
+                
+                # Remove task ID prefix from GitHub title if present
+                if github_title.startswith(f"{task_id}: "):
+                    clean_github_title = github_title[len(f"{task_id}: "):].strip()
+                else:
+                    clean_github_title = github_title
+                
+                if clean_github_title and clean_github_title != current_title:
+                    self.db.update_record("tasks", {"title": clean_github_title}, "id = ?", [task_id])
+                    updates_applied.append(f"Title updated from GitHub")
+
+                # Update acceptance criteria if changed
+                github_body = github_issue.get("body", "")
+                if github_body:
+                    github_ac = GitHubUtils._parse_acceptance_criteria_from_body(github_body)
+                    
+                    if github_ac:
+                        current_ac_json = task.get("acceptance_criteria", "[]")
+                        try:
+                            current_ac = json.loads(current_ac_json) if current_ac_json else []
+                        except json.JSONDecodeError:
+                            current_ac = []
+                        
+                        if github_ac != current_ac:
+                            self.db.update_record(
+                                "tasks", 
+                                {"acceptance_criteria": json.dumps(github_ac)}, 
+                                "id = ?", 
+                                [task_id]
+                            )
+                            updates_applied.append(f"Acceptance criteria updated ({len(github_ac)} items)")
+
+                # Update the sync timestamp to mark that we've processed the GitHub changes
+                if updates_applied:
+                    self.db.update_record(
+                        "tasks",
+                        {"github_last_sync": datetime.now(timezone.utc).isoformat()},
+                        "id = ?",
+                        [task_id],
+                    )
+
             # Create response
             if updates_applied:
                 key_info = f"Task {task_id} synced from GitHub"
@@ -493,6 +568,13 @@ class TaskHandler(BaseHandler):
 
     async def _bulk_sync_with_github(self, **params) -> List[TextContent]:
         """Sync all tasks with GitHub issues"""
+        # Check if GitHub integration is available/enabled
+        if not GitHubUtils.is_github_available():
+            return self._create_above_fold_response(
+                "INFO", "GitHub integration is disabled", 
+                "To enable GitHub sync, set GITHUB_INTEGRATION_ENABLED=true and configure GITHUB_TOKEN and GITHUB_REPO"
+            )
+        
         try:
             # Get all tasks with GitHub issues
             tasks_with_github = self.db.get_records(
@@ -519,19 +601,20 @@ class TaskHandler(BaseHandler):
 
                     if not success:
                         if "conflicts detected" in sync_message.lower():
-                            conflicts_found.append(f"{task['id']}: {sync_message}")
+                            conflicts_found.append(f"{dict(task)['id']}: {sync_message}")
                         else:
-                            sync_results.append(f"❌ {task['id']}: {sync_message}")
+                            sync_results.append(f"❌ {dict(task)['id']}: {sync_message}")
                     elif "in sync" in sync_message.lower():
-                        sync_results.append(f"✅ {task['id']}: {sync_message}")
+                        sync_results.append(f"✅ {dict(task)['id']}: {sync_message}")
                     else:
                         # Apply updates if any changes detected
                         task_updates = []
+                        task_dict = dict(task)
 
                         if github_issue:
                             # Update status if changed
                             github_state = github_issue.get("state", "")
-                            current_status = task.get("status", "")
+                            current_status = task_dict.get("status", "")
 
                             new_status = None
                             if github_state == "closed" and current_status != "Complete":
@@ -551,7 +634,7 @@ class TaskHandler(BaseHandler):
                             # Update assignee if changed
                             github_assignees = [a.get("login", "") for a in github_issue.get("assignees", [])]
                             github_assignee = github_assignees[0] if github_assignees else None
-                            current_assignee = task.get("assignee")
+                            current_assignee = task_dict.get("assignee")
 
                             if github_assignee != current_assignee:
                                 update_data["assignee"] = github_assignee
@@ -560,27 +643,162 @@ class TaskHandler(BaseHandler):
                                 task_updates.append(f"Assignee: {from_assignee} → {to_assignee}")
 
                             if task_updates:
-                                self.db.update_record("tasks", update_data, "id = ?", [task["id"]])
-                                updates_applied.append(f"🔄 {task['id']}: {' | '.join(task_updates)}")
+                                self.db.update_record("tasks", update_data, "id = ?", [task_dict["id"]])
+                                updates_applied.append(f"🔄 {task_dict['id']}: {' | '.join(task_updates)}")
                             else:
-                                sync_results.append(f"✅ {task['id']}: Updated sync metadata")
+                                sync_results.append(f"✅ {task_dict['id']}: Updated sync metadata")
 
                 except Exception as e:
-                    sync_results.append(f"❌ {task['id']}: Error - {str(e)}")
+                    sync_results.append(f"❌ {dict(task)['id']}: Error - {str(e)}")
+
+            # Import missing GitHub issues as tasks
+            imported_issues = []
+            import_errors = []
+            
+            try:
+                # Fetch all repository issues
+                all_issues = await GitHubUtils.fetch_all_repository_issues(state="all")
+                
+                if all_issues:
+                    # Get existing task issue numbers to avoid duplicates
+                    existing_issues = {str(dict(task)["github_issue_number"]) for task in tasks_with_github if dict(task).get("github_issue_number")}
+                    
+                    # Find issues that don't have corresponding tasks
+                    missing_issues = [
+                        issue for issue in all_issues 
+                        if str(issue.get("number", "")) not in existing_issues
+                    ]
+                    
+                    # Import missing issues as tasks (limit to prevent overwhelming)
+                    for issue in missing_issues[:10]:  # Limit to 10 new issues per sync
+                        try:
+                            # Extract basic info from issue
+                            issue_number = issue.get("number")
+                            title = issue.get("title", f"GitHub Issue #{issue_number}")
+                            body = issue.get("body", "")
+                            state = issue.get("state", "open")
+                            
+                            # Determine task status from GitHub state
+                            task_status = "Complete" if state == "closed" else "Not Started"
+                            
+                            # Parse acceptance criteria from body
+                            acceptance_criteria = GitHubUtils._parse_acceptance_criteria_from_body(body)
+                            
+                            # Generate unique task ID
+                            task_number = self.db.get_next_sequence_number("tasks")
+                            task_id = f"TASK-{task_number:04d}-00-00"
+                            
+                            # Create task data
+                            task_data = {
+                                "id": task_id,
+                                "task_number": task_number,
+                                "version": "00-00",
+                                "title": title,
+                                "status": task_status,
+                                "priority": "P2",  # Default priority for imported issues
+                                "effort": "S",     # Default effort for imported issues
+                                "user_story": f"Imported from GitHub Issue #{issue_number}",
+                                "acceptance_criteria": json.dumps(acceptance_criteria),
+                                "github_issue_number": str(issue_number),
+                                "github_issue_url": issue.get("url", ""),
+                                "github_last_sync": datetime.now(timezone.utc).isoformat(),
+                                "github_etag": issue.get("etag", ""),
+                                "created_at": datetime.now(timezone.utc).isoformat(),
+                                "updated_at": datetime.now(timezone.utc).isoformat(),
+                            }
+                            
+                            # Insert task
+                            self.db.insert_record("tasks", task_data)
+                            imported_issues.append(f"✅ {task_id}: {title} (Issue #{issue_number})")
+                            
+                        except Exception as e:
+                            import_errors.append(f"❌ Issue #{issue.get('number', 'unknown')}: {str(e)}")
+                            
+            except Exception as e:
+                import_errors.append(f"❌ Issue import failed: {str(e)}")
+
+            # Sync from GitHub project board to lifecycle statuses
+            project_sync_results = []
+            project_sync_errors = []
+            project_updates_applied = []
+            
+            try:
+                project_updated_count, project_error_count, project_messages = await GitHubUtils.sync_from_project_board(
+                    [dict(task) for task in tasks_with_github]
+                )
+                
+                # Process status changes from project board
+                for message in project_messages:
+                    if isinstance(message, dict) and message.get("type") == "status_change":
+                        try:
+                            task_id = message["task_id"]
+                            current_status = message["current_status"]
+                            target_status = message["target_status"]
+                            project_status = message["project_status"]
+                            
+                            # Update task status in database
+                            update_data = {
+                                "status": target_status,
+                                "updated_at": datetime.now(timezone.utc).isoformat(),
+                                "github_last_sync": datetime.now(timezone.utc).isoformat()
+                            }
+                            
+                            self.db.update_record("tasks", update_data, "id = ?", [task_id])
+                            project_updates_applied.append(
+                                f"🔄 {task_id}: {current_status} → {target_status} (from project: {project_status})"
+                            )
+                            
+                        except Exception as e:
+                            project_sync_errors.append(f"❌ {task_id}: Failed to update status - {str(e)}")
+                    elif isinstance(message, str):
+                        project_sync_errors.append(message)
+                
+                if project_updates_applied:
+                    project_sync_results.append(f"✅ {len(project_updates_applied)} tasks updated from project board")
+                    
+            except Exception as e:
+                project_sync_errors.append(f"❌ Project board sync failed: {str(e)}")
 
             # Build summary
             total_tasks = len(tasks_with_github)
             updates_count = len(updates_applied)
             conflicts_count = len(conflicts_found)
+            imported_count = len(imported_issues)
+            project_updates_count = len(project_updates_applied)
 
             key_info = f"Synced {total_tasks} GitHub task(s)"
-            action_info = f"🔄 {updates_count} updated | ⚠️ {conflicts_count} conflicts"
+            action_info = f"🔄 {updates_count} updated | 📋 {project_updates_count} from project | ⚠️ {conflicts_count} conflicts | 📥 {imported_count} imported"
 
             # Build detailed report
             details = []
             if updates_applied:
-                details.append("## Updated Tasks")
+                details.append("## Updated Tasks (from GitHub issues)")
                 details.extend(updates_applied)
+                details.append("")
+
+            if project_updates_applied:
+                details.append("## Updated Tasks (from project board)")
+                details.extend(project_updates_applied)
+                details.append("")
+
+            if project_sync_results:
+                details.append("## Project Board Sync Results")
+                details.extend(project_sync_results)
+                details.append("")
+
+            if project_sync_errors:
+                details.append("## Project Board Sync Errors")
+                details.extend(project_sync_errors)
+                details.append("")
+
+            if imported_issues:
+                details.append("## Imported GitHub Issues")
+                details.extend(imported_issues)
+                details.append("")
+
+            if import_errors:
+                details.append("## Import Errors")
+                details.extend(import_errors)
                 details.append("")
 
             if conflicts_found:

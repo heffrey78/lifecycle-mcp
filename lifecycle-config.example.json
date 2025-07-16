@@ -1,0 +1,28 @@
+{
+  "_comment": "Lifecycle MCP Configuration File - Copy to lifecycle-config.json and customize",
+  
+  "github_integration_enabled": false,
+  "github_token": "your_github_token_here",
+  "github_repo": "owner/repository-name",
+  "github_project_id": "123456",
+  "github_project_type": "v2",
+  
+  "status_mappings": {
+    "Not Started": "Todo",
+    "In Progress": "In Progress",
+    "Blocked": "Blocked", 
+    "Complete": "Done",
+    "Abandoned": "Abandoned"
+  },
+  
+  "_environment_variables": {
+    "_comment": "These can also be set as environment variables:",
+    "GITHUB_INTEGRATION_ENABLED": "false|true",
+    "GITHUB_TOKEN": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "GITHUB_REPO": "owner/repository-name",
+    "GITHUB_PROJECT_ID": "123456",
+    "GITHUB_PROJECT_TYPE": "v1|v2",
+    "LIFECYCLE_DB": "path/to/lifecycle.db",
+    "LIFECYCLE_CONFIG_FILE": "path/to/config.json"
+  }
+}

@@ -7,6 +7,7 @@ A Model Context Protocol (MCP) server for comprehensive software lifecycle manag
 - **Requirements Management**: Create and manage software requirements with validation and lifecycle tracking
 - **Task Management**: Track implementation tasks with hierarchical structure and effort estimation
 - **Architecture Decisions**: Record ADRs (Architecture Decision Records) with full context
+- **GitHub Integration**: Automatic GitHub issue creation and bidirectional synchronization
 - **Project Dashboards**: Real-time project health metrics and status reporting
 - **Requirement Tracing**: Complete traceability from requirements through implementation
 - **State Validation**: Automatic validation of lifecycle state transitions
@@ -25,10 +26,13 @@ pip install -e .
 # 3. Go to any project where you want to use lifecycle management
 cd /path/to/your/project
 
-# 4. Add the MCP server to Claude
+# 4. Optional: Configure GitHub integration
+./setup-github.sh  # Interactive setup, or set environment variables manually
+
+# 5. Add the MCP server to Claude
 claude mcp add lifecycle lifecycle-mcp -e LIFECYCLE_DB=/path/to/your/project/lifecycle.db
 
-# 5. Start using lifecycle tools in Claude!
+# 6. Start using lifecycle tools in Claude!
 ```
 
 ## Installation Options
@@ -150,7 +154,7 @@ The server exposes 22 MCP tools across 6 handler modules for comprehensive lifec
 - `query_tasks` - Search and filter tasks
 - `get_task_details` - Get full task details with dependencies
 - `sync_task_from_github` - Sync individual task from GitHub issue changes
-- `bulk_sync_github_tasks` - Sync all tasks with their GitHub issues
+- `bulk_sync_github_tasks` - Sync all tasks with their GitHub issues and import missing GitHub issues as tasks
 - `create_architecture_decision` - Record architecture decisions (ADRs)
 - `update_architecture_status` - Update architecture decision status
 - `query_architecture_decisions` - Search and filter architecture decisions
@@ -301,11 +305,11 @@ Sync individual task from GitHub issue changes with conflict detection.
 **Returns:** Sync status and any updates applied from GitHub issue data.
 
 #### `bulk_sync_github_tasks`
-Sync all tasks with their GitHub issues in batch operation.
+Sync all tasks with their GitHub issues in batch operation and import missing GitHub issues as new tasks.
 
 **Parameters:** None
 
-**Returns:** Summary of sync operations performed across all tasks with GitHub issue links.
+**Returns:** Summary of sync operations performed across all tasks with GitHub issue links, plus any newly imported tasks from GitHub issues that didn't have corresponding lifecycle tasks.
 
 ### Architecture Management
 
@@ -553,9 +557,101 @@ The server maintains a comprehensive SQLite database with the following key enti
 - **Tasks**: `TASK-XXXX-YY-ZZ` (e.g., TASK-0001-00-00)
 - **Architecture**: `ADR-XXXX` (e.g., ADR-0001)
 
+## GitHub Integration
+
+This server includes optional GitHub integration that automatically creates GitHub issues for tasks and keeps them synchronized.
+
+### Quick Setup
+
+```bash
+# Option 1: Interactive setup (recommended)
+./setup-github.sh
+
+# Option 2: Manual setup
+export GITHUB_INTEGRATION_ENABLED=true
+export GITHUB_TOKEN=$(gh auth token)  # Requires GitHub CLI
+export GITHUB_REPO="your-username/your-repository"
+```
+
+### Configuration Options
+
+- **`GITHUB_INTEGRATION_ENABLED`**: Enable/disable GitHub integration (default: `false`)
+- **`GITHUB_TOKEN`**: GitHub personal access token (required when enabled)
+- **`GITHUB_REPO`**: Repository in `owner/name` format (required when enabled)
+- **`GITHUB_PROJECT_ID`**: GitHub project board ID (optional)
+- **`GITHUB_PROJECT_TYPE`**: Project type `v1` or `v2` (default: `v2`)
+
+### Features
+
+- ✅ **Automatic Issue Creation**: Tasks automatically create GitHub issues
+- ✅ **Bidirectional Sync**: Changes in GitHub sync back to lifecycle tasks
+- ✅ **Status Mapping**: Task statuses map to GitHub issue states and project columns
+- ✅ **Conflict Detection**: Identifies sync conflicts for manual resolution
+- ✅ **Safe by Default**: GitHub integration disabled unless explicitly configured
+
+### Verification
+
+Test your GitHub configuration:
+
+```bash
+uv run python3 -c "
+from src.lifecycle_mcp.github_utils import GitHubUtils
+import asyncio
+health = asyncio.run(GitHubUtils.check_github_health())
+print('✅ Ready!' if not health['error_messages'] else 'Issues:', health['error_messages'])
+"
+```
+
+📖 **[Complete GitHub Configuration Guide](CONFIGURATION.md)** - Detailed setup instructions, deployment scenarios, and troubleshooting.
+
+### GitHub Relationship Sync Utility
+
+For existing tasks with GitHub issues, you can sync parent-child relationships to create GitHub sub-issue links:
+
+```bash
+# Quick sync with automatic environment setup
+./sync-github-relationships.sh
+
+# Or run the Python script directly
+python sync_github_relationships.py
+
+# Preview what would be synced (dry run)
+./sync-github-relationships.sh --dry-run
+
+# Enable verbose logging
+./sync-github-relationships.sh --verbose
+```
+
+**What it does:**
+- Finds all tasks that have both a `parent_task_id` and a `github_issue_number`
+- Identifies parent tasks that also have GitHub issues
+- Creates GitHub sub-issue relationships using the GitHub GraphQL API
+- Provides detailed reporting of successes and failures
+
+**Prerequisites:**
+- GitHub CLI (`gh`) installed and authenticated
+- Repository must be a GitHub repository
+- GitHub integration must be enabled (script will attempt to auto-configure)
+- Tasks must already have GitHub issues created
+
+**Example output:**
+```
+Found 33 tasks with GitHub issue numbers
+Found 4 parent-child relationships to sync
+Sync completed: 4 successful, 0 failed
+
+✅ Successfully linked 4 parent-child relationships!
+```
+
 ## Environment Variables
 
 - `LIFECYCLE_DB`: Path to SQLite database file (default: "./lifecycle.db")
+- `LIFECYCLE_CONFIG_FILE`: Path to JSON configuration file (default: "./lifecycle-config.json")
+- `GITHUB_INTEGRATION_ENABLED`: Enable GitHub integration (default: `false`)
+- `GITHUB_TOKEN`: GitHub personal access token (required when GitHub enabled)
+- `GITHUB_REPO`: GitHub repository in owner/name format (required when GitHub enabled)
+- `GITHUB_PROJECT_ID`: GitHub project board ID (optional)
+- `GITHUB_PROJECT_TYPE`: GitHub project type - `v1` or `v2` (default: `v2`)
 
 ## Troubleshooting
 
@@ -571,8 +667,14 @@ This error typically occurs when there are async/await mismatches in the server 
    ```
 
 2. Re-add the MCP server:
+  a. Default, either with environment variables set or GitHub integration disabled:
    ```bash
    claude mcp add lifecycle lifecycle-mcp
+   ```
+
+  b. Using an .env file to set variables in support of GitHub integration:
+   ```bash
+   source .env && claude mcp add lifecycle lifecycle-mcp
    ```
 
 3. Check that the server starts without errors:

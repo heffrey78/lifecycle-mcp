@@ -172,6 +172,10 @@ class RequirementHandler(BaseHandler):
 
     async def _analyze_requirement_with_llm(self, params: dict[str, Any]) -> dict[str, Any] | None:
         """Analyze requirement using LLM sampling for decomposition"""
+        # Skip LLM analysis in test environments
+        if hasattr(self, '_testing_mode') and self._testing_mode:
+            return None
+
         if not self.mcp_client:
             self.logger.info("No MCP client available for sampling - using fallback requirement creation")
             return None

@@ -12,13 +12,14 @@ class TestRequirementHandler:
     def test_get_tool_definitions(self, requirement_handler):
         """Test that handler returns correct tool definitions"""
         tools = requirement_handler.get_tool_definitions()
-        assert len(tools) == 5
+        assert len(tools) == 6
 
         tool_names = [tool["name"] for tool in tools]
         expected_tools = [
             "create_requirement",
             "update_requirement_status",
             "query_requirements",
+            "query_requirements_json",
             "get_requirement_details",
             "trace_requirement",
         ]

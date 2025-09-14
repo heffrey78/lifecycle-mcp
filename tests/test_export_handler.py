@@ -81,7 +81,7 @@ class TestExportHandler:
             md_files = list(Path(temp_dir).glob("*.md"))
             content = ""
             for file in md_files:
-                with open(file, "r") as f:
+                with open(file) as f:
                     content += f.read()
 
             assert "Test Requirement" in content
@@ -113,7 +113,7 @@ class TestExportHandler:
             md_files = list(Path(temp_dir).glob("*.md"))
             content = ""
             for file in md_files:
-                with open(file, "r") as f:
+                with open(file) as f:
                     content += f.read()
 
             assert "Test Requirement" in content
@@ -152,7 +152,7 @@ class TestExportHandler:
             assert len(mmd_files) > 0
 
             # Verify Mermaid content
-            with open(mmd_files[0], "r") as f:
+            with open(mmd_files[0]) as f:
                 content = f.read()
                 assert "graph" in content or "flowchart" in content
                 assert "REQ-0001-FUNC-00" in content
@@ -185,7 +185,7 @@ class TestExportHandler:
 
             # Verify content includes task hierarchy
             mmd_files = list(Path(temp_dir).glob("*.mmd"))
-            with open(mmd_files[0], "r") as f:
+            with open(mmd_files[0]) as f:
                 content = f.read()
                 assert "TASK-0001-00-00" in content
                 assert "TASK-0001-01-00" in content
@@ -222,7 +222,7 @@ class TestExportHandler:
 
             # Verify comprehensive diagram
             mmd_files = list(Path(temp_dir).glob("*.mmd"))
-            with open(mmd_files[0], "r") as f:
+            with open(mmd_files[0]) as f:
                 content = f.read()
                 assert "REQ-0001-FUNC-00" in content
                 assert "TASK-0001-00-00" in content
@@ -252,7 +252,7 @@ class TestExportHandler:
 
             # Verify only specified requirement is included
             mmd_files = list(Path(temp_dir).glob("*.mmd"))
-            with open(mmd_files[0], "r") as f:
+            with open(mmd_files[0]) as f:
                 content = f.read()
                 assert "REQ-0001-FUNC-00" in content
                 assert "REQ-0002-FUNC-00" not in content
@@ -303,7 +303,7 @@ class TestExportHandler:
 
             # Verify markdown escaping
             md_files = list(Path(temp_dir).glob("*.md"))
-            with open(md_files[0], "r") as f:
+            with open(md_files[0]) as f:
                 content = f.read()
                 # Should handle special characters appropriately
                 assert "Test & Special" in content

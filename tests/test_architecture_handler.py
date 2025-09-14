@@ -12,13 +12,14 @@ class TestArchitectureHandler:
     def test_get_tool_definitions(self, architecture_handler):
         """Test that handler returns correct tool definitions"""
         tools = architecture_handler.get_tool_definitions()
-        assert len(tools) == 5
+        assert len(tools) == 6
 
         tool_names = [tool["name"] for tool in tools]
         expected_tools = [
             "create_architecture_decision",
             "update_architecture_status",
             "query_architecture_decisions",
+            "query_architecture_decisions_json",
             "get_architecture_details",
             "add_architecture_review",
         ]

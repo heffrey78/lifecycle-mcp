@@ -82,8 +82,8 @@ class TestMCPServerIntegration:
         assert server_instance.status_handler is not None
 
         # Verify all tools are registered
-        # Total number of MCP tools (including sync_task_from_github and bulk_sync_github_tasks)
-        expected_tool_count = 23
+        # Total number of MCP tools including relationship handler and new JSON query tools
+        expected_tool_count = 32
         assert len(server_instance.handlers) == expected_tool_count
 
     @pytest.mark.asyncio
@@ -300,7 +300,7 @@ class TestMCPServerIntegration:
             # At least one file should contain project documentation
             file_contents = []
             for filepath in created_files:
-                with open(filepath, "r") as f:
+                with open(filepath) as f:
                     file_contents.append(f.read())
 
             all_content = "\n".join(file_contents)

@@ -59,7 +59,7 @@ def temp_db():
 
         conn = sqlite3.connect(db_path)
         try:
-            with open(schema_path, "r", encoding="utf-8") as f:
+            with open(schema_path, encoding="utf-8") as f:
                 conn.executescript(f.read())
         finally:
             conn.close()
@@ -90,7 +90,9 @@ def db_manager(temp_db):
 @pytest.fixture
 def requirement_handler(db_manager):
     """Create a RequirementHandler instance"""
-    return RequirementHandler(db_manager)
+    handler = RequirementHandler(db_manager)
+    handler._testing_mode = True  # Disable LLM analysis for tests
+    return handler
 
 
 @pytest.fixture

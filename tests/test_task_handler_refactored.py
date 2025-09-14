@@ -38,12 +38,13 @@ class TestTaskHandlerRefactored:
     def test_get_tool_definitions(self, task_handler):
         """Test that handler returns correct tool definitions"""
         tools = task_handler.get_tool_definitions()
-        assert len(tools) == 6
+        assert len(tools) == 7
 
         expected_tools = [
             "create_task",
             "update_task_status",
             "query_tasks",
+            "query_tasks_json",
             "get_task_details",
             "sync_task_from_github",
             "bulk_sync_github_tasks",

@@ -6,7 +6,7 @@ Provides structured access to requirements, tasks, and architecture artifacts
 
 import asyncio
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -17,6 +17,7 @@ from .handlers import (
     ArchitectureHandler,
     ExportHandler,
     InterviewHandler,
+    RelationshipHandler,
     RequirementHandler,
     StatusHandler,
     TaskHandler,
@@ -40,6 +41,7 @@ class LifecycleMCPServer:
         self.requirement_handler = RequirementHandler(self.db_manager, self.mcp_client)
         self.task_handler = TaskHandler(self.db_manager)
         self.architecture_handler = ArchitectureHandler(self.db_manager, self.mcp_client)
+        self.relationship_handler = RelationshipHandler(self.db_manager)
         self.interview_handler = InterviewHandler(self.db_manager, self.requirement_handler)
         self.export_handler = ExportHandler(self.db_manager)
         self.status_handler = StatusHandler(self.db_manager)
@@ -50,19 +52,28 @@ class LifecycleMCPServer:
             "create_requirement": self.requirement_handler,
             "update_requirement_status": self.requirement_handler,
             "query_requirements": self.requirement_handler,
+            "query_requirements_json": self.requirement_handler,
             "get_requirement_details": self.requirement_handler,
             "trace_requirement": self.requirement_handler,
             # Task tools
             "create_task": self.task_handler,
             "update_task_status": self.task_handler,
             "query_tasks": self.task_handler,
+            "query_tasks_json": self.task_handler,
             "get_task_details": self.task_handler,
             "sync_task_from_github": self.task_handler,
             "bulk_sync_github_tasks": self.task_handler,
+            # Relationship tools
+            "create_relationship": self.relationship_handler,
+            "delete_relationship": self.relationship_handler,
+            "query_relationships": self.relationship_handler,
+            "get_entity_relationships": self.relationship_handler,
+            "query_all_relationships": self.relationship_handler,
             # Architecture tools
             "create_architecture_decision": self.architecture_handler,
             "update_architecture_status": self.architecture_handler,
             "query_architecture_decisions": self.architecture_handler,
+            "query_architecture_decisions_json": self.architecture_handler,
             "get_architecture_details": self.architecture_handler,
             "add_architecture_review": self.architecture_handler,
             # Interview tools
@@ -75,6 +86,7 @@ class LifecycleMCPServer:
             "create_architectural_diagrams": self.export_handler,
             # Status tools
             "get_project_status": self.status_handler,
+            "get_project_metrics": self.status_handler,
         }
 
         # Create MCP server instance
@@ -91,7 +103,7 @@ class LifecycleMCPServer:
         """Register MCP server handlers"""
 
         @self.server.list_tools()
-        async def list_tools() -> List[Tool]:
+        async def list_tools() -> list[Tool]:
             """List available tools from all handlers"""
             tools = []
 
@@ -100,6 +112,7 @@ class LifecycleMCPServer:
                 self.requirement_handler,
                 self.task_handler,
                 self.architecture_handler,
+                self.relationship_handler,
                 self.interview_handler,
                 self.export_handler,
                 self.status_handler,
@@ -119,7 +132,7 @@ class LifecycleMCPServer:
             return tools
 
         @self.server.call_tool()
-        async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
+        async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             """Route tool calls to appropriate handlers
 
             Note: This method is async and must await handler calls for proper MCP protocol compliance.

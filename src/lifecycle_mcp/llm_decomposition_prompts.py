@@ -5,14 +5,14 @@ Used by RequirementHandler to determine when and how to decompose requirements.
 
 import json
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class DecompositionPromptGenerator:
     """Generates prompts for LLM-based requirement decomposition analysis."""
 
     @staticmethod
-    def create_complexity_analysis_prompt(requirement_data: Dict[str, Any]) -> str:
+    def create_complexity_analysis_prompt(requirement_data: dict[str, Any]) -> str:
         """Create prompt for analyzing requirement complexity and decomposition needs."""
 
         prompt = f"""Analyze this software requirement for complexity and decomposition needs:
@@ -83,7 +83,7 @@ Analyze now:"""
 
     @staticmethod
     def create_decomposition_validation_prompt(
-        parent_requirement: Dict[str, Any], proposed_children: List[Dict[str, Any]]
+        parent_requirement: dict[str, Any], proposed_children: list[dict[str, Any]]
     ) -> str:
         """Create prompt for validating proposed requirement decomposition."""
 
@@ -138,7 +138,7 @@ Validate now:"""
 
     @staticmethod
     def create_interactive_decomposition_prompt(
-        requirement_data: Dict[str, Any], user_responses: Dict[str, Any] = None
+        requirement_data: dict[str, Any], user_responses: dict[str, Any] = None
     ) -> str:
         """Create prompt for interactive decomposition conversation."""
 
@@ -152,7 +152,7 @@ Validate now:"""
 
 Ask 3-5 clarifying questions to understand decomposition needs. Focus on:
 1. User journey boundaries
-2. Feature interdependencies  
+2. Feature interdependencies
 3. Implementation phases
 4. Stakeholder priorities
 5. Technical constraints
@@ -207,7 +207,7 @@ Continue interview:"""
         return prompt
 
     @staticmethod
-    def _format_json_list(json_str: Optional[str]) -> str:
+    def _format_json_list(json_str: str | None) -> str:
         """Format JSON list/array for display in prompts."""
         if not json_str:
             return "None specified"
@@ -224,7 +224,7 @@ Continue interview:"""
             return json_str
 
     @staticmethod
-    def extract_decomposition_indicators(requirement_text: str) -> Dict[str, Any]:
+    def extract_decomposition_indicators(requirement_text: str) -> dict[str, Any]:
         """Extract linguistic indicators that suggest decomposition needs."""
 
         indicators = {
@@ -299,7 +299,7 @@ class DecompositionStrategy:
     }
 
     @classmethod
-    def recommend_strategy(cls, requirement_data: Dict[str, Any]) -> List[str]:
+    def recommend_strategy(cls, requirement_data: dict[str, Any]) -> list[str]:
         """Recommend decomposition strategies based on requirement characteristics."""
 
         req_type = requirement_data.get("type", "")

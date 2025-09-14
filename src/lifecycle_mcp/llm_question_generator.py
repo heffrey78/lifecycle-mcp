@@ -7,7 +7,7 @@ Generates contextual questions using LLM to improve requirement gathering
 import json
 import logging
 from enum import Enum
-from typing import Any, Dict, List
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +34,9 @@ class LLMQuestionGenerator:
         stage: InterviewStage,
         project_context: str = "",
         stakeholder_role: str = "",
-        previous_answers: Dict[str, Any] = None,
-        existing_requirements: List[Dict] = None,
-    ) -> List[str]:
+        previous_answers: dict[str, Any] = None,
+        existing_requirements: list[dict] = None,
+    ) -> list[str]:
         """Generate 1-3 contextual questions for the interview stage"""
 
         if not self.llm_client:
@@ -51,7 +51,7 @@ class LLMQuestionGenerator:
             logger.warning(f"LLM question generation failed: {e}. Using fallback questions.")
             return self._get_fallback_questions(stage)
 
-    async def _generate_initial_questions(self, project_context: str, stakeholder_role: str) -> List[str]:
+    async def _generate_initial_questions(self, project_context: str, stakeholder_role: str) -> list[str]:
         """Generate initial questions for problem identification"""
 
         prompt = (
@@ -73,8 +73,8 @@ class LLMQuestionGenerator:
         return await self._call_llm_and_parse(prompt)
 
     async def _generate_progressive_questions(
-        self, stage: InterviewStage, previous_answers: Dict[str, Any], existing_requirements: List[Dict] = None
-    ) -> List[str]:
+        self, stage: InterviewStage, previous_answers: dict[str, Any], existing_requirements: list[dict] = None
+    ) -> list[str]:
         """Generate follow-up questions based on stage and context"""
 
         stage_focus = {
@@ -108,7 +108,7 @@ Return as JSON array of strings. Maximum 3 questions."""
 
         return await self._call_llm_and_parse(prompt)
 
-    async def _call_llm_and_parse(self, prompt: str) -> List[str]:
+    async def _call_llm_and_parse(self, prompt: str) -> list[str]:
         """Call LLM and parse response into question list"""
         try:
             # This would integrate with actual LLM client
@@ -165,7 +165,7 @@ Return as JSON array of strings. Maximum 3 questions."""
                 ]
             )
 
-    def _summarize_answers(self, answers: Dict[str, Any]) -> str:
+    def _summarize_answers(self, answers: dict[str, Any]) -> str:
         """Summarize previous interview answers for context"""
         if not answers:
             return "No previous answers provided."
@@ -177,7 +177,7 @@ Return as JSON array of strings. Maximum 3 questions."""
 
         return "\n".join(summary_parts) if summary_parts else "No significant previous answers."
 
-    def _summarize_requirements(self, requirements: List[Dict]) -> str:
+    def _summarize_requirements(self, requirements: list[dict]) -> str:
         """Summarize existing requirements for context"""
         if not requirements:
             return "No existing requirements in the system."
@@ -193,7 +193,7 @@ Return as JSON array of strings. Maximum 3 questions."""
 
         return summary
 
-    def _get_fallback_questions(self, stage: InterviewStage) -> List[str]:
+    def _get_fallback_questions(self, stage: InterviewStage) -> list[str]:
         """Fallback questions when LLM is unavailable"""
 
         fallback_questions = {

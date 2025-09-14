@@ -7,7 +7,7 @@ Provides common functionality for all domain handlers
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from mcp.types import TextContent
 
@@ -24,13 +24,13 @@ class BaseHandler(ABC):
         self.db = db_manager
         self.logger = logger.getChild(self.__class__.__name__)
 
-    def _create_response(self, text: str) -> List[TextContent]:
+    def _create_response(self, text: str) -> list[TextContent]:
         """Create standardized response format"""
         return [TextContent(type="text", text=text)]
 
     def _create_above_fold_response(
         self, status: str, key_info: str, action_info: str = "", details: str = ""
-    ) -> List[TextContent]:
+    ) -> list[TextContent]:
         """Create above-the-fold optimized response format
 
         Args:
@@ -46,10 +46,7 @@ class BaseHandler(ABC):
         line2 = action_info if action_info else ""
 
         # Line 3: Summary or continuation indicator
-        if details:
-            line3 = "📄 Details available below (expand to view)"
-        else:
-            line3 = ""
+        line3 = "📄 Details available below (expand to view)" if details else ""
 
         # Build response
         response_lines = [line1]
@@ -78,7 +75,7 @@ class BaseHandler(ABC):
             return f"Found {count} {entity_type}(s) matching: {filter_desc}"
         return f"Found {count} {entity_type}(s)"
 
-    def _create_error_response(self, error_msg: str, exception: Optional[Exception] = None) -> List[TextContent]:
+    def _create_error_response(self, error_msg: str, exception: Exception | None = None) -> list[TextContent]:
         """Create standardized error response"""
         if exception:
             self.logger.error(f"{error_msg}: {str(exception)}")
@@ -88,14 +85,14 @@ class BaseHandler(ABC):
         # Use above-the-fold format for errors
         return self._create_above_fold_response("ERROR", error_msg)
 
-    def _validate_required_params(self, params: Dict[str, Any], required_fields: List[str]) -> Optional[str]:
+    def _validate_required_params(self, params: dict[str, Any], required_fields: list[str]) -> str | None:
         """Validate that required parameters are present"""
         missing = [field for field in required_fields if field not in params or params[field] is None]
         if missing:
             return f"Missing required parameters: {', '.join(missing)}"
         return None
 
-    def _safe_json_loads(self, json_str: Optional[str], default: Any = None) -> Any:
+    def _safe_json_loads(self, json_str: str | None, default: Any = None) -> Any:
         """Safely load JSON string with fallback"""
         if not json_str:
             return default or []
@@ -134,11 +131,11 @@ class BaseHandler(ABC):
             self.logger.warning(f"Failed to add review comment: {str(e)}")
 
     @abstractmethod
-    def get_tool_definitions(self) -> List[Dict[str, Any]]:
+    def get_tool_definitions(self) -> list[dict[str, Any]]:
         """Return list of tool definitions this handler provides"""
         pass
 
     @abstractmethod
-    async def handle_tool_call(self, tool_name: str, arguments: Dict[str, Any]) -> List[TextContent]:
+    async def handle_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
         """Handle a tool call for this handler's domain"""
         pass

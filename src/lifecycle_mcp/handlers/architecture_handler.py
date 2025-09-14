@@ -5,7 +5,7 @@ Handles all architecture decision-related operations
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from mcp.types import TextContent
 
@@ -20,7 +20,7 @@ class ArchitectureHandler(BaseHandler):
         super().__init__(db_manager)
         self.mcp_client = mcp_client
 
-    def get_tool_definitions(self) -> List[Dict[str, Any]]:
+    def get_tool_definitions(self) -> list[dict[str, Any]]:
         """Return architecture tool definitions"""
         return [
             {
@@ -81,6 +81,19 @@ class ArchitectureHandler(BaseHandler):
                 },
             },
             {
+                "name": "query_architecture_decisions_json",
+                "description": "Query architecture decisions and return structured JSON data for UI",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "status": {"type": "string"},
+                        "type": {"type": "string"},
+                        "requirement_id": {"type": "string"},
+                        "search_text": {"type": "string"},
+                    },
+                },
+            },
+            {
                 "name": "get_architecture_details",
                 "description": "Get full architecture decision details",
                 "inputSchema": {
@@ -104,7 +117,7 @@ class ArchitectureHandler(BaseHandler):
             },
         ]
 
-    async def handle_tool_call(self, tool_name: str, arguments: Dict[str, Any]) -> List[TextContent]:
+    async def handle_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
         """Route tool calls to appropriate handler methods"""
         try:
             if tool_name == "create_architecture_decision":
@@ -113,6 +126,8 @@ class ArchitectureHandler(BaseHandler):
                 return self._update_architecture_status(**arguments)
             elif tool_name == "query_architecture_decisions":
                 return self._query_architecture_decisions(**arguments)
+            elif tool_name == "query_architecture_decisions_json":
+                return self._query_architecture_decisions_json(**arguments)
             elif tool_name == "get_architecture_details":
                 return self._get_architecture_details(**arguments)
             elif tool_name == "add_architecture_review":
@@ -122,7 +137,7 @@ class ArchitectureHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response(f"Error handling {tool_name}", e)
 
-    async def _create_architecture_decision(self, **params) -> List[TextContent]:
+    async def _create_architecture_decision(self, **params) -> list[TextContent]:
         """Create ADR"""
         # Validate required parameters
         error = self._validate_required_params(params, ["requirement_ids", "title", "context", "decision"])
@@ -133,8 +148,8 @@ class ArchitectureHandler(BaseHandler):
             # Get next ADR number
             adr_number = self.db.execute_query(
                 """
-                SELECT COALESCE(MAX(CAST(SUBSTR(id, 5, 4) AS INTEGER)), 0) + 1 
-                FROM architecture 
+                SELECT COALESCE(MAX(CAST(SUBSTR(id, 5, 4) AS INTEGER)), 0) + 1
+                FROM architecture
                 WHERE type = 'ADR'
             """,
                 fetch_one=True,
@@ -185,7 +200,7 @@ class ArchitectureHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to create architecture decision", e)
 
-    def _update_architecture_status(self, **params) -> List[TextContent]:
+    def _update_architecture_status(self, **params) -> list[TextContent]:
         """Update architecture decision status"""
         # Validate required parameters
         error = self._validate_required_params(params, ["architecture_id", "new_status"])
@@ -222,7 +237,7 @@ class ArchitectureHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to update architecture status", e)
 
-    def _query_architecture_decisions(self, **params) -> List[TextContent]:
+    def _query_architecture_decisions(self, **params) -> list[TextContent]:
         """Query architecture decisions with filters"""
         try:
             where_clauses = []
@@ -298,7 +313,77 @@ class ArchitectureHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to query architecture decisions", e)
 
-    def _get_architecture_details(self, **params) -> List[TextContent]:
+    def _query_architecture_decisions_json(self, **params) -> list[TextContent]:
+        """Query architecture decisions and return structured JSON data for UI"""
+        try:
+            import json
+
+            where_clauses = []
+            where_params = []
+            base_query = "SELECT * FROM architecture"
+
+            # Handle requirement_id filter specially (requires join)
+            if params.get("requirement_id"):
+                base_query = """
+                    SELECT a.* FROM architecture a
+                    JOIN requirement_architecture ra ON a.id = ra.architecture_id
+                    WHERE ra.requirement_id = ?
+                """
+                where_params.append(params["requirement_id"])
+
+                # Add additional filters for the joined query
+                if params.get("search_text"):
+                    where_clauses.append("(a.title LIKE ? OR a.context LIKE ?)")
+                    search = f"%{params['search_text']}%"
+                    where_params.extend([search, search])
+            else:
+                # Build standard filters
+                if params.get("status"):
+                    where_clauses.append("status = ?")
+                    where_params.append(params["status"])
+
+                if params.get("type"):
+                    where_clauses.append("type = ?")
+                    where_params.append(params["type"])
+
+                if params.get("search_text"):
+                    where_clauses.append("(title LIKE ? OR context LIKE ?)")
+                    search = f"%{params['search_text']}%"
+                    where_params.extend([search, search])
+
+            # Construct final query
+            if where_clauses:
+                if "WHERE" in base_query:
+                    base_query += " AND " + " AND ".join(where_clauses)
+                else:
+                    base_query += " WHERE " + " AND ".join(where_clauses)
+
+            base_query += " ORDER BY created_at DESC"
+
+            decisions = self.db.execute_query(base_query, where_params, fetch_all=True, row_factory=True)
+
+            # Convert to list of dictionaries with JSON parsing
+            decisions_list = []
+            for decision in decisions:
+                decision_dict = dict(decision) if hasattr(decision, 'keys') else decision
+
+                # Parse JSON fields if they exist as strings
+                json_fields = ['consequences', 'decision_drivers', 'considered_options', 'authors']
+                for field in json_fields:
+                    if field in decision_dict and isinstance(decision_dict[field], str):
+                        try:
+                            decision_dict[field] = json.loads(decision_dict[field]) if decision_dict[field] else []
+                        except (json.JSONDecodeError, TypeError):
+                            decision_dict[field] = []
+
+                decisions_list.append(decision_dict)
+
+            return [TextContent(type="text", text=json.dumps(decisions_list))]
+
+        except Exception as e:
+            return self._create_error_response("Failed to query architecture decisions for JSON", e)
+
+    def _get_architecture_details(self, **params) -> list[TextContent]:
         """Get full architecture decision details"""
         # Validate required parameters
         error = self._validate_required_params(params, ["architecture_id"])
@@ -398,7 +483,7 @@ class ArchitectureHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to get architecture details", e)
 
-    def _add_architecture_review(self, **params) -> List[TextContent]:
+    def _add_architecture_review(self, **params) -> list[TextContent]:
         """Add review comment to architecture decision"""
         # Validate required parameters
         error = self._validate_required_params(params, ["architecture_id", "comment"])
@@ -423,7 +508,7 @@ class ArchitectureHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to add review", e)
 
-    async def _analyze_adr_for_diagrams(self, adr_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def _analyze_adr_for_diagrams(self, adr_data: dict[str, Any]) -> dict[str, Any] | None:
         """Analyze ADR context using LLM sampling to suggest relevant diagrams"""
         if not self.mcp_client:
             self.logger.info("No MCP client available for sampling - skipping diagram suggestions")
@@ -445,7 +530,7 @@ class ArchitectureHandler(BaseHandler):
             }
 
             # Check if the MCP client has sampling capability
-            if hasattr(self.mcp_client, "sample") and callable(getattr(self.mcp_client, "sample")):
+            if hasattr(self.mcp_client, "sample") and callable(self.mcp_client.sample):
                 try:
                     # Make the actual MCP sampling request
                     response = await self.mcp_client.sample(sampling_request)
@@ -466,7 +551,7 @@ class ArchitectureHandler(BaseHandler):
             self.logger.warning(f"LLM diagram analysis failed: {e}")
             return None
 
-    def _build_adr_context(self, adr_data: Dict[str, Any]) -> str:
+    def _build_adr_context(self, adr_data: dict[str, Any]) -> str:
         """Build context string for ADR diagram analysis"""
         decision_drivers = self._safe_json_loads(adr_data.get("decision_drivers", "[]"))
         considered_options = self._safe_json_loads(adr_data.get("considered_options", "[]"))
@@ -511,13 +596,13 @@ class ArchitectureHandler(BaseHandler):
         )
         return context
 
-    def _format_list_items(self, items: List[str]) -> str:
+    def _format_list_items(self, items: list[str]) -> str:
         """Format list items for context"""
         if not items:
             return "- None specified"
         return "\n".join(f"- {item}" for item in items)
 
-    def _format_consequences(self, consequences: Dict[str, Any]) -> str:
+    def _format_consequences(self, consequences: dict[str, Any]) -> str:
         """Format consequences object for context"""
         if not consequences:
             return "- None specified"
@@ -554,7 +639,7 @@ class ArchitectureHandler(BaseHandler):
             "- Always respond with valid JSON matching the specified format"
         )
 
-    def _format_diagram_suggestions(self, suggestions: Dict[str, Any], adr_id: str) -> str:
+    def _format_diagram_suggestions(self, suggestions: dict[str, Any], adr_id: str) -> str:
         """Format diagram suggestions for user response"""
         suggested_diagrams = suggestions.get("suggested_diagrams", [])
         implementation_notes = suggestions.get("implementation_notes", "")

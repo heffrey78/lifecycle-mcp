@@ -6,7 +6,7 @@ Handles export and diagram generation operations
 
 import os
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any
 
 from mcp.types import TextContent
 
@@ -16,7 +16,7 @@ from .base_handler import BaseHandler
 class ExportHandler(BaseHandler):
     """Handler for export and diagram generation MCP tools"""
 
-    def get_tool_definitions(self) -> List[Dict[str, Any]]:
+    def get_tool_definitions(self) -> list[dict[str, Any]]:
         """Return export tool definitions"""
         return [
             {
@@ -76,7 +76,7 @@ class ExportHandler(BaseHandler):
             },
         ]
 
-    async def handle_tool_call(self, tool_name: str, arguments: Dict[str, Any]) -> List[TextContent]:
+    async def handle_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
         """Route tool calls to appropriate handler methods"""
         try:
             if tool_name == "export_project_documentation":
@@ -88,7 +88,7 @@ class ExportHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response(f"Error handling {tool_name}", e)
 
-    def _export_project_documentation(self, **params) -> List[TextContent]:
+    def _export_project_documentation(self, **params) -> list[TextContent]:
         """Export comprehensive project documentation in markdown format"""
         try:
             project_name = params.get("project_name", "project")
@@ -122,7 +122,7 @@ class ExportHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to export project documentation", e)
 
-    def _export_requirements(self, project_name: str, output_dir: str) -> List[str]:
+    def _export_requirements(self, project_name: str, output_dir: str) -> list[str]:
         """Export requirements to markdown file"""
         requirements = self.db.get_records("requirements", "*", order_by="type, requirement_number")
 
@@ -183,7 +183,7 @@ class ExportHandler(BaseHandler):
 
         return [filename]
 
-    def _export_tasks(self, project_name: str, output_dir: str) -> List[str]:
+    def _export_tasks(self, project_name: str, output_dir: str) -> list[str]:
         """Export tasks to markdown file"""
         tasks = self.db.get_records("tasks", "*", order_by="task_number, subtask_number")
 
@@ -251,7 +251,7 @@ class ExportHandler(BaseHandler):
 
         return [filename]
 
-    def _export_architecture(self, project_name: str, output_dir: str) -> List[str]:
+    def _export_architecture(self, project_name: str, output_dir: str) -> list[str]:
         """Export architecture decisions to markdown file"""
         architecture = self.db.get_records("architecture", "*", order_by="created_at DESC")
 
@@ -331,7 +331,7 @@ class ExportHandler(BaseHandler):
 
         return [filename]
 
-    def _create_architectural_diagrams(self, **params) -> List[TextContent]:
+    def _create_architectural_diagrams(self, **params) -> list[TextContent]:
         """Generate Mermaid diagrams for project architecture"""
         # Check if interactive mode is requested
         if params.get("interactive", False):
@@ -426,7 +426,7 @@ class ExportHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to create architectural diagram", e)
 
-    def _generate_requirements_diagram(self, requirement_ids: List[str] = None) -> str:
+    def _generate_requirements_diagram(self, requirement_ids: list[str] = None) -> str:
         """Generate requirements flowchart"""
         if requirement_ids:
             # Filter specific requirements
@@ -454,7 +454,7 @@ class ExportHandler(BaseHandler):
             req_by_type[req_type].append(req)
 
         # Add type nodes
-        for req_type in req_by_type.keys():
+        for req_type in req_by_type:
             mermaid_content += f"    {req_type}[{req_type} Requirements]\n"
 
         # Add requirement nodes
@@ -478,7 +478,7 @@ class ExportHandler(BaseHandler):
 
         return mermaid_content
 
-    def _generate_tasks_diagram(self, requirement_ids: List[str] = None) -> str:
+    def _generate_tasks_diagram(self, requirement_ids: list[str] = None) -> str:
         """Generate task hierarchy diagram"""
         if requirement_ids:
             # Get tasks for specific requirements
@@ -524,7 +524,7 @@ class ExportHandler(BaseHandler):
 
         return mermaid_content
 
-    def _generate_architecture_diagram(self, requirement_ids: List[str] = None) -> str:
+    def _generate_architecture_diagram(self, requirement_ids: list[str] = None) -> str:
         """Generate architecture decisions diagram"""
         if requirement_ids:
             # Get architecture decisions for specific requirements
@@ -564,7 +564,7 @@ class ExportHandler(BaseHandler):
 
         return mermaid_content
 
-    def _generate_full_project_diagram(self, include_relationships: bool, requirement_ids: List[str] = None) -> str:
+    def _generate_full_project_diagram(self, include_relationships: bool, requirement_ids: list[str] = None) -> str:
         """Generate full project overview diagram"""
         if requirement_ids:
             # Filter to specific requirements
@@ -632,7 +632,7 @@ class ExportHandler(BaseHandler):
         if include_relationships:
             req_tasks = self.db.execute_query(
                 """
-                SELECT rt.requirement_id, rt.task_id 
+                SELECT rt.requirement_id, rt.task_id
                 FROM requirement_tasks rt
                 LIMIT 20
             """,
@@ -658,7 +658,7 @@ class ExportHandler(BaseHandler):
     Root --> Docs
     Root --> Tests"""
 
-    def _generate_dependencies_diagram(self, requirement_ids: List[str] = None) -> str:
+    def _generate_dependencies_diagram(self, requirement_ids: list[str] = None) -> str:
         """Generate dependencies diagram"""
         if requirement_ids:
             # Get task dependencies for specific requirements
@@ -678,11 +678,11 @@ class ExportHandler(BaseHandler):
                 task_placeholders = ",".join(["?"] * len(task_ids))
                 dependencies = self.db.execute_query(
                     f"""
-                    SELECT td.task_id, td.depends_on_task_id 
+                    SELECT td.task_id, td.depends_on_task_id
                     FROM task_dependencies td
                     JOIN tasks t1 ON td.task_id = t1.id
                     JOIN tasks t2 ON td.depends_on_task_id = t2.id
-                    WHERE td.task_id IN ({task_placeholders}) 
+                    WHERE td.task_id IN ({task_placeholders})
                        OR td.depends_on_task_id IN ({task_placeholders})
                 """,
                     task_ids + task_ids,
@@ -694,7 +694,7 @@ class ExportHandler(BaseHandler):
         else:
             dependencies = self.db.execute_query(
                 """
-                SELECT td.task_id, td.depends_on_task_id 
+                SELECT td.task_id, td.depends_on_task_id
                 FROM task_dependencies td
                 JOIN tasks t1 ON td.task_id = t1.id
                 JOIN tasks t2 ON td.depends_on_task_id = t2.id

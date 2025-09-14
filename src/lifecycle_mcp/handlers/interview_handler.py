@@ -5,7 +5,7 @@ Handles interactive interview operations for requirements and architecture
 """
 
 import uuid
-from typing import Any, Dict, List
+from typing import Any
 
 from mcp.types import TextContent
 
@@ -27,7 +27,7 @@ class InterviewHandler(BaseHandler):
         self.interview_sessions = {}
         self.architectural_sessions = {}
 
-    def get_tool_definitions(self) -> List[Dict[str, Any]]:
+    def get_tool_definitions(self) -> list[dict[str, Any]]:
         """Return interview tool definitions"""
         return [
             {
@@ -74,7 +74,7 @@ class InterviewHandler(BaseHandler):
             },
         ]
 
-    async def handle_tool_call(self, tool_name: str, arguments: Dict[str, Any]) -> List[TextContent]:
+    async def handle_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
         """Route tool calls to appropriate handler methods"""
         try:
             if tool_name == "start_requirement_interview":
@@ -90,7 +90,7 @@ class InterviewHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response(f"Error handling {tool_name}", e)
 
-    async def _start_requirement_interview(self, **params) -> List[TextContent]:
+    async def _start_requirement_interview(self, **params) -> list[TextContent]:
         """Start interactive requirement gathering interview"""
         try:
             session_id = str(uuid.uuid4())[:8]
@@ -141,7 +141,7 @@ Please answer these questions to help gather your requirement:
         except Exception as e:
             return self._create_error_response("Failed to start requirement interview", e)
 
-    async def _continue_requirement_interview(self, **params) -> List[TextContent]:
+    async def _continue_requirement_interview(self, **params) -> list[TextContent]:
         """Continue requirement interview with answers"""
         # Validate required parameters
         error = self._validate_required_params(params, ["session_id", "answers"])
@@ -217,7 +217,7 @@ Please answer these questions to help gather your requirement:
         except Exception as e:
             return self._create_error_response("Failed to continue requirement interview", e)
 
-    async def _complete_requirement_interview(self, session_id: str) -> List[TextContent]:
+    async def _complete_requirement_interview(self, session_id: str) -> list[TextContent]:
         """Complete interview and create requirement"""
         try:
             session = self.interview_sessions[session_id]
@@ -243,7 +243,7 @@ Please answer these questions to help gather your requirement:
             # Clean up session
             del self.interview_sessions[session_id]
 
-            interview_summary = f"""# Interview Complete! 
+            interview_summary = f"""# Interview Complete!
 
 ## Requirement Created
 {result[0].text}
@@ -268,7 +268,7 @@ You can now use other tools to further develop this requirement, create tasks, o
         except Exception as e:
             return self._create_error_response("Failed to complete requirement interview", e)
 
-    async def _get_existing_requirements(self) -> List[Dict[str, Any]]:
+    async def _get_existing_requirements(self) -> list[dict[str, Any]]:
         """Get existing requirements for context in question generation"""
         try:
             async with self.db_manager.get_connection() as conn:
@@ -281,7 +281,7 @@ You can now use other tools to further develop this requirement, create tasks, o
             # Return empty list if query fails
             return []
 
-    def _start_architectural_conversation(self, **params) -> List[TextContent]:
+    def _start_architectural_conversation(self, **params) -> list[TextContent]:
         """Start interactive architectural conversation"""
         try:
             session_id = str(uuid.uuid4())[:8]
@@ -326,7 +326,7 @@ You can now use other tools to further develop this requirement, create tasks, o
 
 ## Context
 - **Project**: {params.get("project_context", "Not specified")}
-- **Purpose**: {params.get("diagram_purpose", "Not specified")}  
+- **Purpose**: {params.get("diagram_purpose", "Not specified")}
 - **Complexity**: {params.get("complexity_level", "medium")}
 
 ## Next Questions
@@ -350,7 +350,7 @@ Please answer these questions to help create the most useful architectural diagr
         except Exception as e:
             return self._create_error_response("Failed to start architectural conversation", e)
 
-    def _continue_architectural_conversation(self, **params) -> List[TextContent]:
+    def _continue_architectural_conversation(self, **params) -> list[TextContent]:
         """Continue architectural conversation with responses"""
         # Validate required parameters
         error = self._validate_required_params(params, ["session_id", "responses"])
@@ -416,7 +416,7 @@ Please answer these questions to help create the most useful architectural diagr
         except Exception as e:
             return self._create_error_response("Failed to continue architectural conversation", e)
 
-    def _complete_architectural_conversation(self, session_id: str) -> List[TextContent]:
+    def _complete_architectural_conversation(self, session_id: str) -> list[TextContent]:
         """Complete architectural conversation and generate diagram"""
         try:
             session = self.architectural_sessions[session_id]

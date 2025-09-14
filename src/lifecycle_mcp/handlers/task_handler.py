@@ -5,7 +5,7 @@ Handles all task-related operations
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any
 
 from mcp.types import TextContent
 
@@ -16,7 +16,7 @@ from .base_handler import BaseHandler
 class TaskHandler(BaseHandler):
     """Handler for task-related MCP tools"""
 
-    def get_tool_definitions(self) -> List[Dict[str, Any]]:
+    def get_tool_definitions(self) -> list[dict[str, Any]]:
         """Return task tool definitions"""
         return [
             {
@@ -68,6 +68,19 @@ class TaskHandler(BaseHandler):
                 },
             },
             {
+                "name": "query_tasks_json",
+                "description": "Query tasks and return structured JSON data for UI",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "status": {"type": "string"},
+                        "priority": {"type": "string"},
+                        "assignee": {"type": "string"},
+                        "requirement_id": {"type": "string"},
+                    },
+                },
+            },
+            {
                 "name": "get_task_details",
                 "description": "Get full task details with dependencies",
                 "inputSchema": {
@@ -92,7 +105,7 @@ class TaskHandler(BaseHandler):
             },
         ]
 
-    async def handle_tool_call(self, tool_name: str, arguments: Dict[str, Any]) -> List[TextContent]:
+    async def handle_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
         """Route tool calls to appropriate handler methods"""
         try:
             if tool_name == "create_task":
@@ -101,6 +114,8 @@ class TaskHandler(BaseHandler):
                 return await self._update_task_status(**arguments)
             elif tool_name == "query_tasks":
                 return self._query_tasks(**arguments)
+            elif tool_name == "query_tasks_json":
+                return self._query_tasks_json(**arguments)
             elif tool_name == "get_task_details":
                 return self._get_task_details(**arguments)
             elif tool_name == "sync_task_from_github":
@@ -115,7 +130,7 @@ class TaskHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response(f"Error handling {tool_name}", e)
 
-    async def _create_task(self, **params) -> List[TextContent]:
+    async def _create_task(self, **params) -> list[TextContent]:
         """Create task linked to requirements"""
         # Validate required parameters
         error = self._validate_required_params(params, ["requirement_ids", "title", "priority"])
@@ -245,7 +260,7 @@ class TaskHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to create task", e)
 
-    async def _update_task_status(self, **params) -> List[TextContent]:
+    async def _update_task_status(self, **params) -> list[TextContent]:
         """Update task status"""
         # Validate required parameters
         error = self._validate_required_params(params, ["task_id", "new_status"])
@@ -344,7 +359,7 @@ class TaskHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to update task", e)
 
-    def _query_tasks(self, **params) -> List[TextContent]:
+    def _query_tasks(self, **params) -> list[TextContent]:
         """Query tasks with filters"""
         try:
             where_clauses = []
@@ -410,7 +425,67 @@ class TaskHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to query tasks", e)
 
-    async def _sync_from_github(self, task_id: str) -> List[TextContent]:
+    def _query_tasks_json(self, **params) -> list[TextContent]:
+        """Query tasks and return structured JSON data for UI"""
+        try:
+            import json
+
+            where_clauses = []
+            where_params = []
+
+            # Handle requirement_id filter specially (requires join)
+            if params.get("requirement_id"):
+                tasks = self.db.execute_query(
+                    """
+                    SELECT t.* FROM tasks t
+                    JOIN requirement_tasks rt ON t.id = rt.task_id
+                    WHERE rt.requirement_id = ?
+                    ORDER BY t.priority, t.created_at DESC
+                """,
+                    [params["requirement_id"]],
+                    fetch_all=True,
+                    row_factory=True,
+                )
+            else:
+                # Build standard filters
+                if params.get("status"):
+                    where_clauses.append("status = ?")
+                    where_params.append(params["status"])
+
+                if params.get("priority"):
+                    where_clauses.append("priority = ?")
+                    where_params.append(params["priority"])
+
+                if params.get("assignee"):
+                    where_clauses.append("assignee = ?")
+                    where_params.append(params["assignee"])
+
+                where_clause = " AND ".join(where_clauses) if where_clauses else ""
+
+                tasks = self.db.get_records("tasks", "*", where_clause, where_params, "priority, created_at DESC")
+
+            # Convert to list of dictionaries with JSON parsing
+            tasks_list = []
+            for task in tasks:
+                task_dict = dict(task) if hasattr(task, 'keys') else task
+
+                # Parse JSON fields if they exist as strings
+                json_fields = ['acceptance_criteria']
+                for field in json_fields:
+                    if field in task_dict and isinstance(task_dict[field], str):
+                        try:
+                            task_dict[field] = json.loads(task_dict[field]) if task_dict[field] else []
+                        except (json.JSONDecodeError, TypeError):
+                            task_dict[field] = []
+
+                tasks_list.append(task_dict)
+
+            return [TextContent(type="text", text=json.dumps(tasks_list))]
+
+        except Exception as e:
+            return self._create_error_response("Failed to query tasks for JSON", e)
+
+    async def _sync_from_github(self, task_id: str) -> list[TextContent]:
         """Sync task from GitHub issue changes"""
         try:
             # Get current task with GitHub info
@@ -488,7 +563,7 @@ class TaskHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to sync from GitHub", e)
 
-    async def _bulk_sync_with_github(self, **params) -> List[TextContent]:
+    async def _bulk_sync_with_github(self, **params) -> list[TextContent]:
         """Sync all tasks with GitHub issues"""
         try:
             # Get all tasks with GitHub issues
@@ -596,7 +671,7 @@ class TaskHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to bulk sync with GitHub", e)
 
-    def _get_task_details(self, **params) -> List[TextContent]:
+    def _get_task_details(self, **params) -> list[TextContent]:
         """Get full task details"""
         # Validate required parameters
         error = self._validate_required_params(params, ["task_id"])

@@ -8,7 +8,7 @@ import asyncio
 import json
 import subprocess
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 
 class GitHubUtils:
@@ -42,8 +42,8 @@ class GitHubUtils:
 
     @staticmethod
     async def create_github_issue(
-        title: str, body: str, labels: Optional[list] = None, assignee: Optional[str] = None
-    ) -> Optional[str]:
+        title: str, body: str, labels: list | None = None, assignee: str | None = None
+    ) -> str | None:
         """Create a GitHub issue and return the issue URL"""
         if not GitHubUtils.is_github_available():
             return None
@@ -76,7 +76,7 @@ class GitHubUtils:
             return None
 
     @staticmethod
-    async def update_github_issue(issue_number: str, new_status: str, comment: Optional[str] = None) -> bool:
+    async def update_github_issue(issue_number: str, new_status: str, comment: str | None = None) -> bool:
         """Update a GitHub issue status and optionally add a comment (legacy method)"""
         # Use the new sync-safe method for backward compatibility
         updates = {}
@@ -100,7 +100,7 @@ class GitHubUtils:
         return success
 
     @staticmethod
-    def format_task_body(task_data: Dict[str, Any]) -> str:
+    def format_task_body(task_data: dict[str, Any]) -> str:
         """Format task data into GitHub issue body"""
         body = f"**Status**: {task_data.get('status', 'Not Started')}\n"
         body += f"**Priority**: {task_data.get('priority', 'P2')}\n"
@@ -130,7 +130,7 @@ class GitHubUtils:
         return body
 
     @staticmethod
-    def extract_issue_number_from_url(url: str) -> Optional[str]:
+    def extract_issue_number_from_url(url: str) -> str | None:
         """Extract issue number from GitHub issue URL"""
         try:
             # URL format: https://github.com/owner/repo/issues/123
@@ -144,7 +144,7 @@ class GitHubUtils:
         return None
 
     @staticmethod
-    async def get_github_issue(issue_number: str) -> Optional[Dict[str, Any]]:
+    async def get_github_issue(issue_number: str) -> dict[str, Any] | None:
         """Retrieve current GitHub issue state with sync metadata"""
         if not GitHubUtils.is_github_available():
             return None
@@ -181,8 +181,8 @@ class GitHubUtils:
 
     @staticmethod
     async def update_github_issue_safe(
-        issue_number: str, updates: Dict[str, Any], expected_etag: Optional[str] = None, retry_count: int = 3
-    ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+        issue_number: str, updates: dict[str, Any], expected_etag: str | None = None, retry_count: int = 3
+    ) -> tuple[bool, str | None, dict[str, Any] | None]:
         """
         Update GitHub issue with conflict detection and retry logic
 
@@ -247,8 +247,8 @@ class GitHubUtils:
 
     @staticmethod
     async def sync_task_with_github(
-        task_data: Dict[str, Any], force_sync: bool = False
-    ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+        task_data: dict[str, Any], force_sync: bool = False
+    ) -> tuple[bool, str | None, dict[str, Any] | None]:
         """
         Synchronize task with its GitHub issue
 
@@ -317,7 +317,7 @@ class GitHubUtils:
             return False, f"Error syncing with GitHub: {e}", None
 
     @staticmethod
-    def _generate_etag(issue_data: Dict[str, Any]) -> str:
+    def _generate_etag(issue_data: dict[str, Any]) -> str:
         """Generate ETag from issue data for conflict detection"""
         # Use updatedAt + state + assignees as the basis for ETag
         key_fields = {
@@ -329,7 +329,7 @@ class GitHubUtils:
         return str(hash(json.dumps(key_fields, sort_keys=True)))
 
     @staticmethod
-    async def _close_issue(issue_number: str, comment: Optional[str] = None) -> Tuple[bool, Optional[str]]:
+    async def _close_issue(issue_number: str, comment: str | None = None) -> tuple[bool, str | None]:
         """Close GitHub issue with optional comment"""
         try:
             cmd = ["gh", "issue", "close", issue_number]
@@ -350,7 +350,7 @@ class GitHubUtils:
             return False, str(e)
 
     @staticmethod
-    async def _reopen_issue(issue_number: str, comment: Optional[str] = None) -> Tuple[bool, Optional[str]]:
+    async def _reopen_issue(issue_number: str, comment: str | None = None) -> tuple[bool, str | None]:
         """Reopen GitHub issue with optional comment"""
         try:
             cmd = ["gh", "issue", "reopen", issue_number]
@@ -371,7 +371,7 @@ class GitHubUtils:
             return False, str(e)
 
     @staticmethod
-    async def _add_comment(issue_number: str, comment: str) -> Tuple[bool, Optional[str]]:
+    async def _add_comment(issue_number: str, comment: str) -> tuple[bool, str | None]:
         """Add comment to GitHub issue"""
         try:
             process = await asyncio.create_subprocess_exec(
@@ -395,7 +395,7 @@ class GitHubUtils:
             return False, str(e)
 
     @staticmethod
-    async def _update_assignees(issue_number: str, assignees: List[str]) -> Tuple[bool, Optional[str]]:
+    async def _update_assignees(issue_number: str, assignees: list[str]) -> tuple[bool, str | None]:
         """Update GitHub issue assignees"""
         try:
             # GitHub CLI requires specific format for multiple assignees
@@ -420,7 +420,7 @@ class GitHubUtils:
             return False, str(e)
 
     @staticmethod
-    async def _update_labels(issue_number: str, labels: List[str]) -> Tuple[bool, Optional[str]]:
+    async def _update_labels(issue_number: str, labels: list[str]) -> tuple[bool, str | None]:
         """Update GitHub issue labels"""
         try:
             if labels:
@@ -443,7 +443,7 @@ class GitHubUtils:
             return False, str(e)
 
     @staticmethod
-    async def check_github_health() -> Dict[str, Any]:
+    async def check_github_health() -> dict[str, Any]:
         """Check GitHub integration health and configuration"""
         health_status = {
             "github_cli_available": False,

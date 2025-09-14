@@ -5,7 +5,7 @@ Handles all requirement-related operations
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from mcp.types import TextContent
 
@@ -20,7 +20,7 @@ class RequirementHandler(BaseHandler):
         super().__init__(db_manager)
         self.mcp_client = mcp_client
 
-    def get_tool_definitions(self) -> List[Dict[str, Any]]:
+    def get_tool_definitions(self) -> list[dict[str, Any]]:
         """Return requirement tool definitions"""
         return [
             {
@@ -82,6 +82,19 @@ class RequirementHandler(BaseHandler):
                 },
             },
             {
+                "name": "query_requirements_json",
+                "description": "Query requirements and return structured JSON data for UI",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "status": {"type": "string"},
+                        "priority": {"type": "string"},
+                        "type": {"type": "string"},
+                        "search_text": {"type": "string"},
+                    },
+                },
+            },
+            {
                 "name": "get_requirement_details",
                 "description": "Get full requirement with all relationships",
                 "inputSchema": {
@@ -101,7 +114,7 @@ class RequirementHandler(BaseHandler):
             },
         ]
 
-    async def handle_tool_call(self, tool_name: str, arguments: Dict[str, Any]) -> List[TextContent]:
+    async def handle_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
         """Route tool calls to appropriate handler methods"""
         try:
             if tool_name == "create_requirement":
@@ -110,6 +123,8 @@ class RequirementHandler(BaseHandler):
                 return await self._update_requirement_status(**arguments)
             elif tool_name == "query_requirements":
                 return self._query_requirements(**arguments)
+            elif tool_name == "query_requirements_json":
+                return self._query_requirements_json(**arguments)
             elif tool_name == "get_requirement_details":
                 return self._get_requirement_details(**arguments)
             elif tool_name == "trace_requirement":
@@ -119,7 +134,7 @@ class RequirementHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response(f"Error handling {tool_name}", e)
 
-    async def _create_requirement(self, **params) -> List[TextContent]:
+    async def _create_requirement(self, **params) -> list[TextContent]:
         """Create a new requirement with LLM-enhanced analysis"""
         # Validate required parameters
         error = self._validate_required_params(params, ["type", "title", "priority", "current_state", "desired_state"])
@@ -155,7 +170,7 @@ class RequirementHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to create requirement", e)
 
-    async def _analyze_requirement_with_llm(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def _analyze_requirement_with_llm(self, params: dict[str, Any]) -> dict[str, Any] | None:
         """Analyze requirement using LLM sampling for decomposition"""
         if not self.mcp_client:
             self.logger.info("No MCP client available for sampling - using fallback requirement creation")
@@ -177,7 +192,7 @@ class RequirementHandler(BaseHandler):
             }
 
             # Check if the MCP client has sampling capability
-            if hasattr(self.mcp_client, "sample") and callable(getattr(self.mcp_client, "sample")):
+            if hasattr(self.mcp_client, "sample") and callable(self.mcp_client.sample):
                 try:
                     # Make the actual MCP sampling request
                     response = await self.mcp_client.sample(sampling_request)
@@ -198,7 +213,7 @@ class RequirementHandler(BaseHandler):
             self.logger.warning(f"LLM analysis failed: {e}")
             return None
 
-    def _build_requirement_context(self, params: Dict[str, Any]) -> str:
+    def _build_requirement_context(self, params: dict[str, Any]) -> str:
         """Build context string for LLM analysis"""
         context = f"""Analyze this requirement for decomposition and clarity:
 
@@ -216,7 +231,7 @@ Acceptance Criteria:
 {self._format_list(params.get("acceptance_criteria", []))}
 
 Please analyze if this requirement should be:
-1. Created as a single requirement (good scope examples: "natural language search", 
+1. Created as a single requirement (good scope examples: "natural language search",
    "unified navigation bar", "mobile friendly navigation")
 2. Decomposed into sub-requirements (if it covers multiple features, pages, or complex workflows)
 3. Needs clarification (missing critical details)
@@ -258,13 +273,13 @@ Guidelines:
 - Provide clear rationale for decomposition suggestions
 - Always respond with valid JSON matching the specified format"""
 
-    def _format_list(self, items: List[str]) -> str:
+    def _format_list(self, items: list[str]) -> str:
         """Format list items for context"""
         if not items:
             return "- None specified"
         return "\n".join(f"- {item}" for item in items)
 
-    def _create_clarification_response(self, analysis: Dict[str, Any]) -> List[TextContent]:
+    def _create_clarification_response(self, analysis: dict[str, Any]) -> list[TextContent]:
         """Create response with clarifying questions"""
         questions = analysis.get("clarifying_questions", [])[:3]  # Limit to 3 questions
 
@@ -280,8 +295,8 @@ Guidelines:
         return self._create_above_fold_response("INFO", key_info, action_info, response)
 
     def _create_decomposition_response(
-        self, analysis: Dict[str, Any], original_params: Dict[str, Any]
-    ) -> List[TextContent]:
+        self, analysis: dict[str, Any], original_params: dict[str, Any]
+    ) -> list[TextContent]:
         """Create response with decomposition suggestions"""
         suggestions = analysis.get("decomposition", {}).get("suggested_sub_requirements", [])
 
@@ -298,7 +313,7 @@ Guidelines:
         action_info = f"🔄 {len(suggestions)} sub-requirements suggested | Complex scope detected"
         return self._create_above_fold_response("INFO", key_info, action_info, response)
 
-    def _create_single_requirement(self, params: Dict[str, Any]) -> str:
+    def _create_single_requirement(self, params: dict[str, Any]) -> str:
         """Create a single requirement (extracted from original logic)"""
         # Get next requirement number
         req_number = self.db.get_next_id("requirements", "requirement_number", "type = ?", [params["type"]])
@@ -330,8 +345,8 @@ Guidelines:
         return req_id
 
     async def _create_decomposed_requirements(
-        self, analysis: Dict[str, Any], original_params: Dict[str, Any]
-    ) -> List[TextContent]:
+        self, analysis: dict[str, Any], original_params: dict[str, Any]
+    ) -> list[TextContent]:
         """Create decomposed sub-requirements automatically from LLM analysis"""
         try:
             suggestions = analysis.get("decomposition", {}).get("suggested_sub_requirements", [])
@@ -391,7 +406,7 @@ Guidelines:
 
 ## Sub-Requirements Created ({len(sub_req_ids)})
 """
-            for i, (sub_req_id, suggestion) in enumerate(zip(sub_req_ids, suggestions), 1):
+            for i, (sub_req_id, suggestion) in enumerate(zip(sub_req_ids, suggestions, strict=False), 1):
                 req_type = suggestion.get("type", original_params["type"])
                 response += f"{i}. **{sub_req_id}**: {suggestion['title']} ({req_type})\n"
                 response += f"   - Rationale: {suggestion.get('rationale', 'N/A')}\n"
@@ -441,7 +456,7 @@ Guidelines:
         except Exception as e:
             self.logger.error(f"Failed to create requirement dependency: {e}")
 
-    async def _update_requirement_status(self, **params) -> List[TextContent]:
+    async def _update_requirement_status(self, **params) -> list[TextContent]:
         """Update requirement status with validation"""
         # Validate required parameters
         error = self._validate_required_params(params, ["requirement_id", "new_status"])
@@ -518,7 +533,7 @@ Guidelines:
         except Exception as e:
             return self._create_error_response("Failed to update requirement status", e)
 
-    def _query_requirements(self, **params) -> List[TextContent]:
+    def _query_requirements(self, **params) -> list[TextContent]:
         """Query requirements with filters"""
         try:
             where_clauses = []
@@ -578,7 +593,59 @@ Guidelines:
         except Exception as e:
             return self._create_error_response("Failed to query requirements", e)
 
-    def _get_requirement_details(self, **params) -> List[TextContent]:
+    def _query_requirements_json(self, **params) -> list[TextContent]:
+        """Query requirements and return structured JSON data for UI"""
+        try:
+            where_clauses = []
+            where_params = []
+
+            if params.get("status"):
+                where_clauses.append("status = ?")
+                where_params.append(params["status"])
+
+            if params.get("priority"):
+                where_clauses.append("priority = ?")
+                where_params.append(params["priority"])
+
+            if params.get("type"):
+                where_clauses.append("type = ?")
+                where_params.append(params["type"])
+
+            if params.get("search_text"):
+                where_clauses.append("(title LIKE ? OR desired_state LIKE ?)")
+                search = f"%{params['search_text']}%"
+                where_params.extend([search, search])
+
+            where_clause = " AND ".join(where_clauses) if where_clauses else ""
+
+            requirements = self.db.get_records(
+                "requirements", "*", where_clause, where_params, "priority, created_at DESC"
+            )
+
+            # Convert database rows to JSON-serializable format
+            requirements_list = []
+            for req in requirements:
+                # Convert row object to dictionary and handle any special fields
+                req_dict = dict(req) if hasattr(req, 'keys') else req
+
+                # Parse JSON fields if they exist as strings
+                json_fields = ['functional_requirements', 'acceptance_criteria', 'business_value']
+                for field in json_fields:
+                    if field in req_dict and isinstance(req_dict[field], str):
+                        try:
+                            req_dict[field] = json.loads(req_dict[field]) if req_dict[field] else []
+                        except (json.JSONDecodeError, TypeError):
+                            req_dict[field] = []
+
+                requirements_list.append(req_dict)
+
+            # Return as JSON string in text content
+            return [TextContent(type="text", text=json.dumps(requirements_list))]
+
+        except Exception as e:
+            return self._create_error_response("Failed to query requirements as JSON", e)
+
+    def _get_requirement_details(self, **params) -> list[TextContent]:
         """Get full requirement details"""
         # Validate required parameters
         error = self._validate_required_params(params, ["requirement_id"])
@@ -656,7 +723,7 @@ Guidelines:
         except Exception as e:
             return self._create_error_response("Failed to get requirement details", e)
 
-    def _trace_requirement(self, **params) -> List[TextContent]:
+    def _trace_requirement(self, **params) -> list[TextContent]:
         """Trace requirement through full lifecycle including decomposition relationships"""
         # Validate required parameters
         error = self._validate_required_params(params, ["requirement_id"])

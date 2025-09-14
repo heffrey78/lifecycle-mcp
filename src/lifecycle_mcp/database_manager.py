@@ -9,10 +9,10 @@ import os
 import sqlite3
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from queue import Empty, Full, Queue
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from .migrations import apply_all_migrations
 
@@ -63,7 +63,7 @@ class ConnectionPool:
 
         return conn
 
-    def get_connection(self, timeout: Optional[float] = None) -> sqlite3.Connection:
+    def get_connection(self, timeout: float | None = None) -> sqlite3.Connection:
         """Get a connection from the pool with timeout"""
         timeout = timeout or self.timeout
 
@@ -80,10 +80,8 @@ class ConnectionPool:
                 logger.warning("Stale connection detected, creating new one")
                 with self.lock:
                     self.all_connections.discard(conn)
-                try:
+                with suppress(Exception):
                     conn.close()
-                except Exception:
-                    pass
 
                 # Create new connection
                 new_conn = self._create_connection()
@@ -107,16 +105,12 @@ class ConnectionPool:
                 # Connection is bad or pool is full, close it
                 with self.lock:
                     self.all_connections.discard(conn)
-                try:
+                with suppress(Exception):
                     conn.close()
-                except Exception:
-                    pass
         else:
             # Temporary connection, just close it
-            try:
+            with suppress(Exception):
                 conn.close()
-            except Exception:
-                pass
 
     def close_all(self):
         """Close all connections in the pool"""
@@ -131,14 +125,12 @@ class ConnectionPool:
 
             # Close any remaining connections
             for conn in list(self.all_connections):
-                try:
+                with suppress(sqlite3.Error):
                     conn.close()
-                except sqlite3.Error:
-                    pass
 
             self.all_connections.clear()
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get connection pool statistics"""
         with self.lock:
             return {
@@ -154,7 +146,7 @@ class DatabaseManager:
 
     def __init__(
         self,
-        db_path: Optional[str] = None,
+        db_path: str | None = None,
         pool_size: int = 5,
         timeout: float = 30.0,
         enable_pooling: bool = True,
@@ -186,7 +178,7 @@ class DatabaseManager:
             conn = sqlite3.connect(self.db_path)
             schema_path = Path(__file__).parent / "lifecycle-schema.sql"
             if schema_path.exists():
-                with open(schema_path, "r", encoding="utf-8") as f:
+                with open(schema_path, encoding="utf-8") as f:
                     conn.executescript(f.read())
                 logger.info("Database schema initialized")
             else:
@@ -198,7 +190,7 @@ class DatabaseManager:
         apply_all_migrations(self.db_path)
 
     @contextmanager
-    def get_connection(self, row_factory: bool = False, timeout: Optional[float] = None):
+    def get_connection(self, row_factory: bool = False, timeout: float | None = None):
         """Context manager for database connections with pooling and retry logic"""
         conn = None
         for attempt in range(self.retry_attempts):
@@ -216,10 +208,8 @@ class DatabaseManager:
 
             except sqlite3.OperationalError as e:
                 if conn:
-                    try:
+                    with suppress(Exception):
                         conn.rollback()
-                    except Exception:
-                        pass
 
                 # Check if this is a retry-able error
                 if "database is locked" in str(e).lower() or "disk I/O error" in str(e).lower():
@@ -233,10 +223,8 @@ class DatabaseManager:
 
             except Exception as e:
                 if conn:
-                    try:
+                    with suppress(Exception):
                         conn.rollback()
-                    except Exception:
-                        pass
                 logger.error(f"Database operation failed: {str(e)}")
                 raise
 
@@ -250,11 +238,11 @@ class DatabaseManager:
     def execute_query(
         self,
         query: str,
-        params: Optional[List[Any]] = None,
+        params: list[Any] | None = None,
         fetch_one: bool = False,
         fetch_all: bool = False,
         row_factory: bool = False,
-    ) -> Optional[Union[List, sqlite3.Row]]:
+    ) -> list | sqlite3.Row | None:
         """Execute a query and return results"""
         params = params or []
 
@@ -271,7 +259,7 @@ class DatabaseManager:
                 conn.commit()
                 return cur.lastrowid
 
-    def execute_many(self, query: str, params_list: List[List[Any]]) -> None:
+    def execute_many(self, query: str, params_list: list[list[Any]]) -> None:
         """Execute a query multiple times with different parameters"""
         with self.get_connection() as conn:
             cur = conn.cursor()
@@ -279,7 +267,7 @@ class DatabaseManager:
             conn.commit()
 
     @contextmanager
-    def transaction(self, row_factory: bool = False, timeout: Optional[float] = None):
+    def transaction(self, row_factory: bool = False, timeout: float | None = None):
         """Context manager for database transactions with pooling and retry logic"""
         conn = None
         for attempt in range(self.retry_attempts):
@@ -298,10 +286,8 @@ class DatabaseManager:
 
             except sqlite3.OperationalError as e:
                 if conn:
-                    try:
+                    with suppress(Exception):
                         conn.rollback()
-                    except Exception:
-                        pass
 
                 # Check if this is a retry-able error
                 if "database is locked" in str(e).lower() or "disk I/O error" in str(e).lower():
@@ -315,10 +301,8 @@ class DatabaseManager:
 
             except Exception as e:
                 if conn:
-                    try:
+                    with suppress(Exception):
                         conn.rollback()
-                    except Exception:
-                        pass
                 logger.error(f"Transaction failed: {str(e)}")
                 raise
 
@@ -330,7 +314,7 @@ class DatabaseManager:
                         conn.close()
 
     def get_next_id(
-        self, table: str, id_column: str, where_clause: str = "", where_params: Optional[List[Any]] = None
+        self, table: str, id_column: str, where_clause: str = "", where_params: list[Any] | None = None
     ) -> int:
         """Get next available ID for a table with optional filtering"""
         where_params = where_params or []
@@ -343,13 +327,13 @@ class DatabaseManager:
         result = self.execute_query(query, where_params, fetch_one=True)
         return result[0] if result else 1
 
-    def check_exists(self, table: str, where_clause: str, where_params: List[Any]) -> bool:
+    def check_exists(self, table: str, where_clause: str, where_params: list[Any]) -> bool:
         """Check if a record exists in the table"""
         query = f"SELECT 1 FROM {table} WHERE {where_clause} LIMIT 1"
         result = self.execute_query(query, where_params, fetch_one=True)
         return result is not None
 
-    def insert_record(self, table: str, data: Dict[str, Any]) -> Optional[int]:
+    def insert_record(self, table: str, data: dict[str, Any]) -> int | None:
         """Insert a record into the table and return the row ID"""
         columns = list(data.keys())
         placeholders = ["?" for _ in columns]
@@ -358,15 +342,15 @@ class DatabaseManager:
         query = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({', '.join(placeholders)})"
         return self.execute_query(query, values)
 
-    def update_record(self, table: str, data: Dict[str, Any], where_clause: str, where_params: List[Any]) -> None:
+    def update_record(self, table: str, data: dict[str, Any], where_clause: str, where_params: list[Any]) -> None:
         """Update records in the table"""
-        set_clauses = [f"{column} = ?" for column in data.keys()]
+        set_clauses = [f"{column} = ?" for column in data]
         values = list(data.values()) + where_params
 
         query = f"UPDATE {table} SET {', '.join(set_clauses)} WHERE {where_clause}"
         self.execute_query(query, values)
 
-    def delete_record(self, table: str, where_clause: str, where_params: List[Any]) -> None:
+    def delete_record(self, table: str, where_clause: str, where_params: list[Any]) -> None:
         """Delete records from the table"""
         query = f"DELETE FROM {table} WHERE {where_clause}"
         self.execute_query(query, where_params)
@@ -376,11 +360,11 @@ class DatabaseManager:
         table: str,
         columns: str = "*",
         where_clause: str = "",
-        where_params: Optional[List[Any]] = None,
+        where_params: list[Any] | None = None,
         order_by: str = "",
-        limit: Optional[int] = None,
+        limit: int | None = None,
         row_factory: bool = True,
-    ) -> List[sqlite3.Row]:
+    ) -> list[sqlite3.Row]:
         """Get records from the table with optional filtering and ordering"""
         where_params = where_params or []
 
@@ -398,8 +382,8 @@ class DatabaseManager:
         return self.execute_query(query, where_params, fetch_all=True, row_factory=row_factory)
 
     def configure_pool(
-        self, pool_size: Optional[int] = None, timeout: Optional[float] = None, enable_pooling: Optional[bool] = None
-    ) -> Dict[str, Any]:
+        self, pool_size: int | None = None, timeout: float | None = None, enable_pooling: bool | None = None
+    ) -> dict[str, Any]:
         """Reconfigure connection pool settings"""
         old_config = {"pool_size": self.pool_size, "timeout": self.timeout, "enable_pooling": self.enable_pooling}
 
@@ -427,7 +411,7 @@ class DatabaseManager:
             "new_config": {"pool_size": self.pool_size, "timeout": self.timeout, "enable_pooling": self.enable_pooling},
         }
 
-    def get_pool_stats(self) -> Dict[str, Any]:
+    def get_pool_stats(self) -> dict[str, Any]:
         """Get connection pool statistics and health metrics"""
         if not self.enable_pooling or not self.connection_pool:
             return {"pooling_enabled": False, "message": "Connection pooling is disabled"}
@@ -444,7 +428,7 @@ class DatabaseManager:
 
         return stats
 
-    def test_connection(self, timeout: Optional[float] = None) -> Dict[str, Any]:
+    def test_connection(self, timeout: float | None = None) -> dict[str, Any]:
         """Test database connectivity and measure response time"""
         start_time = time.time()
 

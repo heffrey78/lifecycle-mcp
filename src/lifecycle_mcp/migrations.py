@@ -55,7 +55,7 @@ def get_schema_version(db_path: str) -> int:
 
         # Check if schema_version table exists
         cursor.execute("""
-            SELECT name FROM sqlite_master 
+            SELECT name FROM sqlite_master
             WHERE type='table' AND name='schema_version'
         """)
 
@@ -92,7 +92,7 @@ def set_schema_version(db_path: str, version: int, description: str) -> bool:
 
         cursor.execute(
             """
-            INSERT INTO schema_version (version, description) 
+            INSERT INTO schema_version (version, description)
             VALUES (?, ?)
         """,
             (version, description),
@@ -228,7 +228,7 @@ def apply_decomposition_extension_migration(db_path: str) -> bool:
                     rd.depends_on_requirement_id as parent_requirement_id,
                     rt.hierarchy_level + 1,
                     rt.root_requirement_id,
-                    rt.path || ' > ' || r.type || '-' || 
+                    rt.path || ' > ' || r.type || '-' ||
                     CAST(r.requirement_number AS TEXT)
                 FROM requirements r
                 JOIN requirement_dependencies rd ON r.id = rd.requirement_id
@@ -248,11 +248,11 @@ def apply_decomposition_extension_migration(db_path: str) -> bool:
                 r.complexity_score,
                 r.scope_assessment,
                 r.decomposition_level,
-                (LENGTH(r.functional_requirements) - 
-                 LENGTH(REPLACE(r.functional_requirements, ',', '')) + 1) 
+                (LENGTH(r.functional_requirements) -
+                 LENGTH(REPLACE(r.functional_requirements, ',', '')) + 1)
                  as functional_req_count,
-                (LENGTH(r.acceptance_criteria) - 
-                 LENGTH(REPLACE(r.acceptance_criteria, ',', '')) + 1) 
+                (LENGTH(r.acceptance_criteria) -
+                 LENGTH(REPLACE(r.acceptance_criteria, ',', '')) + 1)
                  as acceptance_criteria_count,
                 CASE
                     WHEN r.complexity_score >= 7 THEN 'High'
@@ -264,9 +264,9 @@ def apply_decomposition_extension_migration(db_path: str) -> bool:
                 AND r.decomposition_level < 3
                 AND (
                     r.complexity_score >= 5
-                    OR r.scope_assessment IN 
+                    OR r.scope_assessment IN
                     ('multiple_features', 'complex_workflow', 'epic')
-                    OR (LENGTH(r.functional_requirements) - 
+                    OR (LENGTH(r.functional_requirements) -
                         LENGTH(REPLACE(r.functional_requirements, ',', '')) + 1) > 5
                 )
             """)
@@ -328,7 +328,7 @@ def apply_decomposition_extension_migration(db_path: str) -> bool:
                             JOIN circular_check cc ON rd.requirement_id = cc.ancestor_id
                             WHERE rd.dependency_type = 'parent'
                         )
-                        SELECT 1 FROM circular_check 
+                        SELECT 1 FROM circular_check
                         WHERE ancestor_id = NEW.requirement_id
                     )
                     THEN RAISE(ABORT, 'Circular dependency detected in parent-child relationship')
@@ -351,6 +351,63 @@ def apply_decomposition_extension_migration(db_path: str) -> bool:
             conn.close()
 
 
+def fix_blocked_items_view_migration(db_path: str) -> bool:
+    """
+    Apply migration to fix blocked_items view column reference
+
+    Args:
+        db_path: Path to the SQLite database
+
+    Returns:
+        True if migration was applied successfully, False otherwise
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # Drop and recreate the blocked_items view with correct column reference
+        cursor.execute("DROP VIEW IF EXISTS blocked_items")
+        cursor.execute("""
+            CREATE VIEW blocked_items AS
+            SELECT
+                'task' as item_type,
+                t.id,
+                t.title,
+                t.status,
+                GROUP_CONCAT(td.depends_on_task_id) as blocking_items
+            FROM tasks t
+            JOIN task_dependencies td ON t.id = td.task_id
+            JOIN tasks dt ON td.depends_on_task_id = dt.id
+            WHERE t.status = 'Blocked' OR (t.status = 'Not Started' AND dt.status != 'Complete')
+            GROUP BY t.id
+
+            UNION ALL
+
+            SELECT
+                'requirement' as item_type,
+                r.id,
+                r.title,
+                r.status,
+                GROUP_CONCAT(rd.depends_on_requirement_id) as blocking_items
+            FROM requirements r
+            JOIN requirement_dependencies rd ON r.id = rd.requirement_id
+            JOIN requirements dr ON rd.depends_on_requirement_id = dr.id
+            WHERE dr.status NOT IN ('Validated', 'Deprecated')
+            GROUP BY r.id
+        """)
+
+        conn.commit()
+        print("Blocked items view migration applied successfully")
+        return True
+
+    except Exception as e:
+        print(f"Error applying blocked items view migration: {e}")
+        return False
+    finally:
+        if "conn" in locals():
+            conn.close()
+
+
 def apply_all_migrations(db_path: str) -> bool:
     """Apply all pending migrations to the database"""
     current_version = get_schema_version(db_path)
@@ -359,6 +416,7 @@ def apply_all_migrations(db_path: str) -> bool:
         (1, "GitHub integration fields", apply_github_integration_migration),
         (2, "GitHub sync metadata fields", apply_github_sync_metadata_migration),
         (3, "Requirement decomposition extension", apply_decomposition_extension_migration),
+        (4, "Fix blocked_items view column reference", fix_blocked_items_view_migration),
     ]
 
     for version, description, migration_func in migrations:

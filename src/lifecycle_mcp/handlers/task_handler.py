@@ -171,9 +171,13 @@ class TaskHandler(BaseHandler):
 
                 if parent_info:
                     parent_task_number = parent_info[0]["task_number"]
-                    subtask_number = self.db.get_next_id(
-                        "tasks", "subtask_number", "parent_task_id = ?", [params["parent_task_id"]]
+                    # Count existing subtasks using relationships table
+                    existing_subtasks = self.db.get_records(
+                        "relationships", "COUNT(*) as count",
+                        "target_type = 'task' AND target_id = ? AND relationship_type = 'parent'",
+                        [params["parent_task_id"]]
                     )
+                    subtask_number = existing_subtasks[0]["count"] + 1 if existing_subtasks else 1
                     task_number = parent_task_number
                 else:
                     # Parent task not found
@@ -181,7 +185,7 @@ class TaskHandler(BaseHandler):
 
             task_id = f"TASK-{task_number:04d}-{subtask_number:02d}-00"
 
-            # Prepare task data
+            # Prepare task data (removed parent_task_id column)
             task_data = {
                 "id": task_id,
                 "task_number": task_number,
@@ -192,13 +196,25 @@ class TaskHandler(BaseHandler):
                 "effort": params.get("effort"),
                 "user_story": params.get("user_story"),
                 "acceptance_criteria": self._safe_json_dumps(params.get("acceptance_criteria", [])),
-                "parent_task_id": params.get("parent_task_id"),
                 "assignee": params.get("assignee"),
                 "status": "Not Started",
             }
 
             # Insert task
             self.db.insert_record("tasks", task_data)
+
+            # Create parent-child relationship if this is a subtask
+            if params.get("parent_task_id"):
+                relationship_id = f"rel-{task_id}-{params['parent_task_id']}-parent"
+                relationship_data = {
+                    "id": relationship_id,
+                    "source_type": "task",
+                    "source_id": task_id,
+                    "target_type": "task",
+                    "target_id": params["parent_task_id"],
+                    "relationship_type": "parent"
+                }
+                self.db.insert_record("relationships", relationship_data)
 
             # Link to requirements
             for req_id in params["requirement_ids"]:
@@ -738,9 +754,20 @@ class TaskHandler(BaseHandler):
                     task_info += f"- {req['id']}: {req['title']}\n"
 
             # Get subtasks if this is a parent task
-            subtasks = self.db.get_records(
-                "tasks", "id, title, status", "parent_task_id = ?", [params["task_id"]], "subtask_number"
+            # Query relationships table for child tasks
+            child_relationship_records = self.db.get_records(
+                "relationships", "source_id",
+                "target_type = 'task' AND target_id = ? AND relationship_type = 'parent'",
+                [params["task_id"]]
             )
+
+            subtasks = []
+            if child_relationship_records:
+                child_task_ids = [r["source_id"] for r in child_relationship_records]
+                for task_id in child_task_ids:
+                    task_records = self.db.get_records("tasks", "id, title, status", "id = ?", [task_id])
+                    if task_records:
+                        subtasks.extend(task_records)
 
             if subtasks:
                 task_info += f"\n## Subtasks ({len(subtasks)})\n"
@@ -748,8 +775,16 @@ class TaskHandler(BaseHandler):
                     task_info += f"- {subtask['id']}: {subtask['title']} [{subtask['status']}]\n"
 
             # Show parent task if this is a subtask
-            if task["parent_task_id"]:
-                parent_tasks = self.db.get_records("tasks", "id, title, status", "id = ?", [task["parent_task_id"]])
+            # Query relationships table for parent tasks
+            parent_relationship_records = self.db.get_records(
+                "relationships", "target_id",
+                "source_type = 'task' AND source_id = ? AND relationship_type = 'parent'",
+                [params["task_id"]]
+            )
+
+            if parent_relationship_records:
+                parent_task_id = parent_relationship_records[0]["target_id"]
+                parent_tasks = self.db.get_records("tasks", "id, title, status", "id = ?", [parent_task_id])
 
                 if parent_tasks:
                     parent = dict(parent_tasks[0])  # Convert Row to dict for consistency

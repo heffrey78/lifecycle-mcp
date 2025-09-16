@@ -287,72 +287,37 @@ class RelationshipHandler(BaseHandler):
         return valid_combinations.get((source_type, target_type, rel_type), False)
 
     def _relationship_exists(self, source_id: str, target_id: str, rel_type: str) -> bool:
-        """Check if relationship already exists"""
+        """Check if relationship already exists in unified relationships table"""
         source_type = self._get_entity_type(source_id)
         target_type = self._get_entity_type(target_id)
 
-        if source_type == "requirement" and target_type == "task":
-            results = self.db.get_records("requirement_tasks", "1", "requirement_id = ? AND task_id = ?", [source_id, target_id])
-            return len(results) > 0
-        elif source_type == "task" and target_type == "requirement":
-            # Consistent parameter order: always put requirement_id first, task_id second
-            results = self.db.get_records("requirement_tasks", "1", "requirement_id = ? AND task_id = ?", [target_id, source_id])
-            return len(results) > 0
-        elif source_type == "requirement" and target_type == "architecture":
-            results = self.db.get_records("requirement_architecture", "1", "requirement_id = ? AND architecture_id = ?", [source_id, target_id])
-            return len(results) > 0
-        elif source_type == "task" and target_type == "task":
-            # For dependencies: task_id is the dependent, depends_on_task_id is the dependency
-            results = self.db.get_records("task_dependencies", "1", "task_id = ? AND depends_on_task_id = ? AND dependency_type = ?", [source_id, target_id, rel_type])
-            return len(results) > 0
-        elif source_type == "requirement" and target_type == "requirement":
-            # For dependencies: requirement_id is the dependent, depends_on_requirement_id is the dependency
-            results = self.db.get_records("requirement_dependencies", "1", "requirement_id = ? AND depends_on_requirement_id = ? AND dependency_type = ?", [source_id, target_id, rel_type])
-            return len(results) > 0
+        if not source_type or not target_type:
+            return False
 
-        return False
+        # Check unified relationships table
+        results = self.db.get_records(
+            "relationships",
+            "1",
+            "source_type = ? AND source_id = ? AND target_type = ? AND target_id = ? AND relationship_type = ?",
+            [source_type, source_id, target_type, target_id, rel_type]
+        )
+        return len(results) > 0
 
     def _insert_relationship(self, source_id: str, target_id: str, source_type: str, target_type: str, rel_type: str) -> bool:
-        """Insert relationship into appropriate table"""
+        """Insert relationship into unified relationships table"""
         try:
-            if source_type == "requirement" and target_type == "task" and rel_type == "implements":
-                self.db.insert_record("requirement_tasks", {
-                    "requirement_id": source_id,
-                    "task_id": target_id
-                })
-            elif source_type == "task" and target_type == "requirement" and rel_type == "implements":
-                self.db.insert_record("requirement_tasks", {
-                    "requirement_id": target_id,
-                    "task_id": source_id
-                })
-            elif source_type == "requirement" and target_type == "architecture" and rel_type == "addresses":
-                self.db.insert_record("requirement_architecture", {
-                    "requirement_id": source_id,
-                    "architecture_id": target_id,
-                    "relationship_type": rel_type
-                })
-            elif source_type == "architecture" and target_type == "requirement" and rel_type == "addresses":
-                self.db.insert_record("requirement_architecture", {
-                    "requirement_id": target_id,
-                    "architecture_id": source_id,
-                    "relationship_type": rel_type
-                })
-            elif source_type == "task" and target_type == "task":
-                # Consistent pattern: source is dependent, target is dependency
-                self.db.insert_record("task_dependencies", {
-                    "task_id": source_id,
-                    "depends_on_task_id": target_id,
-                    "dependency_type": rel_type
-                })
-            elif source_type == "requirement" and target_type == "requirement":
-                # Consistent pattern: source is dependent, target is dependency
-                self.db.insert_record("requirement_dependencies", {
-                    "requirement_id": source_id,
-                    "depends_on_requirement_id": target_id,
-                    "dependency_type": rel_type
-                })
-            else:
-                return False
+            # Generate unique relationship ID
+            relationship_id = f"rel-{source_id}-{target_id}-{rel_type}"
+
+            # Insert into unified relationships table
+            self.db.insert_record("relationships", {
+                "id": relationship_id,
+                "source_type": source_type,
+                "source_id": source_id,
+                "target_type": target_type,
+                "target_id": target_id,
+                "relationship_type": rel_type
+            })
 
             return True
         except Exception as e:
@@ -360,114 +325,80 @@ class RelationshipHandler(BaseHandler):
             return False
 
     def _delete_relationship_record(self, source_id: str, target_id: str, source_type: str, target_type: str, rel_type: str | None = None) -> int:
-        """Delete relationship record and return count of deleted records"""
+        """Delete relationship record from unified relationships table and return count of deleted records"""
         try:
-
-            if source_type == "requirement" and target_type == "task":
-                self.db.delete_record("requirement_tasks", "requirement_id = ? AND task_id = ?", [source_id, target_id])
-                return 1  # Simplified return for now
-            elif source_type == "task" and target_type == "requirement":
-                self.db.delete_record("requirement_tasks", "requirement_id = ? AND task_id = ?", [target_id, source_id])
-                return 1
-            elif source_type == "requirement" and target_type == "architecture":
-                if rel_type:
-                    self.db.delete_record("requirement_architecture", "requirement_id = ? AND architecture_id = ? AND relationship_type = ?", [source_id, target_id, rel_type])
-                else:
-                    self.db.delete_record("requirement_architecture", "requirement_id = ? AND architecture_id = ?", [source_id, target_id])
-                return 1
-            elif source_type == "task" and target_type == "task":
-                if rel_type:
-                    # Consistent with _relationship_exists: source is dependent, target is dependency
-                    self.db.delete_record("task_dependencies", "task_id = ? AND depends_on_task_id = ? AND dependency_type = ?", [source_id, target_id, rel_type])
-                else:
-                    self.db.delete_record("task_dependencies", "task_id = ? AND depends_on_task_id = ?", [source_id, target_id])
-                return 1
-            elif source_type == "requirement" and target_type == "requirement":
-                if rel_type:
-                    # Consistent with _relationship_exists: source is dependent, target is dependency
-                    self.db.delete_record("requirement_dependencies", "requirement_id = ? AND depends_on_requirement_id = ? AND dependency_type = ?", [source_id, target_id, rel_type])
-                else:
-                    self.db.delete_record("requirement_dependencies", "requirement_id = ? AND depends_on_requirement_id = ?", [source_id, target_id])
-                return 1
-            else:
+            if not source_type or not target_type:
                 return 0
+
+            # Build WHERE clause for unified relationships table
+            if rel_type:
+                where_clause = "source_type = ? AND source_id = ? AND target_type = ? AND target_id = ? AND relationship_type = ?"
+                params = [source_type, source_id, target_type, target_id, rel_type]
+            else:
+                where_clause = "source_type = ? AND source_id = ? AND target_type = ? AND target_id = ?"
+                params = [source_type, source_id, target_type, target_id]
+
+            # Get count before deletion for return value
+            existing = self.db.get_records("relationships", "COUNT(*) as count", where_clause, params)
+            count = existing[0]["count"] if existing else 0
+
+            if count > 0:
+                self.db.delete_record("relationships", where_clause, params)
+                return count
+
+            return 0
 
         except Exception as e:
             self.logger.error(f"Failed to delete relationship: {str(e)}")
             return 0
 
     def _fetch_all_relationships(self) -> list[dict[str, Any]]:
-        """Fetch all relationships from all tables"""
+        """Fetch all relationships from unified relationships table"""
         relationships = []
 
-        # Requirement -> Task relationships
-        req_task_rows = self.db.get_records("requirement_tasks", "*")
-        for row in req_task_rows:
-            # Get requirement and task titles separately
-            req_rows = self.db.get_records("requirements", "title", "id = ?", [row["requirement_id"]])
-            task_rows = self.db.get_records("tasks", "title", "id = ?", [row["task_id"]])
+        # Get all relationships from unified table
+        relationship_rows = self.db.get_records("relationships", "*")
 
-            req_title = req_rows[0]["title"] if req_rows else row["requirement_id"]
-            task_title = task_rows[0]["title"] if task_rows else row["task_id"]
+        for row in relationship_rows:
+            source_id = row["source_id"]
+            target_id = row["target_id"]
+            source_type = row["source_type"]
+            target_type = row["target_type"]
 
-            relationships.append({
-                "source_id": row["requirement_id"],
-                "target_id": row["task_id"],
-                "type": "implements",
-                "source_title": req_title,
-                "target_title": task_title
-            })
+            # Get source entity title
+            source_title = source_id  # Default fallback
+            if source_type == "requirement":
+                source_rows = self.db.get_records("requirements", "title", "id = ?", [source_id])
+                if source_rows:
+                    source_title = source_rows[0]["title"]
+            elif source_type == "task":
+                source_rows = self.db.get_records("tasks", "title", "id = ?", [source_id])
+                if source_rows:
+                    source_title = source_rows[0]["title"]
+            elif source_type == "architecture":
+                source_rows = self.db.get_records("architecture", "title", "id = ?", [source_id])
+                if source_rows:
+                    source_title = source_rows[0]["title"]
 
-        # Requirement -> Architecture relationships
-        req_arch_rows = self.db.get_records("requirement_architecture", "*")
-        for row in req_arch_rows:
-            # Get requirement and architecture titles separately
-            req_rows = self.db.get_records("requirements", "title", "id = ?", [row["requirement_id"]])
-            arch_rows = self.db.get_records("architecture", "title", "id = ?", [row["architecture_id"]])
-
-            req_title = req_rows[0]["title"] if req_rows else row["requirement_id"]
-            arch_title = arch_rows[0]["title"] if arch_rows else row["architecture_id"]
-
-            relationships.append({
-                "source_id": row["requirement_id"],
-                "target_id": row["architecture_id"],
-                "type": row.get("relationship_type", "addresses"),
-                "source_title": req_title,
-                "target_title": arch_title
-            })
-
-        # Task dependencies
-        task_dep_rows = self.db.get_records("task_dependencies", "*")
-        for row in task_dep_rows:
-            # Get task titles separately
-            source_rows = self.db.get_records("tasks", "title", "id = ?", [row["depends_on_task_id"]])
-            target_rows = self.db.get_records("tasks", "title", "id = ?", [row["task_id"]])
-
-            source_title = source_rows[0]["title"] if source_rows else row["depends_on_task_id"]
-            target_title = target_rows[0]["title"] if target_rows else row["task_id"]
+            # Get target entity title
+            target_title = target_id  # Default fallback
+            if target_type == "requirement":
+                target_rows = self.db.get_records("requirements", "title", "id = ?", [target_id])
+                if target_rows:
+                    target_title = target_rows[0]["title"]
+            elif target_type == "task":
+                target_rows = self.db.get_records("tasks", "title", "id = ?", [target_id])
+                if target_rows:
+                    target_title = target_rows[0]["title"]
+            elif target_type == "architecture":
+                target_rows = self.db.get_records("architecture", "title", "id = ?", [target_id])
+                if target_rows:
+                    target_title = target_rows[0]["title"]
 
             relationships.append({
-                "source_id": row["depends_on_task_id"],
-                "target_id": row["task_id"],
-                "type": row.get("dependency_type", "depends"),
-                "source_title": source_title,
-                "target_title": target_title
-            })
-
-        # Requirement dependencies
-        req_dep_rows = self.db.get_records("requirement_dependencies", "*")
-        for row in req_dep_rows:
-            # Get requirement titles separately
-            source_rows = self.db.get_records("requirements", "title", "id = ?", [row["depends_on_requirement_id"]])
-            target_rows = self.db.get_records("requirements", "title", "id = ?", [row["requirement_id"]])
-
-            source_title = source_rows[0]["title"] if source_rows else row["depends_on_requirement_id"]
-            target_title = target_rows[0]["title"] if target_rows else row["requirement_id"]
-
-            relationships.append({
-                "source_id": row["depends_on_requirement_id"],
-                "target_id": row["requirement_id"],
-                "type": row.get("dependency_type", "depends"),
+                "source_id": source_id,
+                "target_id": target_id,
+                "type": row["relationship_type"],
                 "source_title": source_title,
                 "target_title": target_title
             })

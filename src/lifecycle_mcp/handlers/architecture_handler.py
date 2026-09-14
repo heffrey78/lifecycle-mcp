@@ -32,8 +32,35 @@ ARCHITECTURE_EDIT_COLUMNS = {
     "considered_options": "considered_options",
     "consequences": "consequences",
     "authors": "authors",
+    "deciders": "deciders",
+    "implementation_notes": "implementation_notes",
+    "validation_criteria": "validation_criteria",
+    "risk_assessment": "risk_assessment",
 }
-ARCHITECTURE_JSON_FIELDS = ("decision_drivers", "considered_options", "consequences", "authors")
+# Curated list fields (roadmap R6b), shown after the consequences in details and export: (column, title).
+ARCHITECTURE_LIST_SECTIONS = (
+    ("validation_criteria", "Validation Criteria"),
+    ("risk_assessment", "Risk Assessment"),
+)
+ARCHITECTURE_JSON_FIELDS = (
+    "decision_drivers",
+    "considered_options",
+    "consequences",
+    "authors",
+    "deciders",
+    *(column for column, _ in ARCHITECTURE_LIST_SECTIONS),
+)
+# Curated create/update inputs (roadmap R6b), shared by both tool schemas.
+ARCHITECTURE_CURATED_PROPERTIES = {
+    "deciders": {"type": "array", "items": {"type": "string"}},
+    "implementation_notes": {"type": "string"},
+    "validation_criteria": {"type": "array", "items": {"type": "string"}},
+    "risk_assessment": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "One entry per risk: the risk, likelihood, impact and mitigation",
+    },
+}
 
 
 class ArchitectureHandler(BaseHandler):
@@ -61,6 +88,7 @@ class ArchitectureHandler(BaseHandler):
                         "decision_drivers": {"type": "array", "items": {"type": "string"}},
                         "considered_options": {"type": "array", "items": {"type": "string"}},
                         "authors": {"type": "array", "items": {"type": "string"}},
+                        **ARCHITECTURE_CURATED_PROPERTIES,
                     },
                     "required": ["requirement_ids", "title", "context", "decision"],
                 },
@@ -168,6 +196,7 @@ class ArchitectureHandler(BaseHandler):
                         "decision_drivers": {"type": "array", "items": {"type": "string"}},
                         "considered_options": {"type": "array", "items": {"type": "string"}},
                         "authors": {"type": "array", "items": {"type": "string"}},
+                        **ARCHITECTURE_CURATED_PROPERTIES,
                         **EDIT_OPTION_PROPERTIES,
                     },
                     "required": ["architecture_id"],
@@ -290,6 +319,13 @@ class ArchitectureHandler(BaseHandler):
                 "considered_options": self._safe_json_dumps(params.get("considered_options", [])),
                 "consequences": self._safe_json_dumps(params.get("consequences", {})),
                 "authors": self._safe_json_dumps(params.get("authors", ["MCP User"])),
+                **{
+                    column: self._safe_json_dumps(params[column])
+                    if column in ARCHITECTURE_JSON_FIELDS
+                    else params[column]
+                    for column in ARCHITECTURE_CURATED_PROPERTIES
+                    if column in params
+                },
             }
 
             # Insert ADR
@@ -491,7 +527,7 @@ class ArchitectureHandler(BaseHandler):
                 decision_dict = dict(decision) if hasattr(decision, "keys") else decision
 
                 # Parse JSON fields if they exist as strings
-                json_fields = ["consequences", "decision_drivers", "considered_options", "authors"]
+                json_fields = ARCHITECTURE_JSON_FIELDS
                 for field in json_fields:
                     if field in decision_dict and isinstance(decision_dict[field], str):
                         try:
@@ -521,6 +557,7 @@ class ArchitectureHandler(BaseHandler):
                 return self._create_error_response("Architecture decision not found")
 
             arch = arch_decisions[0]
+            deciders = ", ".join(self._safe_json_loads(arch["deciders"])) or "Not specified"
 
             # Build detailed report
             report = f"""# Architecture Decision: {arch["id"]}
@@ -533,6 +570,7 @@ class ArchitectureHandler(BaseHandler):
 - **Updated**: {arch["updated_at"]}
 - **Revision**: {arch["revision"]}
 - **Authors**: {arch["authors"] or "Not specified"}
+- **Deciders**: {deciders}
 
 ## Context
 {arch["context"]}
@@ -564,6 +602,10 @@ class ArchitectureHandler(BaseHandler):
                             report += f"**{key.title()}**: {value}\n"
                     else:
                         report += f"{consequences}\n"
+
+            if arch["implementation_notes"]:
+                report += f"\n## Implementation Notes\n{arch['implementation_notes']}\n"
+            report += self._format_sections(arch, ARCHITECTURE_LIST_SECTIONS, "\n## {title}\n{body}")
 
             # Get linked requirements
             requirements = self.db.execute_query(

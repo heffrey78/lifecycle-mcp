@@ -42,8 +42,25 @@ REQUIREMENT_EDITABLE = (
     "functional_requirements",
     "acceptance_criteria",
     "business_value",
+    "nonfunctional_requirements",
+    "technical_constraints",
+    "business_rules",
+    "validation_metrics",
+    "out_of_scope",
 )
-REQUIREMENT_JSON_FIELDS = ("functional_requirements", "acceptance_criteria")
+# Curated list fields (roadmap R6b), shown after the acceptance criteria in details and export: (column, title).
+REQUIREMENT_LIST_SECTIONS = (
+    ("nonfunctional_requirements", "Non-Functional Requirements"),
+    ("technical_constraints", "Technical Constraints"),
+    ("business_rules", "Business Rules"),
+    ("validation_metrics", "Validation Metrics"),
+    ("out_of_scope", "Out of Scope"),
+)
+REQUIREMENT_JSON_FIELDS = (
+    "functional_requirements",
+    "acceptance_criteria",
+    *(column for column, _ in REQUIREMENT_LIST_SECTIONS),
+)
 
 # A requirement in one of these statuses has been approved: edits need a reason and flag it as changed since review.
 REVIEWED_STATUSES = ("Approved", "Architecture", "Ready", "Implemented", "Validated", "Deprecated")
@@ -105,6 +122,11 @@ class RequirementHandler(BaseHandler):
                         "business_value": {"type": "string"},
                         "risk_level": {"type": "string", "enum": ["High", "Medium", "Low"]},
                         "author": {"type": "string"},
+                        "nonfunctional_requirements": {"type": "array", "items": {"type": "string"}},
+                        "technical_constraints": {"type": "array", "items": {"type": "string"}},
+                        "business_rules": {"type": "array", "items": {"type": "string"}},
+                        "validation_metrics": {"type": "array", "items": {"type": "string"}},
+                        "out_of_scope": {"type": "array", "items": {"type": "string"}},
                     },
                     "required": ["type", "title", "priority", "current_state", "desired_state"],
                 },
@@ -209,6 +231,11 @@ class RequirementHandler(BaseHandler):
                         "functional_requirements": {"type": "array", "items": {"type": "string"}},
                         "acceptance_criteria": {"type": "array", "items": {"type": "string"}},
                         "business_value": {"type": "string"},
+                        "nonfunctional_requirements": {"type": "array", "items": {"type": "string"}},
+                        "technical_constraints": {"type": "array", "items": {"type": "string"}},
+                        "business_rules": {"type": "array", "items": {"type": "string"}},
+                        "validation_metrics": {"type": "array", "items": {"type": "string"}},
+                        "out_of_scope": {"type": "array", "items": {"type": "string"}},
                         **EDIT_OPTION_PROPERTIES,
                         "reason": {
                             "type": "string",
@@ -520,6 +547,11 @@ Guidelines:
             "author": params.get("author", "MCP User"),
             "business_value": params.get("business_value", ""),
             "risk_level": params.get("risk_level", "Medium"),
+            **{
+                column: self._safe_json_dumps(params[column])
+                for column, _ in REQUIREMENT_LIST_SECTIONS
+                if column in params
+            },
         }
 
         # Insert requirement
@@ -810,7 +842,7 @@ Guidelines:
                 req_dict = dict(req) if hasattr(req, "keys") else req
 
                 # Parse JSON fields if they exist as strings
-                json_fields = ["functional_requirements", "acceptance_criteria", "business_value"]
+                json_fields = [*REQUIREMENT_JSON_FIELDS, "business_value"]
                 for field in json_fields:
                     if field in req_dict and isinstance(req_dict[field], str):
                         try:
@@ -880,6 +912,8 @@ Guidelines:
                     report += "\n### Acceptance Criteria\n"
                     for ac in acc_criteria:
                         report += f"- {ac}\n"
+
+            report += self._format_sections(req, REQUIREMENT_LIST_SECTIONS, "\n### {title}\n{body}")
 
             # Get linked tasks
             tasks = self.db.execute_query(

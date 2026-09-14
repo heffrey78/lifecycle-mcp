@@ -12,7 +12,7 @@ class TestTaskHandler:
     def test_get_tool_definitions(self, task_handler):
         """Test that handler returns correct tool definitions"""
         tools = task_handler.get_tool_definitions()
-        assert len(tools) == 8
+        assert len(tools) == 9
 
         tool_names = [tool["name"] for tool in tools]
         expected_tools = [

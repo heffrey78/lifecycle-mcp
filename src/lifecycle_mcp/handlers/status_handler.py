@@ -12,6 +12,7 @@ from typing import Any
 from mcp.types import TextContent
 
 from .base_handler import BaseHandler
+from .requirement_handler import changes_since_review
 
 
 class StatusHandler(BaseHandler):
@@ -120,6 +121,12 @@ class StatusHandler(BaseHandler):
                     report += f"- {item['item_type'].upper()} {item['id']}: {item['title']}\n"
                     report += f"  Blocked by: {item['blocking_items']}\n"
 
+            changed = changes_since_review(self.db)
+            if changed:
+                report += f"\n## ⚠️ Changed Since Last Review ({len(changed)})\n"
+                for req_id, entry in changed.items():
+                    report += f"- {req_id}: {entry['title']} [{entry['status']}] edited {', '.join(entry['fields'])}\n"
+
             # Add summary metrics
             report += self._add_summary_metrics(req_stats, task_stats)
 
@@ -132,6 +139,8 @@ class StatusHandler(BaseHandler):
             action_info = f"📈 {total_reqs} requirements | {completed_tasks}/{total_tasks} tasks complete"
             if blocked:
                 action_info += f" | ⚠️ {len(blocked)} blocked"
+            if changed:
+                action_info += f" | ⚠️ {len(changed)} changed since review"
 
             return self._create_above_fold_response("INFO", key_info, action_info, report)
 

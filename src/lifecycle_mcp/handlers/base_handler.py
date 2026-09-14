@@ -6,8 +6,9 @@ Provides common functionality for all domain handlers
 
 import json
 import logging
+import sqlite3
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,6 +33,18 @@ class RevisionConflict(Exception):
 
 class DeleteRefused(Exception):
     """A delete was refused because the record is past its early stage or other records depend on it."""
+
+
+class EditRefused(Exception):
+    """An edit was refused by a lifecycle rule (a missing reason, a decided ADR, a cycle); nothing was written."""
+
+
+# Inputs every update tool accepts next to the fields it edits.
+EDIT_OPTION_PROPERTIES = {
+    "reason": {"type": "string", "description": "Why the change is made; shown in get_entity_history"},
+    "actor": {"type": "string", "description": "Who makes the change (default: MCP User)"},
+    "if_revision": {"type": "integer", "description": "Apply the edit only if the record is still at this revision"},
+}
 
 
 @dataclass
@@ -136,24 +149,38 @@ class BaseHandler(ABC):
             self.logger.warning(f"Failed to serialize to JSON: {str(e)}")
             return "[]"
 
-    def _link(self, source_type: str, source_id: str, target_type: str, target_id: str, relationship_type: str):
+    def _link(
+        self,
+        source_type: str,
+        source_id: str,
+        target_type: str,
+        target_id: str,
+        relationship_type: str,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ):
         """Record a link in the relationships table, the only place links are stored (idempotent).
 
         Direction conventions: requirement -> task (implements), requirement -> architecture (addresses),
         child -> parent (parent), dependent -> dependency (depends/requires/informs), blocker -> blocked (blocks).
+        Pass cursor to write inside an open transaction.
         """
-        self.db.execute_query(
+        sql = (
             "INSERT OR IGNORE INTO relationships "
-            "(id, source_type, source_id, target_type, target_id, relationship_type) VALUES (?, ?, ?, ?, ?, ?)",
-            [
-                f"rel-{source_id}-{target_id}-{relationship_type}",
-                source_type,
-                source_id,
-                target_type,
-                target_id,
-                relationship_type,
-            ],
+            "(id, source_type, source_id, target_type, target_id, relationship_type) VALUES (?, ?, ?, ?, ?, ?)"
         )
+        values = [
+            f"rel-{source_id}-{target_id}-{relationship_type}",
+            source_type,
+            source_id,
+            target_type,
+            target_id,
+            relationship_type,
+        ]
+        if cursor is None:
+            self.db.execute_query(sql, values)
+        else:
+            cursor.execute(sql, values)
 
     def _apply_edit(
         self,
@@ -167,6 +194,8 @@ class BaseHandler(ABC):
         actor: str = "MCP User",
         reason: str | None = None,
         if_revision: int | None = None,
+        check: Callable[[dict[str, Any]], None] | None = None,
+        relink: Callable[[sqlite3.Cursor, dict[str, Any]], dict[str, tuple[Any, Any]]] | None = None,
     ) -> EditResult:
         """Apply content edits to one record atomically; every update tool goes through here.
 
@@ -174,9 +203,13 @@ class BaseHandler(ABC):
         revision once, and logs one lifecycle_events row per changed field with before and after values,
         actor and reason. JSON fields are compared by value, not by their stored text.
 
-        Raises ValueError for a field that isn't editable, LookupError when the record doesn't exist and
-        RevisionConflict when if_revision is stale. Nothing is written in any of those cases, nor when a
-        constraint rejects one of the new values.
+        check receives the record as stored and raises EditRefused when a lifecycle rule forbids the edit.
+        relink changes the record's links through the transaction's cursor and returns {field: (before, after)}
+        for each link field it changed; those count as changed fields and are logged the same way.
+
+        Raises ValueError for a field that isn't editable, LookupError when the record doesn't exist,
+        RevisionConflict when if_revision is stale and EditRefused from check or relink. Nothing is written in
+        any of those cases, nor when a constraint rejects one of the new values.
         """
         editable, json_fields = set(editable), set(json_fields)
         not_editable = set(changes) - editable
@@ -190,6 +223,8 @@ class BaseHandler(ABC):
             before = dict(row)
             if if_revision is not None and before["revision"] != if_revision:
                 raise RevisionConflict(entity_id, before["revision"], if_revision)
+            if check is not None:
+                check(before)
 
             updates: dict[str, Any] = {}
             for name, value in changes.items():
@@ -204,26 +239,37 @@ class BaseHandler(ABC):
                 if not unchanged:
                     updates[name] = stored
 
-            if not updates:
+            links = relink(cur, before) if relink is not None else {}
+
+            if not updates and not links:
                 return EditResult([], before["revision"], before)
 
-            assignments = ", ".join(f"{name} = ?" for name in updates)
+            assignments = "".join(f"{name} = ?, " for name in updates)
             cur.execute(
-                f"UPDATE {table} SET {assignments}, revision = revision + 1, updated_at = CURRENT_TIMESTAMP "
+                f"UPDATE {table} SET {assignments}revision = revision + 1, updated_at = CURRENT_TIMESTAMP "
                 "WHERE id = ? AND revision = ?",
                 [*updates.values(), entity_id, before["revision"]],
             )
             if cur.rowcount != 1:  # another writer bumped the revision since we read the row
                 current = cur.execute(f"SELECT revision FROM {table} WHERE id = ?", [entity_id]).fetchone()[0]
                 raise RevisionConflict(entity_id, current, before["revision"])
-            for name, stored in updates.items():
+            edits = [(name, before[name], stored) for name, stored in updates.items()]
+            edits += [(name, old, new) for name, (old, new) in links.items()]
+            for name, old, new in edits:
                 cur.execute(
                     "INSERT INTO lifecycle_events "
                     "(entity_type, entity_id, event_type, field, from_value, to_value, actor, reason) "
                     "VALUES (?, ?, 'field_edit', ?, ?, ?, ?, ?)",
-                    [entity_type, entity_id, name, before[name], stored, actor, reason],
+                    [entity_type, entity_id, name, old, new, actor, reason],
                 )
-            return EditResult(list(updates), before["revision"] + 1, before)
+            return EditResult([name for name, _, _ in edits], before["revision"] + 1, before)
+
+    @staticmethod
+    def _describe_edit(result: EditResult) -> str:
+        """Action line for an update tool's response"""
+        if not result.changed:
+            return f"No changes: every value already matched (revision {result.revision})"
+        return f"✏️ Changed {', '.join(result.changed)} | revision {result.revision}"
 
     def _delete_entity(
         self,

@@ -61,6 +61,7 @@ class LifecycleMCPServer:
             "get_requirement_details": self.requirement_handler,
             "trace_requirement": self.requirement_handler,
             "delete_requirement": self.requirement_handler,
+            "update_requirement": self.requirement_handler,
             # Task tools
             "create_task": self.task_handler,
             "update_task_status": self.task_handler,
@@ -70,6 +71,7 @@ class LifecycleMCPServer:
             "sync_task_from_github": self.task_handler,
             "bulk_sync_github_tasks": self.task_handler,
             "delete_task": self.task_handler,
+            "update_task": self.task_handler,
             # Relationship tools
             "create_relationship": self.relationship_handler,
             "delete_relationship": self.relationship_handler,
@@ -85,6 +87,7 @@ class LifecycleMCPServer:
             "get_architecture_details": self.architecture_handler,
             "add_architecture_review": self.architecture_handler,
             "delete_architecture": self.architecture_handler,
+            "update_architecture": self.architecture_handler,
             # Interview tools
             "start_requirement_interview": self.interview_handler,
             "continue_requirement_interview": self.interview_handler,

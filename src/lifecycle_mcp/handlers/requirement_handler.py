@@ -9,7 +9,8 @@ from typing import Any
 
 from mcp.types import TextContent
 
-from .base_handler import BaseHandler, DeleteRefused
+from ..database_manager import DatabaseManager
+from .base_handler import EDIT_OPTION_PROPERTIES, BaseHandler, DeleteRefused, EditRefused, RevisionConflict
 
 # Records that depend on a requirement and therefore block deleting it.
 REQUIREMENT_DELETE_BLOCKERS = [
@@ -29,6 +30,52 @@ REQUIREMENT_DELETE_BLOCKERS = [
         "AND source_type = 'requirement'",
     ),
 ]
+
+
+# Fields update_requirement can change. The type is part of the ID; status moves go through update_requirement_status.
+REQUIREMENT_EDITABLE = (
+    "title",
+    "priority",
+    "risk_level",
+    "current_state",
+    "desired_state",
+    "functional_requirements",
+    "acceptance_criteria",
+    "business_value",
+)
+REQUIREMENT_JSON_FIELDS = ("functional_requirements", "acceptance_criteria")
+
+# A requirement in one of these statuses has been approved: edits need a reason and flag it as changed since review.
+REVIEWED_STATUSES = ("Approved", "Architecture", "Ready", "Implemented", "Validated", "Deprecated")
+
+# Content edits to reviewed requirements made after their latest status change. The marker is derived rather than
+# stored: the next status transition clears it, and that transition's comment serves as the acknowledgement.
+CHANGES_SINCE_REVIEW_SQL = """
+    SELECT e.entity_id, r.title, r.status, e.field FROM lifecycle_events e
+    JOIN requirements r ON r.id = e.entity_id
+    WHERE e.entity_type = 'requirement' AND e.event_type = 'field_edit'
+      AND r.status IN (SELECT value FROM json_each(?))
+      AND e.id > COALESCE((
+          SELECT MAX(s.id) FROM lifecycle_events s
+          WHERE s.entity_type = 'requirement' AND s.entity_id = e.entity_id AND s.event_type = 'status_change'
+      ), 0)
+"""
+
+
+def changes_since_review(db: DatabaseManager, requirement_id: str | None = None) -> dict[str, dict[str, Any]]:
+    """Reviewed requirements edited since their latest status change: ID -> title, status and edited fields.
+
+    Pass requirement_id to look at a single requirement.
+    """
+    sql, params = CHANGES_SINCE_REVIEW_SQL, [json.dumps(REVIEWED_STATUSES)]
+    if requirement_id:
+        sql, params = sql + " AND e.entity_id = ?", [*params, requirement_id]
+    changed: dict[str, dict[str, Any]] = {}
+    for row in db.execute_query(sql + " ORDER BY e.id", params, fetch_all=True, row_factory=True) or []:
+        entry = changed.setdefault(row["entity_id"], {"title": row["title"], "status": row["status"], "fields": []})
+        if row["field"] not in entry["fields"]:
+            entry["fields"].append(row["field"])
+    return changed
 
 
 class RequirementHandler(BaseHandler):
@@ -143,6 +190,34 @@ class RequirementHandler(BaseHandler):
                     "required": ["requirement_id"],
                 },
             },
+            {
+                "name": "update_requirement",
+                "description": (
+                    "Edit a requirement's content in place. At Approved or later a reason is required, and the "
+                    "requirement shows as changed since last review until its next status change. Status moves go "
+                    "through update_requirement_status; the type and ID never change."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "requirement_id": {"type": "string"},
+                        "title": {"type": "string"},
+                        "priority": {"type": "string", "enum": ["P0", "P1", "P2", "P3"]},
+                        "risk_level": {"type": "string", "enum": ["High", "Medium", "Low"]},
+                        "current_state": {"type": "string"},
+                        "desired_state": {"type": "string"},
+                        "functional_requirements": {"type": "array", "items": {"type": "string"}},
+                        "acceptance_criteria": {"type": "array", "items": {"type": "string"}},
+                        "business_value": {"type": "string"},
+                        **EDIT_OPTION_PROPERTIES,
+                        "reason": {
+                            "type": "string",
+                            "description": "Why the change is made; required at Approved or later",
+                        },
+                    },
+                    "required": ["requirement_id"],
+                },
+            },
         ]
 
     async def handle_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
@@ -162,6 +237,8 @@ class RequirementHandler(BaseHandler):
                 return self._trace_requirement(**arguments)
             elif tool_name == "delete_requirement":
                 return self._delete_requirement(**arguments)
+            elif tool_name == "update_requirement":
+                return self._update_requirement(**arguments)
             else:
                 return self._create_error_response(f"Unknown tool: {tool_name}")
         except Exception as e:
@@ -185,6 +262,58 @@ class RequirementHandler(BaseHandler):
             return self._create_error_response(str(e))
         return self._create_above_fold_response(
             "SUCCESS", f"Requirement {requirement_id} deleted", f"🗑️ Removed {removed} link(s) it owned"
+        )
+
+    def _update_requirement(self, **params) -> list[TextContent]:
+        """Edit requirement content; approved requirements need a reason and show as changed since last review"""
+        error = self._validate_required_params(params, ["requirement_id"])
+        if error:
+            return self._create_error_response(error)
+        requirement_id = params["requirement_id"]
+        changes = {name: params[name] for name in REQUIREMENT_EDITABLE if name in params}
+        if not changes:
+            return self._create_error_response(
+                f"Nothing to update: pass at least one of {', '.join(REQUIREMENT_EDITABLE)}"
+            )
+        reason = (params.get("reason") or "").strip() or None
+
+        def require_reason_once_approved(before: dict[str, Any]) -> None:
+            if before["status"] in REVIEWED_STATUSES and not reason:
+                raise EditRefused(
+                    f"Requirement {requirement_id} is {before['status']}; a reason is required to edit a requirement "
+                    "at Approved or later. Pass reason explaining the change."
+                )
+
+        try:
+            result = self._apply_edit(
+                "requirements",
+                "requirement",
+                requirement_id,
+                changes,
+                editable=REQUIREMENT_EDITABLE,
+                json_fields=REQUIREMENT_JSON_FIELDS,
+                actor=params.get("actor") or "MCP User",
+                reason=reason,
+                if_revision=params.get("if_revision"),
+                check=require_reason_once_approved,
+            )
+        except (LookupError, RevisionConflict, EditRefused) as e:
+            return self._create_error_response(str(e))
+
+        action_info = self._describe_edit(result)
+        status = result.before["status"]
+        if result.changed and status in REVIEWED_STATUSES:
+            action_info += f" | ⚠️ changed since last review ({status}) until its next status change"
+        return self._create_above_fold_response("SUCCESS", f"Requirement {requirement_id} updated", action_info)
+
+    def _changed_since_review_line(self, requirement_id: str) -> str:
+        """Report line flagging edits made since the latest status change, or "" when there are none"""
+        entry = changes_since_review(self.db, requirement_id).get(requirement_id)
+        if not entry:
+            return ""
+        return (
+            f"\n- **⚠️ Changed Since Last Review**: {', '.join(entry['fields'])} edited at {entry['status']} "
+            "(get_entity_history shows before, after and reason; the next status change clears this)"
         )
 
     async def _create_requirement(self, **params) -> list[TextContent]:
@@ -712,6 +841,7 @@ Guidelines:
                 return self._create_error_response("Requirement not found")
 
             req = requirements[0]
+            review_line = self._changed_since_review_line(req["id"])
 
             # Build detailed report
             report = f"""# Requirement Details: {req["id"]}
@@ -725,6 +855,7 @@ Guidelines:
 - **Author**: {req["author"]}
 - **Created**: {req["created_at"]}
 - **Updated**: {req["updated_at"]}
+- **Revision**: {req["revision"]}{review_line}
 
 ## Problem Definition
 **Current State**: {req["current_state"]}
@@ -771,6 +902,8 @@ Guidelines:
             # Create above-the-fold response for requirement details
             key_info = f"Requirement {req['id']} details"
             action_info = f"📄 {req['title']} | {req['status']} | {req['priority']}"
+            if review_line:
+                action_info += " | ⚠️ changed since last review"
             return self._create_above_fold_response("INFO", key_info, action_info, report)
 
         except Exception as e:
@@ -847,6 +980,7 @@ Guidelines:
             )
 
             # Build trace report
+            review_line = self._changed_since_review_line(req["id"])
             report = f"""# Requirement Trace: {req["id"]}
 
 ## Requirement Details
@@ -854,7 +988,7 @@ Guidelines:
 - **Status**: {req["status"]}
 - **Priority**: {req["priority"]}
 - **Created**: {req["created_at"]}
-- **Progress**: {req["tasks_completed"]}/{req["task_count"]} tasks complete
+- **Progress**: {req["tasks_completed"]}/{req["task_count"]} tasks complete{review_line}
 
 ## Current State
 {req["current_state"]}
@@ -907,6 +1041,8 @@ Guidelines:
 
             arch_count = len(architecture) if architecture else 0
             action_info = f"🔍 {req['title']} | {len(tasks)} tasks | {arch_count} architecture{decomp_info}"
+            if review_line:
+                action_info += " | ⚠️ changed since last review"
             return self._create_above_fold_response("INFO", key_info, action_info, report)
 
         except Exception as e:

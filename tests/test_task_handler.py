@@ -54,9 +54,14 @@ class TestTaskHandler:
         assert records[0]["effort"] == "M"
 
         # Verify task-requirement link was created
-        links = task_handler.db.get_records("requirement_tasks", "*", "task_id = ?", ["TASK-0001-00-00"])
+        links = task_handler.db.get_records(
+            "relationships",
+            "*",
+            "target_type = 'task' AND target_id = ? AND relationship_type = 'implements'",
+            ["TASK-0001-00-00"],
+        )
         assert len(links) == 1
-        assert links[0]["requirement_id"] == "REQ-0001-FUNC-00"
+        assert links[0]["source_type"] == "requirement" and links[0]["source_id"] == "REQ-0001-FUNC-00"
 
     @pytest.mark.asyncio
     async def test_create_task_missing_params(self, task_handler):

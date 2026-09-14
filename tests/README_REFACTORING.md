@@ -40,14 +40,8 @@ async def test_create_task_requirement_status_validation(
 ```python
 # This pattern repeated 20+ times:
 await requirement_handler._create_requirement(**sample_requirement_data)
-await requirement_handler._update_requirement_status(
-    requirement_id="REQ-0001-FUNC-00",
-    new_status="Under Review"
-)
-await requirement_handler._update_requirement_status(
-    requirement_id="REQ-0001-FUNC-00",
-    new_status="Approved"
-)
+await requirement_handler._update_requirement_status(requirement_id="REQ-0001-FUNC-00", new_status="Under Review")
+await requirement_handler._update_requirement_status(requirement_id="REQ-0001-FUNC-00", new_status="Approved")
 ```
 
 **After (fixture):**

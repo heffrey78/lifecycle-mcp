@@ -5,6 +5,7 @@ Test configuration and fixtures for MCP Lifecycle Management Server
 import asyncio
 import logging
 import os
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -33,6 +34,72 @@ def pytest_configure(config):
     """Configure pytest with asyncio settings"""
     # This addresses the deprecation warning about asyncio_default_fixture_loop_scope
     config.option.asyncio_default_fixture_loop_scope = "function"
+
+
+BLOCKED_PROGRAMS = {"gh", "git"}
+
+
+def _program_name(args) -> str:
+    if isinstance(args, str | bytes | os.PathLike):
+        text = os.fsdecode(args).strip()
+        first = text.split()[0] if text else ""
+    else:
+        items = list(args)
+        first = os.fsdecode(items[0]) if items else ""
+    return Path(first).name
+
+
+@pytest.fixture(autouse=True)
+def block_real_github(monkeypatch, request):
+    """Keep every test away from real GitHub.
+
+    Local runs of this suite once created hundreds of real issues on the project repository.
+    GitHub integration is opt-in via LIFECYCLE_GITHUB, which is cleared here, and any attempt to
+    spawn gh or git (through subprocess.run, Popen or asyncio subprocesses) fails the test at once.
+    Tests that genuinely need a real repository are marked ``github_live`` and must register what
+    they create with the ``github_issue_cleanup`` fixture.
+    """
+    if request.node.get_closest_marker("github_live"):
+        return
+    monkeypatch.delenv("LIFECYCLE_GITHUB", raising=False)
+
+    class GuardedPopen(subprocess.Popen):
+        def __init__(self, args, *pargs, **kwargs):
+            program = _program_name(args)
+            if program in BLOCKED_PROGRAMS:
+                self._child_created = False  # keeps Popen.__del__ quiet on the half-built object
+                pytest.fail(
+                    f"Test tried to run {program!r}. Real GitHub access is blocked in tests: "
+                    "mock GitHubUtils, or mark the test github_live and use github_issue_cleanup.",
+                    pytrace=False,
+                )
+            super().__init__(args, *pargs, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", GuardedPopen)
+
+
+@pytest.fixture
+def github_issue_cleanup():
+    """Issue numbers appended here are closed as 'not planned' when the test ends, pass or fail."""
+    created: list[str] = []
+    yield created
+    for number in created:
+        subprocess.run(
+            [
+                "gh",
+                "issue",
+                "close",
+                str(number),
+                "--reason",
+                "not planned",
+                "--comment",
+                "Closed automatically by lifecycle-mcp live test cleanup.",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
 
 
 @pytest.fixture(scope="function")

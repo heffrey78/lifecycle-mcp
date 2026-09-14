@@ -51,7 +51,7 @@ class TestMCPServerIntegration:
                     cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
                     tables = [row[0] for row in cursor.fetchall()]
 
-                    required_tables = ["requirements", "tasks", "architecture", "requirement_tasks"]
+                    required_tables = ["requirements", "tasks", "architecture", "relationships"]
                     for table in required_tables:
                         if table not in tables:
                             raise RuntimeError(f"Database initialization failed: missing table '{table}'")

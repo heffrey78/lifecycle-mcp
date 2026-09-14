@@ -173,9 +173,10 @@ class TaskHandler(BaseHandler):
                     parent_task_number = parent_info[0]["task_number"]
                     # Count existing subtasks using relationships table
                     existing_subtasks = self.db.get_records(
-                        "relationships", "COUNT(*) as count",
+                        "relationships",
+                        "COUNT(*) as count",
                         "target_type = 'task' AND target_id = ? AND relationship_type = 'parent'",
-                        [params["parent_task_id"]]
+                        [params["parent_task_id"]],
                     )
                     subtask_number = existing_subtasks[0]["count"] + 1 if existing_subtasks else 1
                     task_number = parent_task_number
@@ -205,20 +206,11 @@ class TaskHandler(BaseHandler):
 
             # Create parent-child relationship if this is a subtask
             if params.get("parent_task_id"):
-                relationship_id = f"rel-{task_id}-{params['parent_task_id']}-parent"
-                relationship_data = {
-                    "id": relationship_id,
-                    "source_type": "task",
-                    "source_id": task_id,
-                    "target_type": "task",
-                    "target_id": params["parent_task_id"],
-                    "relationship_type": "parent"
-                }
-                self.db.insert_record("relationships", relationship_data)
+                self._link("task", task_id, "task", params["parent_task_id"], "parent")
 
             # Link to requirements
             for req_id in params["requirement_ids"]:
-                self.db.insert_record("requirement_tasks", {"requirement_id": req_id, "task_id": task_id})
+                self._link("requirement", req_id, "task", task_id, "implements")
 
             # Create GitHub issue if available
             github_url = None
@@ -259,7 +251,7 @@ class TaskHandler(BaseHandler):
                     github_error = f"GitHub issue creation failed: {str(e)}"
                     self.logger.warning(f"GitHub integration error for task {task_id}: {github_error}")
             else:
-                github_error = "GitHub not available or not configured"
+                github_error = GitHubUtils.unavailable_reason()
 
             # Create above-the-fold response
             key_info = f"Task {task_id} created"
@@ -268,6 +260,8 @@ class TaskHandler(BaseHandler):
             github_info = ""
             if github_url:
                 github_info = f"🔗 GitHub: {github_url}"
+            elif not GitHubUtils.is_github_enabled():
+                github_info = f"GitHub: {github_error}"
             elif github_error:
                 github_info = f"⚠️ GitHub: {github_error}"
 
@@ -358,7 +352,7 @@ class TaskHandler(BaseHandler):
                     self.logger.error(f"GitHub integration error: {github_error}")
             else:
                 if current_task.get("github_issue_number"):
-                    github_error = "GitHub not available"
+                    github_error = GitHubUtils.unavailable_reason()
 
             # Create above-the-fold response
             key_info = f"Task {params['task_id']} updated"
@@ -386,8 +380,9 @@ class TaskHandler(BaseHandler):
                 tasks = self.db.execute_query(
                     """
                     SELECT t.* FROM tasks t
-                    JOIN requirement_tasks rt ON t.id = rt.task_id
-                    WHERE rt.requirement_id = ?
+                    JOIN relationships rel ON rel.target_id = t.id
+                    WHERE rel.source_type = 'requirement' AND rel.source_id = ?
+                      AND rel.target_type = 'task' AND rel.relationship_type = 'implements'
                     ORDER BY t.priority, t.created_at DESC
                 """,
                     [params["requirement_id"]],
@@ -454,8 +449,9 @@ class TaskHandler(BaseHandler):
                 tasks = self.db.execute_query(
                     """
                     SELECT t.* FROM tasks t
-                    JOIN requirement_tasks rt ON t.id = rt.task_id
-                    WHERE rt.requirement_id = ?
+                    JOIN relationships rel ON rel.target_id = t.id
+                    WHERE rel.source_type = 'requirement' AND rel.source_id = ?
+                      AND rel.target_type = 'task' AND rel.relationship_type = 'implements'
                     ORDER BY t.priority, t.created_at DESC
                 """,
                     [params["requirement_id"]],
@@ -483,10 +479,10 @@ class TaskHandler(BaseHandler):
             # Convert to list of dictionaries with JSON parsing
             tasks_list = []
             for task in tasks:
-                task_dict = dict(task) if hasattr(task, 'keys') else task
+                task_dict = dict(task) if hasattr(task, "keys") else task
 
                 # Parse JSON fields if they exist as strings
-                json_fields = ['acceptance_criteria']
+                json_fields = ["acceptance_criteria"]
                 for field in json_fields:
                     if field in task_dict and isinstance(task_dict[field], str):
                         try:
@@ -740,8 +736,9 @@ class TaskHandler(BaseHandler):
             requirements = self.db.execute_query(
                 """
                 SELECT r.id, r.title FROM requirements r
-                JOIN requirement_tasks rt ON r.id = rt.requirement_id
-                WHERE rt.task_id = ?
+                JOIN relationships rel ON rel.source_id = r.id
+                WHERE rel.source_type = 'requirement' AND rel.target_type = 'task'
+                  AND rel.target_id = ? AND rel.relationship_type = 'implements'
             """,
                 [params["task_id"]],
                 fetch_all=True,
@@ -756,9 +753,10 @@ class TaskHandler(BaseHandler):
             # Get subtasks if this is a parent task
             # Query relationships table for child tasks
             child_relationship_records = self.db.get_records(
-                "relationships", "source_id",
+                "relationships",
+                "source_id",
                 "target_type = 'task' AND target_id = ? AND relationship_type = 'parent'",
-                [params["task_id"]]
+                [params["task_id"]],
             )
 
             subtasks = []
@@ -777,9 +775,10 @@ class TaskHandler(BaseHandler):
             # Show parent task if this is a subtask
             # Query relationships table for parent tasks
             parent_relationship_records = self.db.get_records(
-                "relationships", "target_id",
+                "relationships",
+                "target_id",
                 "source_type = 'task' AND source_id = ? AND relationship_type = 'parent'",
-                [params["task_id"]]
+                [params["task_id"]],
             )
 
             if parent_relationship_records:

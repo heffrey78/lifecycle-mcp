@@ -22,8 +22,13 @@ from .handlers import (
     StatusHandler,
     TaskHandler,
 )
+from .handlers.base_handler import ErrorResult
 
 logger = logging.getLogger(__name__)
+
+
+class ToolCallError(Exception):
+    """Raised from call_tool so the MCP layer returns the result with isError=true."""
 
 
 class LifecycleMCPServer:
@@ -135,23 +140,27 @@ class LifecycleMCPServer:
         async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             """Route tool calls to appropriate handlers
 
+            Failures are raised as ToolCallError, which the MCP layer turns into a result with
+            isError=true carrying the same message text.
+
             Note: This method is async and must await handler calls for proper MCP protocol compliance.
             All handler.handle_tool_call() methods must also be async to prevent connection issues.
             """
+            handler = self.handlers.get(name)
+            if not handler:
+                logger.error(f"No handler found for tool: {name}")
+                raise ToolCallError(f"[ERROR] Unknown tool: {name}")
+
+            logger.debug(f"Routing tool '{name}' to {handler.__class__.__name__}")
             try:
-                # Find the appropriate handler for this tool
-                handler = self.handlers.get(name)
-                if not handler:
-                    logger.error(f"No handler found for tool: {name}")
-                    return [TextContent(type="text", text=f"Unknown tool: {name}")]
-
-                # Delegate to the handler
-                logger.debug(f"Routing tool '{name}' to {handler.__class__.__name__}")
-                return await handler.handle_tool_call(name, arguments)
-
+                result = await handler.handle_tool_call(name, arguments)
             except Exception as e:
-                logger.error(f"Error handling tool '{name}': {str(e)}")
-                return [TextContent(type="text", text=f"Error handling {name}: {str(e)}")]
+                logger.exception(f"Error handling tool '{name}'")
+                raise ToolCallError(f"[ERROR] Error handling {name}: {e}") from e
+
+            if isinstance(result, ErrorResult):
+                raise ToolCallError("\n".join(block.text for block in result))
+            return result
 
     async def run(self):
         """Run the MCP server"""

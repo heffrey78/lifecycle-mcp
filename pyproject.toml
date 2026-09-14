@@ -11,7 +11,7 @@ license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp[cli]>=1.0.0"
+    "mcp[cli]>=1.10,<2"
 ]
 
 [project.scripts]
@@ -82,6 +82,7 @@ select = [
     "N",     # pep8-naming
     "SIM",   # flake8-simplify
     "ASYNC", # flake8-async
+    "T20",   # no print(): stdout is the MCP protocol channel
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)
@@ -89,7 +90,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "PLR2004", "PLR0913"]
+"tests/*" = ["S101", "PLR2004", "PLR0913", "T20"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["lifecycle_mcp"]
@@ -132,4 +133,5 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
+    "github_live: talks to a real GitHub repository; opt-in via LIFECYCLE_GITHUB_LIVE=1 (see tests/test_github_live.py)",
 ]

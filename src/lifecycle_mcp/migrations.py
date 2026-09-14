@@ -1,1037 +1,473 @@
 #!/usr/bin/env python3
 """
-Database migration utilities for MCP Lifecycle Management Server
-Handles schema updates and data migrations
+Database migrations for the Lifecycle MCP server.
+
+A new database is created from lifecycle-schema.sql (the version 0 baseline) and then brought up
+to date by the same migrations an existing database runs, so every database follows one path.
+
+Each pending migration runs inside a single transaction together with its schema_version row.
+SQLite DDL is transactional, so a failing migration leaves no partial schema behind; the runner
+then raises MigrationError and the server refuses to start instead of running on a broken schema.
 """
 
+import logging
 import sqlite3
+from collections.abc import Callable
+
+logger = logging.getLogger(__name__)
+
+Migration = Callable[[sqlite3.Connection], None]
 
 
-def apply_github_integration_migration(db_path: str) -> bool:
-    """
-    Apply migration to add GitHub integration fields to tasks table
+class MigrationError(RuntimeError):
+    """A migration failed and was rolled back; the database stays at its previous version."""
 
 
-    Args:
-        db_path: Path to the SQLite database
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
-    Returns:
-        True if migration was applied successfully, False otherwise
-    """
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        # Check if github_issue_number column already exists
-        cursor.execute("PRAGMA table_info(tasks)")
-        columns = [column[1] for column in cursor.fetchall()]
-
-        if "github_issue_number" not in columns:
-            # Add GitHub integration columns
-            cursor.execute("ALTER TABLE tasks ADD COLUMN github_issue_number TEXT")
-            cursor.execute("ALTER TABLE tasks ADD COLUMN github_issue_url TEXT")
-
-            conn.commit()
-            print("GitHub integration migration applied successfully")
-            return True
-        else:
-            print("GitHub integration migration already applied")
-            return True
-
-    except Exception as e:
-        print(f"Error applying GitHub integration migration: {e}")
-        return False
-    finally:
-        if "conn" in locals():
-            conn.close()
+def _tables(conn: sqlite3.Connection) -> set[str]:
+    return {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
 
 
-def get_schema_version(db_path: str) -> int:
-    """Get the current schema version from the database"""
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        # Check if schema_version table exists
-        cursor.execute("""
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name='schema_version'
-        """)
-
-        if cursor.fetchone():
-            cursor.execute("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1")
-            result = cursor.fetchone()
-            return result[0] if result else 0
-        else:
-            # Create schema_version table
-            cursor.execute("""
-                CREATE TABLE schema_version (
-                    version INTEGER PRIMARY KEY,
-                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    description TEXT
-                )
-            """)
-            cursor.execute("INSERT INTO schema_version (version, description) VALUES (0, 'Initial schema')")
-            conn.commit()
-            return 0
-
-    except Exception as e:
-        print(f"Error getting schema version: {e}")
-        return 0
-    finally:
-        if "conn" in locals():
-            conn.close()
+# --- migrations 1-7 ----------------------------------------------------------------------------
 
 
-def set_schema_version(db_path: str, version: int, description: str) -> bool:
-    """Set the schema version in the database"""
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
+def add_github_integration_columns(conn: sqlite3.Connection) -> None:
+    if "github_issue_number" not in _columns(conn, "tasks"):
+        conn.execute("ALTER TABLE tasks ADD COLUMN github_issue_number TEXT")
+        conn.execute("ALTER TABLE tasks ADD COLUMN github_issue_url TEXT")
 
-        cursor.execute(
-            """
-            INSERT INTO schema_version (version, description)
-            VALUES (?, ?)
-        """,
-            (version, description),
+
+def add_github_sync_metadata_columns(conn: sqlite3.Connection) -> None:
+    if "github_etag" not in _columns(conn, "tasks"):
+        conn.execute("ALTER TABLE tasks ADD COLUMN github_etag TEXT")
+        conn.execute("ALTER TABLE tasks ADD COLUMN github_last_sync TEXT")
+
+
+def add_decomposition_columns(conn: sqlite3.Connection) -> None:
+    """Requirement decomposition metadata. Its link-based view and triggers live in migration 8."""
+    if "decomposition_metadata" in _columns(conn, "requirements"):
+        return
+    conn.execute("ALTER TABLE requirements ADD COLUMN decomposition_metadata TEXT")
+    conn.execute(
+        "ALTER TABLE requirements ADD COLUMN decomposition_source TEXT "
+        "CHECK (decomposition_source IN ('manual', 'llm_automatic', 'llm_suggested'))"
+    )
+    conn.execute(
+        "ALTER TABLE requirements ADD COLUMN complexity_score INTEGER CHECK (complexity_score BETWEEN 1 AND 10)"
+    )
+    conn.execute(
+        "ALTER TABLE requirements ADD COLUMN scope_assessment TEXT "
+        "CHECK (scope_assessment IN ('single_feature', 'multiple_features', 'complex_workflow', 'epic'))"
+    )
+    conn.execute(
+        "ALTER TABLE requirements ADD COLUMN decomposition_level INTEGER "
+        "DEFAULT 0 CHECK (decomposition_level BETWEEN 0 AND 3)"
+    )
+    conn.execute("""
+        CREATE VIEW IF NOT EXISTS decomposition_candidates AS
+        SELECT
+            r.id,
+            r.title,
+            r.status,
+            r.complexity_score,
+            r.scope_assessment,
+            r.decomposition_level,
+            (LENGTH(r.functional_requirements) - LENGTH(REPLACE(r.functional_requirements, ',', '')) + 1)
+                AS functional_req_count,
+            (LENGTH(r.acceptance_criteria) - LENGTH(REPLACE(r.acceptance_criteria, ',', '')) + 1)
+                AS acceptance_criteria_count,
+            CASE
+                WHEN r.complexity_score >= 7 THEN 'High'
+                WHEN r.complexity_score >= 5 THEN 'Medium'
+                ELSE 'Low'
+            END AS decomposition_priority
+        FROM requirements r
+        WHERE r.status IN ('Draft', 'Under Review')
+            AND r.decomposition_level < 3
+            AND (
+                r.complexity_score >= 5
+                OR r.scope_assessment IN ('multiple_features', 'complex_workflow', 'epic')
+                OR (LENGTH(r.functional_requirements) - LENGTH(REPLACE(r.functional_requirements, ',', '')) + 1) > 5
+            )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_requirements_decomposition "
+        "ON requirements(decomposition_level, complexity_score, scope_assessment)"
+    )
+
+
+def create_relationships_table(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS relationships (
+            id TEXT PRIMARY KEY,
+            source_type TEXT NOT NULL CHECK (source_type IN ('requirement', 'task', 'architecture')),
+            source_id TEXT NOT NULL,
+            target_type TEXT NOT NULL CHECK (target_type IN ('requirement', 'task', 'architecture')),
+            target_id TEXT NOT NULL,
+            relationship_type TEXT NOT NULL CHECK (relationship_type IN (
+                'implements', 'addresses', 'depends', 'blocks', 'informs',
+                'requires', 'parent', 'refines', 'conflicts', 'relates'
+            )),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(source_type, source_id, target_type, target_id, relationship_type)
         )
-
-        conn.commit()
-        return True
-
-    except Exception as e:
-        print(f"Error setting schema version: {e}")
-        return False
-    finally:
-        if "conn" in locals():
-            conn.close()
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_relationships_source ON relationships(source_type, source_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_relationships_target ON relationships(target_type, target_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_relationships_type ON relationships(relationship_type)")
 
 
-def apply_github_sync_metadata_migration(db_path: str) -> bool:
-    """
-    Apply migration to add GitHub sync metadata fields to tasks table
+def superseded(conn: sqlite3.Connection) -> None:
+    """Replaced by migration 8. Kept so version numbers stay stable for existing databases."""
 
 
-    Args:
-        db_path: Path to the SQLite database
+# --- migration 8: one link store ---------------------------------------------------------------
 
+LEGACY_LINK_TABLES = ("requirement_tasks", "requirement_architecture", "task_dependencies", "requirement_dependencies")
 
-    Returns:
-        True if migration was applied successfully, False otherwise
-    """
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
+LINK_VIEWS = ("requirement_progress", "task_hierarchy", "blocked_items", "requirement_hierarchy")
 
-        # Check if github_etag column already exists
-        cursor.execute("PRAGMA table_info(tasks)")
-        columns = [column[1] for column in cursor.fetchall()]
+LINK_TRIGGERS = (
+    "update_requirement_task_count_insert",
+    "update_requirement_task_count_delete",
+    "update_requirement_task_completion",
+    "validate_decomposition_level",
+    "set_decomposition_level",
+    "prevent_circular_dependencies",
+)
 
-        if "github_etag" not in columns:
-            # Add GitHub sync metadata columns
-            cursor.execute("ALTER TABLE tasks ADD COLUMN github_etag TEXT")
-            cursor.execute("ALTER TABLE tasks ADD COLUMN github_last_sync TEXT")
+_INSERT_LINK = (
+    "INSERT OR IGNORE INTO relationships (id, source_type, source_id, target_type, target_id, relationship_type"
+)
 
-            conn.commit()
-            print("GitHub sync metadata migration applied successfully")
-            return True
-        else:
-            print("GitHub sync metadata migration already applied")
-            return True
+# Legacy table -> statements copying its rows into relationships. Requirement links always point
+# requirement -> task/architecture; task and requirement dependencies point dependent -> dependency,
+# except "blocks", which points blocker -> blocked as create_relationship defines it.
+LEGACY_LINK_COPIES = {
+    "requirement_tasks": [
+        f"""{_INSERT_LINK}, created_at)
+            SELECT 'rel-' || requirement_id || '-' || task_id || '-implements', 'requirement', requirement_id,
+                   'task', task_id, 'implements', COALESCE(created_at, CURRENT_TIMESTAMP)
+            FROM requirement_tasks""",
+    ],
+    "requirement_architecture": [
+        f"""{_INSERT_LINK})
+            SELECT 'rel-' || requirement_id || '-' || architecture_id || '-addresses', 'requirement', requirement_id,
+                   'architecture', architecture_id, 'addresses'
+            FROM requirement_architecture""",
+    ],
+    "task_dependencies": [
+        f"""{_INSERT_LINK})
+            SELECT 'rel-' || depends_on_task_id || '-' || task_id || '-blocks', 'task', depends_on_task_id,
+                   'task', task_id, 'blocks'
+            FROM task_dependencies WHERE dependency_type = 'blocks'""",
+        f"""{_INSERT_LINK})
+            SELECT 'rel-' || task_id || '-' || depends_on_task_id || '-' || COALESCE(dependency_type, 'depends'),
+                   'task', task_id, 'task', depends_on_task_id, COALESCE(dependency_type, 'depends')
+            FROM task_dependencies WHERE dependency_type IS NULL OR dependency_type IN ('informs', 'requires')""",
+    ],
+    "requirement_dependencies": [
+        f"""{_INSERT_LINK})
+            SELECT 'rel-' || requirement_id || '-' || depends_on_requirement_id || '-' || kind,
+                   'requirement', requirement_id, 'requirement', depends_on_requirement_id, kind
+            FROM (
+                SELECT requirement_id, depends_on_requirement_id,
+                       CASE WHEN dependency_type IN ('parent', 'refines', 'conflicts', 'relates')
+                            THEN dependency_type ELSE 'depends' END AS kind
+                FROM requirement_dependencies
+            )""",
+    ],
+}
 
-    except Exception as e:
-        print(f"Error applying GitHub sync metadata migration: {e}")
-        return False
-    finally:
-        if "conn" in locals():
-            conn.close()
+_REVERSED_REQUIREMENT_LINKS = """
+    (source_type = 'task' AND target_type = 'requirement' AND relationship_type = 'implements')
+    OR (source_type = 'architecture' AND target_type = 'requirement' AND relationship_type = 'addresses')
+"""
 
+LINK_VIEW_SQL = [
+    """CREATE VIEW requirement_progress AS
+    SELECT
+        r.id,
+        r.title,
+        r.status,
+        r.priority,
+        r.task_count,
+        r.tasks_completed,
+        CASE
+            WHEN r.task_count = 0 THEN 0
+            ELSE ROUND(CAST(r.tasks_completed AS FLOAT) / r.task_count * 100, 2)
+        END AS completion_percentage,
+        (
+            SELECT COUNT(*) FROM relationships rel
+            WHERE rel.source_type = 'requirement' AND rel.source_id = r.id
+              AND rel.target_type = 'architecture' AND rel.relationship_type = 'addresses'
+        ) AS architecture_artifacts
+    FROM requirements r
+    WHERE r.status != 'Deprecated'""",
+    """CREATE VIEW task_hierarchy AS
+    WITH RECURSIVE task_tree AS (
+        SELECT t.id, t.title, t.status, NULL AS parent_task_id, 0 AS level, t.id AS root_task_id
+        FROM tasks t
+        WHERE NOT EXISTS (
+            SELECT 1 FROM relationships rel
+            WHERE rel.source_type = 'task' AND rel.source_id = t.id
+              AND rel.target_type = 'task' AND rel.relationship_type = 'parent'
+        )
+        UNION ALL
+        SELECT t.id, t.title, t.status, rel.target_id, tt.level + 1, tt.root_task_id
+        FROM relationships rel
+        JOIN tasks t ON t.id = rel.source_id
+        JOIN task_tree tt ON tt.id = rel.target_id
+        WHERE rel.source_type = 'task' AND rel.target_type = 'task' AND rel.relationship_type = 'parent'
+    )
+    SELECT * FROM task_tree""",
+    """CREATE VIEW blocked_items AS
+    WITH task_edges AS (
+        SELECT source_id AS dependent_id, target_id AS dependency_id FROM relationships
+        WHERE source_type = 'task' AND target_type = 'task' AND relationship_type IN ('depends', 'requires')
+        UNION
+        SELECT target_id, source_id FROM relationships
+        WHERE source_type = 'task' AND target_type = 'task' AND relationship_type = 'blocks'
+    ),
+    requirement_edges AS (
+        SELECT source_id AS dependent_id, target_id AS dependency_id FROM relationships
+        WHERE source_type = 'requirement' AND target_type = 'requirement' AND relationship_type = 'depends'
+    )
+    SELECT 'task' AS item_type, t.id, t.title, t.status, GROUP_CONCAT(dt.id) AS blocking_items
+    FROM tasks t
+    JOIN task_edges e ON e.dependent_id = t.id
+    JOIN tasks dt ON dt.id = e.dependency_id
+    WHERE t.status = 'Blocked' OR (t.status = 'Not Started' AND dt.status != 'Complete')
+    GROUP BY t.id
+    UNION ALL
+    SELECT 'requirement' AS item_type, r.id, r.title, r.status, GROUP_CONCAT(dr.id) AS blocking_items
+    FROM requirements r
+    JOIN requirement_edges e ON e.dependent_id = r.id
+    JOIN requirements dr ON dr.id = e.dependency_id
+    WHERE dr.status NOT IN ('Validated', 'Deprecated')
+    GROUP BY r.id""",
+    """CREATE VIEW requirement_hierarchy AS
+    WITH RECURSIVE requirement_tree AS (
+        SELECT
+            r.id, r.title, r.status, r.priority, r.decomposition_level, r.complexity_score, r.scope_assessment,
+            NULL AS parent_requirement_id,
+            0 AS hierarchy_level,
+            r.id AS root_requirement_id,
+            r.type || '-' || CAST(r.requirement_number AS TEXT) AS path
+        FROM requirements r
+        WHERE NOT EXISTS (
+            SELECT 1 FROM relationships rel
+            WHERE rel.source_type = 'requirement' AND rel.source_id = r.id
+              AND rel.target_type = 'requirement' AND rel.relationship_type = 'parent'
+        )
+        UNION ALL
+        SELECT
+            r.id, r.title, r.status, r.priority, r.decomposition_level, r.complexity_score, r.scope_assessment,
+            rel.target_id,
+            rt.hierarchy_level + 1,
+            rt.root_requirement_id,
+            rt.path || ' > ' || r.type || '-' || CAST(r.requirement_number AS TEXT)
+        FROM relationships rel
+        JOIN requirements r ON r.id = rel.source_id
+        JOIN requirement_tree rt ON rt.id = rel.target_id
+        WHERE rel.source_type = 'requirement' AND rel.target_type = 'requirement'
+          AND rel.relationship_type = 'parent' AND rt.hierarchy_level < 3
+    )
+    SELECT * FROM requirement_tree""",
+]
 
-def apply_decomposition_extension_migration(db_path: str) -> bool:
-    """
-    Apply migration to add requirement decomposition extensions
+_TASK_COUNT = """(
+    SELECT COUNT(*) FROM relationships
+    WHERE source_type = 'requirement' AND source_id = {req}
+      AND target_type = 'task' AND relationship_type = 'implements'
+)"""
+_TASKS_COMPLETED = """(
+    SELECT COUNT(*) FROM relationships rel JOIN tasks t ON t.id = rel.target_id
+    WHERE rel.source_type = 'requirement' AND rel.source_id = {req} AND rel.target_type = 'task'
+      AND rel.relationship_type = 'implements' AND t.status = 'Complete'
+)"""
+_REQUIREMENT_TASK_LINK = (
+    "{row}.source_type = 'requirement' AND {row}.target_type = 'task' AND {row}.relationship_type = 'implements'"
+)
+_REQUIREMENT_PARENT_LINK = (
+    "NEW.source_type = 'requirement' AND NEW.target_type = 'requirement' AND NEW.relationship_type = 'parent'"
+)
 
-    Args:
-        db_path: Path to the SQLite database
-
-    Returns:
-        True if migration was applied successfully, False otherwise
-    """
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        # Check if decomposition_metadata column already exists
-        cursor.execute("PRAGMA table_info(requirements)")
-        columns = [column[1] for column in cursor.fetchall()]
-
-        if "decomposition_metadata" not in columns:
-            # Add decomposition-specific metadata to requirements table
-            # JSON for LLM analysis results
-            cursor.execute("ALTER TABLE requirements ADD COLUMN decomposition_metadata TEXT")
-            cursor.execute(
-                "ALTER TABLE requirements ADD COLUMN decomposition_source TEXT "
-                "CHECK (decomposition_source IN "
-                "('manual', 'llm_automatic', 'llm_suggested'))"
-            )
-            cursor.execute(
-                "ALTER TABLE requirements ADD COLUMN complexity_score INTEGER CHECK (complexity_score BETWEEN 1 AND 10)"
-            )
-            cursor.execute(
-                "ALTER TABLE requirements ADD COLUMN scope_assessment TEXT "
-                "CHECK (scope_assessment IN "
-                "('single_feature', 'multiple_features', 'complex_workflow', 'epic'))"
-            )
-            # Max 3 levels
-            cursor.execute(
-                "ALTER TABLE requirements ADD COLUMN decomposition_level INTEGER "
-                "DEFAULT 0 CHECK (decomposition_level BETWEEN 0 AND 3)"
-            )
-
-            # Create requirement hierarchy view
-            cursor.execute("""
-            CREATE VIEW IF NOT EXISTS requirement_hierarchy AS
-            WITH RECURSIVE requirement_tree AS (
-                -- Base case: top-level requirements (no parent)
-                SELECT
-                    r.id,
-                    r.title,
-                    r.status,
-                    r.priority,
-                    r.decomposition_level,
-                    r.complexity_score,
-                    r.scope_assessment,
-                    NULL as parent_requirement_id,
-                    0 as hierarchy_level,
-                    r.id as root_requirement_id,
-                    r.type || '-' || CAST(r.requirement_number AS TEXT) as path
-                FROM requirements r
-                WHERE r.id NOT IN (
-                    SELECT rd.requirement_id
-                    FROM requirement_dependencies rd
-                    WHERE rd.dependency_type = 'parent'
+LINK_TRIGGER_SQL = [
+    f"""CREATE TRIGGER update_requirement_task_count_insert
+    AFTER INSERT ON relationships
+    WHEN {_REQUIREMENT_TASK_LINK.format(row="NEW")}
+    BEGIN
+        UPDATE requirements
+        SET task_count = {_TASK_COUNT.format(req="NEW.source_id")},
+            tasks_completed = {_TASKS_COMPLETED.format(req="NEW.source_id")}
+        WHERE id = NEW.source_id;
+    END""",
+    f"""CREATE TRIGGER update_requirement_task_count_delete
+    AFTER DELETE ON relationships
+    WHEN {_REQUIREMENT_TASK_LINK.format(row="OLD")}
+    BEGIN
+        UPDATE requirements
+        SET task_count = {_TASK_COUNT.format(req="OLD.source_id")},
+            tasks_completed = {_TASKS_COMPLETED.format(req="OLD.source_id")}
+        WHERE id = OLD.source_id;
+    END""",
+    f"""CREATE TRIGGER update_requirement_task_completion
+    AFTER UPDATE OF status ON tasks
+    WHEN NEW.status = 'Complete' OR OLD.status = 'Complete'
+    BEGIN
+        UPDATE requirements
+        SET tasks_completed = {_TASKS_COMPLETED.format(req="requirements.id")}
+        WHERE id IN (
+            SELECT source_id FROM relationships
+            WHERE source_type = 'requirement' AND target_type = 'task'
+              AND target_id = NEW.id AND relationship_type = 'implements'
+        );
+    END""",
+    f"""CREATE TRIGGER validate_decomposition_level
+    BEFORE INSERT ON relationships
+    WHEN {_REQUIREMENT_PARENT_LINK}
+    BEGIN
+        SELECT CASE
+            WHEN (SELECT decomposition_level FROM requirements WHERE id = NEW.target_id) >= 3
+            THEN RAISE(ABORT, 'Maximum decomposition depth of 3 levels exceeded')
+        END;
+    END""",
+    f"""CREATE TRIGGER set_decomposition_level
+    AFTER INSERT ON relationships
+    WHEN {_REQUIREMENT_PARENT_LINK}
+    BEGIN
+        UPDATE requirements
+        SET decomposition_level = (
+            SELECT COALESCE(parent.decomposition_level, 0) + 1 FROM requirements parent WHERE parent.id = NEW.target_id
+        )
+        WHERE id = NEW.source_id;
+    END""",
+    f"""CREATE TRIGGER prevent_circular_dependencies
+    BEFORE INSERT ON relationships
+    WHEN {_REQUIREMENT_PARENT_LINK}
+    BEGIN
+        SELECT CASE
+            WHEN EXISTS (
+                WITH RECURSIVE ancestors(id) AS (
+                    SELECT NEW.target_id
+                    UNION
+                    SELECT rel.target_id FROM relationships rel JOIN ancestors a ON rel.source_id = a.id
+                    WHERE rel.source_type = 'requirement' AND rel.target_type = 'requirement'
+                      AND rel.relationship_type = 'parent'
                 )
-
-                UNION ALL
-
-                -- Recursive case: child requirements
-                SELECT
-                    r.id,
-                    r.title,
-                    r.status,
-                    r.priority,
-                    r.decomposition_level,
-                    r.complexity_score,
-                    r.scope_assessment,
-                    rd.depends_on_requirement_id as parent_requirement_id,
-                    rt.hierarchy_level + 1,
-                    rt.root_requirement_id,
-                    rt.path || ' > ' || r.type || '-' ||
-                    CAST(r.requirement_number AS TEXT)
-                FROM requirements r
-                JOIN requirement_dependencies rd ON r.id = rd.requirement_id
-                JOIN requirement_tree rt ON rd.depends_on_requirement_id = rt.id
-                WHERE rd.dependency_type = 'parent' AND rt.hierarchy_level < 3
+                SELECT 1 FROM ancestors WHERE id = NEW.source_id
             )
-            SELECT * FROM requirement_tree
-            """)
+            THEN RAISE(ABORT, 'Circular dependency detected in parent-child relationship')
+        END;
+    END""",
+]
 
-            # Create decomposition candidates view
-            cursor.execute("""
-            CREATE VIEW IF NOT EXISTS decomposition_candidates AS
-            SELECT
-                r.id,
-                r.title,
-                r.status,
-                r.complexity_score,
-                r.scope_assessment,
-                r.decomposition_level,
-                (LENGTH(r.functional_requirements) -
-                 LENGTH(REPLACE(r.functional_requirements, ',', '')) + 1)
-                 as functional_req_count,
-                (LENGTH(r.acceptance_criteria) -
-                 LENGTH(REPLACE(r.acceptance_criteria, ',', '')) + 1)
-                 as acceptance_criteria_count,
-                CASE
-                    WHEN r.complexity_score >= 7 THEN 'High'
-                    WHEN r.complexity_score >= 5 THEN 'Medium'
-                    ELSE 'Low'
-                END as decomposition_priority
+
+def consolidate_links(conn: sqlite3.Connection) -> None:
+    """Make relationships the only link store.
+
+    Works on every database state seen in the field: intact legacy tables, databases where the old
+    migration 7 dropped some legacy tables before failing, and databases where it completed. Links in
+    tables that were already dropped cannot be recovered; views and triggers are rebuilt regardless.
+    """
+    # Old views and triggers reference legacy tables and tasks.parent_task_id; they would block the
+    # column drop and break once the tables go, so remove them first.
+    for view in LINK_VIEWS:
+        conn.execute(f"DROP VIEW IF EXISTS {view}")
+    for trigger in LINK_TRIGGERS:
+        conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+
+    existing = _tables(conn)
+    for table, statements in LEGACY_LINK_COPIES.items():
+        if table in existing:
+            for statement in statements:
+                conn.execute(statement)
+    if "parent_task_id" in _columns(conn, "tasks"):
+        conn.execute(f"""{_INSERT_LINK})
+            SELECT 'rel-' || id || '-' || parent_task_id || '-parent', 'task', id, 'task', parent_task_id, 'parent'
+            FROM tasks WHERE parent_task_id IS NOT NULL AND parent_task_id != ''""")
+
+    # create_relationship used to accept requirement links in either direction; store one direction.
+    conn.execute(f"""{_INSERT_LINK}, created_at)
+        SELECT 'rel-' || target_id || '-' || source_id || '-' || relationship_type,
+               target_type, target_id, source_type, source_id, relationship_type, created_at
+        FROM relationships WHERE {_REVERSED_REQUIREMENT_LINKS}""")
+    conn.execute(f"DELETE FROM relationships WHERE {_REVERSED_REQUIREMENT_LINKS}")
+
+    for table in LEGACY_LINK_TABLES:
+        conn.execute(f"DROP TABLE IF EXISTS {table}")
+    if "parent_task_id" in _columns(conn, "tasks"):
+        conn.execute("ALTER TABLE tasks DROP COLUMN parent_task_id")
+
+    for statement in LINK_VIEW_SQL + LINK_TRIGGER_SQL:
+        conn.execute(statement)
+
+    # Denormalised counters were maintained from the legacy tables (or not at all); recompute them,
+    # touching only rows that are wrong so updated_at isn't bumped needlessly.
+    conn.execute(f"""
+        UPDATE requirements
+        SET task_count = counts.total, tasks_completed = counts.done
+        FROM (
+            SELECT id, {_TASK_COUNT.format(req="r.id")} AS total, {_TASKS_COMPLETED.format(req="r.id")} AS done
             FROM requirements r
-            WHERE r.status IN ('Draft', 'Under Review')
-                AND r.decomposition_level < 3
-                AND (
-                    r.complexity_score >= 5
-                    OR r.scope_assessment IN
-                    ('multiple_features', 'complex_workflow', 'epic')
-                    OR (LENGTH(r.functional_requirements) -
-                        LENGTH(REPLACE(r.functional_requirements, ',', '')) + 1) > 5
-                )
-            """)
+        ) AS counts
+        WHERE counts.id = requirements.id
+          AND (requirements.task_count IS NOT counts.total OR requirements.tasks_completed IS NOT counts.done)
+    """)
 
-            # Add indexes for decomposition queries
-            cursor.execute(
-                "CREATE INDEX IF NOT EXISTS idx_requirement_dependencies_parent "
-                "ON requirement_dependencies(depends_on_requirement_id, dependency_type)"
+
+# --- runner ------------------------------------------------------------------------------------
+
+MIGRATIONS: list[tuple[int, str, Migration]] = [
+    (1, "GitHub integration fields", add_github_integration_columns),
+    (2, "GitHub sync metadata fields", add_github_sync_metadata_columns),
+    (3, "Requirement decomposition extension", add_decomposition_columns),
+    (4, "Fix blocked_items view column reference (superseded by 8)", superseded),
+    (5, "Create unified relationships table", create_relationships_table),
+    (6, "Consolidate relationship data (superseded by 8)", superseded),
+    (7, "Remove redundant relationship tables (superseded by 8)", superseded),
+    (8, "Consolidate all links into relationships", consolidate_links),
+]
+
+
+def apply_all_migrations(db_path: str, target_version: int | None = None) -> int:
+    """Apply pending migrations up to target_version (default: latest) and return the resulting version.
+
+    Raises MigrationError when a migration fails; that migration is rolled back completely.
+    """
+    target = MIGRATIONS[-1][0] if target_version is None else target_version
+    conn = sqlite3.connect(db_path, isolation_level=None, timeout=30)
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS schema_version (
+                version INTEGER PRIMARY KEY,
+                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                description TEXT
             )
-            cursor.execute(
-                "CREATE INDEX IF NOT EXISTS idx_requirements_decomposition "
-                "ON requirements(decomposition_level, complexity_score, scope_assessment)"
-            )
-
-            # Add triggers for decomposition validation
-            cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS validate_decomposition_level
-            BEFORE INSERT ON requirement_dependencies
-            WHEN NEW.dependency_type = 'parent'
-            BEGIN
-                SELECT CASE
-                    WHEN (
-                        SELECT decomposition_level
-                        FROM requirements
-                        WHERE id = NEW.depends_on_requirement_id
-                    ) >= 3
-                    THEN RAISE(ABORT, 'Maximum decomposition depth of 3 levels exceeded')
-                END;
-            END
-            """)
-
-            cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS set_decomposition_level
-            AFTER INSERT ON requirement_dependencies
-            WHEN NEW.dependency_type = 'parent'
-            BEGIN
-                UPDATE requirements
-                SET decomposition_level = (
-                    SELECT COALESCE(parent_req.decomposition_level, 0) + 1
-                    FROM requirements parent_req
-                    WHERE parent_req.id = NEW.depends_on_requirement_id
-                )
-                WHERE id = NEW.requirement_id;
-            END
-            """)
-
-            cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS prevent_circular_dependencies
-            BEFORE INSERT ON requirement_dependencies
-            WHEN NEW.dependency_type = 'parent'
-            BEGIN
-                SELECT CASE
-                    WHEN EXISTS (
-                        WITH RECURSIVE circular_check AS (
-                            SELECT NEW.depends_on_requirement_id as ancestor_id
-                            UNION ALL
-                            SELECT rd.depends_on_requirement_id
-                            FROM requirement_dependencies rd
-                            JOIN circular_check cc ON rd.requirement_id = cc.ancestor_id
-                            WHERE rd.dependency_type = 'parent'
-                        )
-                        SELECT 1 FROM circular_check
-                        WHERE ancestor_id = NEW.requirement_id
-                    )
-                    THEN RAISE(ABORT, 'Circular dependency detected in parent-child relationship')
-                END;
-            END
-            """)
-
-            conn.commit()
-            print("Decomposition extension migration applied successfully")
-            return True
-        else:
-            print("Decomposition extension migration already applied")
-            return True
-
-    except Exception as e:
-        print(f"Error applying decomposition extension migration: {e}")
-        return False
+        """)
+        for version, description, migrate in MIGRATIONS:
+            if version > target:
+                break
+            # IMMEDIATE takes the write lock before re-reading the version, so two servers starting
+            # against the same database cannot both apply a migration.
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                current = conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_version").fetchone()[0]
+                if current >= version:
+                    conn.execute("COMMIT")
+                    continue
+                logger.info(f"Applying migration {version}: {description}")
+                migrate(conn)
+                conn.execute("INSERT INTO schema_version (version, description) VALUES (?, ?)", (version, description))
+                conn.execute("COMMIT")
+            except Exception as e:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise MigrationError(f"Migration {version} ({description}) failed and was rolled back: {e}") from e
+        return conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_version").fetchone()[0]
     finally:
-        if "conn" in locals():
-            conn.close()
-
-
-def fix_blocked_items_view_migration(db_path: str) -> bool:
-    """
-    Apply migration to fix blocked_items view column reference
-
-    Args:
-        db_path: Path to the SQLite database
-
-    Returns:
-        True if migration was applied successfully, False otherwise
-    """
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        # Drop and recreate the blocked_items view with correct column reference
-        cursor.execute("DROP VIEW IF EXISTS blocked_items")
-        cursor.execute("""
-            CREATE VIEW blocked_items AS
-            SELECT
-                'task' as item_type,
-                t.id,
-                t.title,
-                t.status,
-                GROUP_CONCAT(td.depends_on_task_id) as blocking_items
-            FROM tasks t
-            JOIN task_dependencies td ON t.id = td.task_id
-            JOIN tasks dt ON td.depends_on_task_id = dt.id
-            WHERE t.status = 'Blocked' OR (t.status = 'Not Started' AND dt.status != 'Complete')
-            GROUP BY t.id
-
-            UNION ALL
-
-            SELECT
-                'requirement' as item_type,
-                r.id,
-                r.title,
-                r.status,
-                GROUP_CONCAT(rd.depends_on_requirement_id) as blocking_items
-            FROM requirements r
-            JOIN requirement_dependencies rd ON r.id = rd.requirement_id
-            JOIN requirements dr ON rd.depends_on_requirement_id = dr.id
-            WHERE dr.status NOT IN ('Validated', 'Deprecated')
-            GROUP BY r.id
-        """)
-
-        conn.commit()
-        print("Blocked items view migration applied successfully")
-        return True
-
-    except Exception as e:
-        print(f"Error applying blocked items view migration: {e}")
-        return False
-    finally:
-        if "conn" in locals():
-            conn.close()
-
-
-def apply_relationship_schema_migration(db_path: str) -> bool:
-    """
-    Apply migration to create unified polymorphic relationships table
-
-    Args:
-        db_path: Path to the SQLite database
-
-    Returns:
-        True if migration was applied successfully, False otherwise
-    """
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        # Check if relationships table already exists
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='relationships'")
-
-        if not cursor.fetchone():
-            # Create unified polymorphic relationships table
-            cursor.execute("""
-                CREATE TABLE relationships (
-                    id TEXT PRIMARY KEY,
-                    source_type TEXT NOT NULL CHECK (source_type IN ('requirement', 'task', 'architecture')),
-                    source_id TEXT NOT NULL,
-                    target_type TEXT NOT NULL CHECK (target_type IN ('requirement', 'task', 'architecture')),
-                    target_id TEXT NOT NULL,
-                    relationship_type TEXT NOT NULL CHECK (relationship_type IN ('implements', 'addresses', 'depends', 'blocks', 'informs', 'requires', 'parent', 'refines', 'conflicts', 'relates')),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(source_type, source_id, target_type, target_id, relationship_type)
-                )
-            """)
-
-            # Add performance indexes
-            cursor.execute("CREATE INDEX idx_relationships_source ON relationships(source_type, source_id)")
-            cursor.execute("CREATE INDEX idx_relationships_target ON relationships(target_type, target_id)")
-            cursor.execute("CREATE INDEX idx_relationships_type ON relationships(relationship_type)")
-
-            conn.commit()
-            print("Relationship schema migration applied successfully")
-
-            # Validate table creation
-            cursor.execute("PRAGMA table_info(relationships)")
-            table_info = cursor.fetchall()
-            expected_columns = ['id', 'source_type', 'source_id', 'target_type', 'target_id', 'relationship_type', 'created_at']
-            actual_columns = [column[1] for column in table_info]
-
-            for expected_col in expected_columns:
-                if expected_col not in actual_columns:
-                    raise Exception(f"Expected column '{expected_col}' not found in relationships table")
-
-            return True
-        else:
-            print("Relationship schema migration already applied")
-            return True
-
-    except Exception as e:
-        print(f"Error applying relationship schema migration: {e}")
-        if "conn" in locals():
-            conn.rollback()
-        return False
-    finally:
-        if "conn" in locals():
-            conn.close()
-
-
-def apply_relationship_consolidation_migration(db_path: str) -> bool:
-    """
-    Apply migration to consolidate existing relationship data into unified table
-
-    Args:
-        db_path: Path to the SQLite database
-
-    Returns:
-        True if migration was applied successfully, False otherwise
-    """
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        # Check if consolidation already applied by looking for migrated data
-        cursor.execute("SELECT COUNT(*) FROM relationships")
-        existing_relationships = cursor.fetchone()[0]
-
-        if existing_relationships > 0:
-            print("Relationship consolidation migration already applied")
-            return True
-
-        print("Starting relationship data consolidation...")
-
-        # 1. Migrate parent_task_id relationships from tasks table
-        cursor.execute("""
-            SELECT id, parent_task_id, title
-            FROM tasks
-            WHERE parent_task_id IS NOT NULL AND parent_task_id != ''
-        """)
-        parent_relationships = cursor.fetchall()
-
-        for task_id, parent_task_id, title in parent_relationships:
-            relationship_id = f"rel-{task_id}-{parent_task_id}-parent"
-            cursor.execute("""
-                INSERT INTO relationships (id, source_type, source_id, target_type, target_id, relationship_type)
-                VALUES (?, 'task', ?, 'task', ?, 'parent')
-            """, (relationship_id, task_id, parent_task_id))
-            print(f"Migrated parent relationship: {task_id} → {parent_task_id}")
-
-        # 2. Migrate requirement_tasks junction table data
-        cursor.execute("""
-            SELECT requirement_id, task_id, created_at
-            FROM requirement_tasks
-        """)
-        requirement_task_relationships = cursor.fetchall()
-
-        for req_id, task_id, created_at in requirement_task_relationships:
-            relationship_id = f"rel-{req_id}-{task_id}-implements"
-            cursor.execute("""
-                INSERT INTO relationships (id, source_type, source_id, target_type, target_id, relationship_type, created_at)
-                VALUES (?, 'requirement', ?, 'task', ?, 'implements', ?)
-            """, (relationship_id, req_id, task_id, created_at))
-            print(f"Migrated requirement→task relationship: {req_id} → {task_id}")
-
-        # 3. Migrate requirement_architecture junction table data (if any)
-        cursor.execute("""
-            SELECT requirement_id, architecture_id, relationship_type
-            FROM requirement_architecture
-        """)
-        req_arch_relationships = cursor.fetchall()
-
-        for req_id, arch_id, rel_type in req_arch_relationships:
-            # Default to 'addresses' if relationship_type is None or empty
-            if not rel_type:
-                rel_type = 'addresses'
-            relationship_id = f"rel-{req_id}-{arch_id}-{rel_type}"
-            cursor.execute("""
-                INSERT INTO relationships (id, source_type, source_id, target_type, target_id, relationship_type)
-                VALUES (?, 'requirement', ?, 'architecture', ?, ?)
-            """, (relationship_id, req_id, arch_id, rel_type))
-            print(f"Migrated requirement→architecture relationship: {req_id} → {arch_id} ({rel_type})")
-
-        # 4. Migrate task_dependencies table data (if any)
-        cursor.execute("""
-            SELECT task_id, depends_on_task_id, dependency_type
-            FROM task_dependencies
-        """)
-        task_deps = cursor.fetchall()
-
-        for task_id, depends_on_task_id, dep_type in task_deps:
-            # Default to 'depends' if dependency_type is None or empty
-            if not dep_type:
-                dep_type = 'depends'
-            relationship_id = f"rel-{task_id}-{depends_on_task_id}-{dep_type}"
-            cursor.execute("""
-                INSERT INTO relationships (id, source_type, source_id, target_type, target_id, relationship_type)
-                VALUES (?, 'task', ?, 'task', ?, ?)
-            """, (relationship_id, task_id, depends_on_task_id, dep_type))
-            print(f"Migrated task dependency: {task_id} → {depends_on_task_id} ({dep_type})")
-
-        # 5. Migrate requirement_dependencies table data (if any)
-        cursor.execute("""
-            SELECT requirement_id, depends_on_requirement_id, dependency_type
-            FROM requirement_dependencies
-        """)
-        req_deps = cursor.fetchall()
-
-        for req_id, depends_on_req_id, dep_type in req_deps:
-            # Default to 'depends' if dependency_type is None or empty
-            if not dep_type:
-                dep_type = 'depends'
-            relationship_id = f"rel-{req_id}-{depends_on_req_id}-{dep_type}"
-            cursor.execute("""
-                INSERT INTO relationships (id, source_type, source_id, target_type, target_id, relationship_type)
-                VALUES (?, 'requirement', ?, 'requirement', ?, ?)
-            """, (relationship_id, req_id, depends_on_req_id, dep_type))
-            print(f"Migrated requirement dependency: {req_id} → {depends_on_req_id} ({dep_type})")
-
-        conn.commit()
-
-        # Verify migration success
-        cursor.execute("SELECT COUNT(*) FROM relationships")
-        final_count = cursor.fetchone()[0]
-
-        total_migrated = len(parent_relationships) + len(requirement_task_relationships) + len(req_arch_relationships) + len(task_deps) + len(req_deps)
-
-        if final_count != total_migrated:
-            raise Exception(f"Migration verification failed: expected {total_migrated} relationships, found {final_count}")
-
-        print(f"Relationship consolidation migration completed successfully: {final_count} relationships migrated")
-        return True
-
-    except Exception as e:
-        print(f"Error applying relationship consolidation migration: {e}")
-        if "conn" in locals():
-            conn.rollback()
-        return False
-    finally:
-        if "conn" in locals():
-            conn.close()
-
-
-def apply_relationship_cleanup_migration(db_path: str) -> bool:
-    """
-    Remove redundant relationship tables and columns after data consolidation.
-    Schema Version 7: Cleanup phase
-    """
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        print("Starting relationship table cleanup migration...")
-
-        # Check if cleanup already applied by checking if any tables exist
-        cursor.execute("""
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name IN ('task_dependencies', 'requirement_dependencies', 'requirement_architecture')
-        """)
-        existing_tables = [row[0] for row in cursor.fetchall()]
-
-        # Also check if parent_task_id column exists
-        cursor.execute("PRAGMA table_info(tasks)")
-        columns_info_check = cursor.fetchall()
-        has_parent_task_id_check = any(col[1] == 'parent_task_id' for col in columns_info_check)
-
-        if not existing_tables and not has_parent_task_id_check:
-            print("Relationship cleanup migration already applied")
-            return True
-
-        print(f"Found {len(existing_tables)} tables to clean up: {existing_tables}")
-        if has_parent_task_id_check:
-            print("parent_task_id column needs to be removed")
-
-        # Verify data has been migrated to relationships table
-        cursor.execute("SELECT COUNT(*) FROM relationships")
-        relationship_count = cursor.fetchone()[0]
-
-        if relationship_count == 0:
-            raise Exception("Cannot cleanup: no relationships found in unified table. Data consolidation may not have completed.")
-
-        print(f"Found {relationship_count} relationships in unified table, proceeding with cleanup...")
-
-        # 1. Drop task_dependencies table (verify data migrated to unified table)
-        if 'task_dependencies' in existing_tables:
-            cursor.execute("SELECT COUNT(*) FROM task_dependencies")
-            old_count = cursor.fetchone()[0]
-
-            if old_count > 0:
-                # Verify that all old relationships exist in new table
-                cursor.execute("""
-                    SELECT COUNT(*) FROM task_dependencies td
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM relationships r
-                        WHERE r.source_type = 'task'
-                        AND r.source_id = td.task_id
-                        AND r.target_type = 'task'
-                        AND r.target_id = td.depends_on_task_id
-                        AND r.relationship_type = COALESCE(td.dependency_type, 'depends')
-                    )
-                """)
-                unmigrated_count = cursor.fetchone()[0]
-
-                if unmigrated_count > 0:
-                    raise Exception(f"Cannot drop task_dependencies: {unmigrated_count} relationships not found in unified table. Data consolidation incomplete.")
-
-                print(f"Verified {old_count} task dependencies migrated to unified table")
-
-            cursor.execute("DROP TABLE task_dependencies")
-            print("Dropped task_dependencies table")
-
-        # 2. Drop requirement_dependencies table (verify data migrated to unified table)
-        if 'requirement_dependencies' in existing_tables:
-            cursor.execute("SELECT COUNT(*) FROM requirement_dependencies")
-            old_count = cursor.fetchone()[0]
-
-            if old_count > 0:
-                # Verify that all old relationships exist in new table
-                cursor.execute("""
-                    SELECT COUNT(*) FROM requirement_dependencies rd
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM relationships r
-                        WHERE r.source_type = 'requirement'
-                        AND r.source_id = rd.requirement_id
-                        AND r.target_type = 'requirement'
-                        AND r.target_id = rd.depends_on_requirement_id
-                        AND r.relationship_type = COALESCE(rd.dependency_type, 'depends')
-                    )
-                """)
-                unmigrated_count = cursor.fetchone()[0]
-
-                if unmigrated_count > 0:
-                    raise Exception(f"Cannot drop requirement_dependencies: {unmigrated_count} relationships not found in unified table. Data consolidation incomplete.")
-
-                print(f"Verified {old_count} requirement dependencies migrated to unified table")
-
-            cursor.execute("DROP TABLE requirement_dependencies")
-            print("Dropped requirement_dependencies table")
-
-        # 3. Drop requirement_architecture table (verify data migrated to unified table)
-        if 'requirement_architecture' in existing_tables:
-            cursor.execute("SELECT COUNT(*) FROM requirement_architecture")
-            old_count = cursor.fetchone()[0]
-
-            if old_count > 0:
-                # Verify that all old relationships exist in new table
-                cursor.execute("""
-                    SELECT COUNT(*) FROM requirement_architecture ra
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM relationships r
-                        WHERE r.source_type = 'requirement'
-                        AND r.source_id = ra.requirement_id
-                        AND r.target_type = 'architecture'
-                        AND r.target_id = ra.architecture_id
-                        AND r.relationship_type = COALESCE(ra.relationship_type, 'addresses')
-                    )
-                """)
-                unmigrated_count = cursor.fetchone()[0]
-
-                if unmigrated_count > 0:
-                    raise Exception(f"Cannot drop requirement_architecture: {unmigrated_count} relationships not found in unified table. Data consolidation incomplete.")
-
-                print(f"Verified {old_count} requirement->architecture relationships migrated to unified table")
-
-            cursor.execute("DROP TABLE requirement_architecture")
-            print("Dropped requirement_architecture table")
-
-        # 4. Remove parent_task_id column from tasks table
-        # SQLite doesn't support DROP COLUMN, so we need to recreate the table
-        cursor.execute("PRAGMA table_info(tasks)")
-        columns_info = cursor.fetchall()
-
-        # Check if parent_task_id column exists
-        has_parent_task_id = any(col[1] == 'parent_task_id' for col in columns_info)
-
-        if has_parent_task_id:
-            # Verify parent relationships were migrated to unified table
-            cursor.execute("SELECT COUNT(*) FROM tasks WHERE parent_task_id IS NOT NULL AND parent_task_id != ''")
-            parent_count = cursor.fetchone()[0]
-
-            if parent_count > 0:
-                # Verify that all parent relationships exist in new table
-                cursor.execute("""
-                    SELECT COUNT(*) FROM tasks t
-                    WHERE t.parent_task_id IS NOT NULL AND t.parent_task_id != ''
-                    AND NOT EXISTS (
-                        SELECT 1 FROM relationships r
-                        WHERE r.source_type = 'task'
-                        AND r.source_id = t.id
-                        AND r.target_type = 'task'
-                        AND r.target_id = t.parent_task_id
-                        AND r.relationship_type = 'parent'
-                    )
-                """)
-                unmigrated_count = cursor.fetchone()[0]
-
-                if unmigrated_count > 0:
-                    raise Exception(f"Cannot remove parent_task_id: {unmigrated_count} parent relationships not found in unified table. Data consolidation incomplete.")
-
-                print(f"Verified {parent_count} parent task relationships migrated to unified table")
-
-            # Get all columns except parent_task_id
-            columns_to_keep = [col[1] for col in columns_info if col[1] != 'parent_task_id']
-            columns_str = ', '.join(columns_to_keep)
-
-            # Create new tasks table without parent_task_id
-            cursor.execute(f"""
-                CREATE TABLE tasks_new AS
-                SELECT {columns_str} FROM tasks
-            """)
-
-            # Drop old table and rename new one
-            cursor.execute("DROP TABLE tasks")
-            cursor.execute("ALTER TABLE tasks_new RENAME TO tasks")
-
-            # Recreate indexes and triggers for tasks table
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee)")
-
-            # Recreate update trigger
-            cursor.execute("""
-                CREATE TRIGGER update_task_timestamp
-                AFTER UPDATE ON tasks
-                BEGIN
-                    UPDATE tasks SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
-                END
-            """)
-
-            # Recreate status change trigger
-            cursor.execute("""
-                CREATE TRIGGER log_task_status_change
-                AFTER UPDATE OF status ON tasks
-                WHEN OLD.status != NEW.status
-                BEGIN
-                    INSERT INTO lifecycle_events (entity_type, entity_id, event_type, from_value, to_value)
-                    VALUES ('task', NEW.id, 'status_change', OLD.status, NEW.status);
-
-                    -- Update completed timestamp
-                    UPDATE tasks
-                    SET completed_at = CASE
-                        WHEN NEW.status = 'Complete' THEN CURRENT_TIMESTAMP
-                        ELSE NULL
-                    END
-                    WHERE id = NEW.id;
-                END
-            """)
-
-            print("Removed parent_task_id column from tasks table")
-
-        # 5. Update requirement task completion trigger to use new relationships table
-        cursor.execute("DROP TRIGGER IF EXISTS update_requirement_task_completion")
-        cursor.execute("""
-            CREATE TRIGGER update_requirement_task_completion
-            AFTER UPDATE OF status ON tasks
-            WHEN NEW.status = 'Complete' OR OLD.status = 'Complete'
-            BEGIN
-                UPDATE requirements
-                SET tasks_completed = (
-                    SELECT COUNT(*)
-                    FROM relationships r
-                    JOIN tasks t ON r.target_id = t.id
-                    WHERE r.source_id = requirements.id
-                    AND r.source_type = 'requirement'
-                    AND r.target_type = 'task'
-                    AND r.relationship_type = 'implements'
-                    AND t.status = 'Complete'
-                )
-                WHERE id IN (
-                    SELECT source_id FROM relationships
-                    WHERE target_id = NEW.id
-                    AND source_type = 'requirement'
-                    AND target_type = 'task'
-                    AND relationship_type = 'implements'
-                );
-            END
-        """)
-        print("Updated requirement task completion trigger for unified relationships table")
-
-        # 6. Update requirement task count trigger to use new relationships table
-        cursor.execute("DROP TRIGGER IF EXISTS update_requirement_task_count_insert")
-        cursor.execute("""
-            CREATE TRIGGER update_requirement_task_count_insert
-            AFTER INSERT ON relationships
-            WHEN NEW.source_type = 'requirement' AND NEW.target_type = 'task' AND NEW.relationship_type = 'implements'
-            BEGIN
-                UPDATE requirements
-                SET task_count = (
-                    SELECT COUNT(*) FROM relationships
-                    WHERE source_id = NEW.source_id
-                    AND source_type = 'requirement'
-                    AND target_type = 'task'
-                    AND relationship_type = 'implements'
-                )
-                WHERE id = NEW.source_id;
-            END
-        """)
-        print("Updated requirement task count trigger for unified relationships table")
-
-        # 7. Update requirement_progress view to use new relationships table
-        cursor.execute("DROP VIEW IF EXISTS requirement_progress")
-        cursor.execute("""
-            CREATE VIEW requirement_progress AS
-            SELECT
-                r.id,
-                r.title,
-                r.status,
-                r.priority,
-                r.task_count,
-                r.tasks_completed,
-                CASE
-                    WHEN r.task_count = 0 THEN 0
-                    ELSE ROUND(CAST(r.tasks_completed AS FLOAT) / r.task_count * 100, 2)
-                END as completion_percentage,
-                COUNT(DISTINCT rel.target_id) as architecture_artifacts
-            FROM requirements r
-            LEFT JOIN relationships rel ON r.id = rel.source_id
-                AND rel.source_type = 'requirement'
-                AND rel.target_type = 'architecture'
-            WHERE r.status != 'Deprecated'
-            GROUP BY r.id
-        """)
-        print("Updated requirement_progress view for unified relationships table")
-
-        # 8. Update requirement_hierarchy view to use new relationships table
-        cursor.execute("DROP VIEW IF EXISTS requirement_hierarchy")
-        cursor.execute("""
-            CREATE VIEW requirement_hierarchy AS
-            WITH RECURSIVE requirement_tree AS (
-                -- Base case: top-level requirements (no parent)
-                SELECT
-                    r.id,
-                    r.title,
-                    r.status,
-                    r.priority,
-                    r.decomposition_level,
-                    r.complexity_score,
-                    r.scope_assessment,
-                    NULL as parent_requirement_id,
-                    0 as hierarchy_level,
-                    r.id as root_requirement_id,
-                    r.type || '-' || CAST(r.requirement_number AS TEXT) as path
-                FROM requirements r
-                WHERE r.id NOT IN (
-                    SELECT rel.source_id
-                    FROM relationships rel
-                    WHERE rel.source_type = 'requirement'
-                    AND rel.target_type = 'requirement'
-                    AND rel.relationship_type = 'parent'
-                )
-
-                UNION ALL
-
-                -- Recursive case: child requirements
-                SELECT
-                    r.id,
-                    r.title,
-                    r.status,
-                    r.priority,
-                    r.decomposition_level,
-                    r.complexity_score,
-                    r.scope_assessment,
-                    rel.target_id as parent_requirement_id,
-                    rt.hierarchy_level + 1,
-                    rt.root_requirement_id,
-                    rt.path || ' > ' || r.type || '-' ||
-                    CAST(r.requirement_number AS TEXT)
-                FROM requirements r
-                JOIN relationships rel ON r.id = rel.source_id
-                JOIN requirement_tree rt ON rel.target_id = rt.id
-                WHERE rel.source_type = 'requirement'
-                AND rel.target_type = 'requirement'
-                AND rel.relationship_type = 'parent'
-                AND rt.hierarchy_level < 3
-            )
-            SELECT * FROM requirement_tree
-        """)
-        print("Updated requirement_hierarchy view for unified relationships table")
-
-        # 9. Update blocked_items view to use new relationships table
-        cursor.execute("DROP VIEW IF EXISTS blocked_items")
-        cursor.execute("""
-            CREATE VIEW blocked_items AS
-            SELECT
-                'task' as item_type,
-                t.id,
-                t.title,
-                t.status,
-                GROUP_CONCAT(rel.target_id) as blocking_items
-            FROM tasks t
-            JOIN relationships rel ON t.id = rel.source_id
-            JOIN tasks dt ON rel.target_id = dt.id
-            WHERE rel.source_type = 'task'
-            AND rel.target_type = 'task'
-            AND rel.relationship_type IN ('depends', 'blocks')
-            AND (t.status = 'Blocked' OR (t.status = 'Not Started' AND dt.status != 'Complete'))
-            GROUP BY t.id
-
-            UNION ALL
-
-            SELECT
-                'requirement' as item_type,
-                r.id,
-                r.title,
-                r.status,
-                GROUP_CONCAT(rel.target_id) as blocking_items
-            FROM requirements r
-            JOIN relationships rel ON r.id = rel.source_id
-            JOIN requirements dr ON rel.target_id = dr.id
-            WHERE rel.source_type = 'requirement'
-            AND rel.target_type = 'requirement'
-            AND rel.relationship_type IN ('depends', 'blocks')
-            AND dr.status NOT IN ('Validated', 'Deprecated')
-            GROUP BY r.id
-        """)
-        print("Updated blocked_items view for unified relationships table")
-
-        conn.commit()
-
-        # Verify cleanup success
-        cursor.execute("""
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name IN ('task_dependencies', 'requirement_dependencies', 'requirement_architecture')
-        """)
-        remaining_tables = cursor.fetchall()
-
-        if remaining_tables:
-            raise Exception(f"Cleanup verification failed: tables still exist: {[t[0] for t in remaining_tables]}")
-
-        # Verify parent_task_id column removed
-        cursor.execute("PRAGMA table_info(tasks)")
-        columns_after = cursor.fetchall()
-        if any(col[1] == 'parent_task_id' for col in columns_after):
-            raise Exception("Cleanup verification failed: parent_task_id column still exists in tasks table")
-
-        print(f"Relationship cleanup migration completed successfully")
-        return True
-
-    except Exception as e:
-        print(f"Error applying relationship cleanup migration: {e}")
-        if "conn" in locals():
-            conn.rollback()
-        return False
-    finally:
-        if "conn" in locals():
-            conn.close()
-
-
-def apply_all_migrations(db_path: str) -> bool:
-    """Apply all pending migrations to the database"""
-    current_version = get_schema_version(db_path)
-
-    migrations = [
-        (1, "GitHub integration fields", apply_github_integration_migration),
-        (2, "GitHub sync metadata fields", apply_github_sync_metadata_migration),
-        (3, "Requirement decomposition extension", apply_decomposition_extension_migration),
-        (4, "Fix blocked_items view column reference", fix_blocked_items_view_migration),
-        (5, "Create unified relationships table", apply_relationship_schema_migration),
-        (6, "Consolidate relationship data", apply_relationship_consolidation_migration),
-        (7, "Remove redundant relationship tables", apply_relationship_cleanup_migration),
-    ]
-
-    for version, description, migration_func in migrations:
-        if current_version < version:
-            print(f"Applying migration {version}: {description}")
-            if migration_func(db_path):
-                set_schema_version(db_path, version, description)
-                current_version = version
-            else:
-                print(f"Migration {version} failed")
-                return False
-
-    return True
+        conn.close()

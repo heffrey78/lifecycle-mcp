@@ -12,10 +12,8 @@ class TestStatusHandler:
     def test_get_tool_definitions(self, status_handler):
         """Test that handler returns correct tool definitions"""
         tools = status_handler.get_tool_definitions()
-        assert len(tools) == 1
-
         tool_names = [tool["name"] for tool in tools]
-        assert "get_project_status" in tool_names
+        assert tool_names == ["get_project_status", "get_project_metrics"]
 
     def test_get_project_status_empty_project(self, status_handler):
         """Test getting status for empty project"""

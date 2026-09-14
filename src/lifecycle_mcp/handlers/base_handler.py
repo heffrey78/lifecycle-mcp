@@ -16,6 +16,10 @@ from ..database_manager import DatabaseManager
 logger = logging.getLogger(__name__)
 
 
+class ErrorResult(list):
+    """Content for a failed tool call. The server reports it to the client with isError=true."""
+
+
 class BaseHandler(ABC):
     """Abstract base class for all MCP tool handlers"""
 
@@ -76,14 +80,13 @@ class BaseHandler(ABC):
         return f"Found {count} {entity_type}(s)"
 
     def _create_error_response(self, error_msg: str, exception: Exception | None = None) -> list[TextContent]:
-        """Create standardized error response"""
+        """Create standardized error response; the exception's message is included so agents can act on it"""
         if exception:
-            self.logger.error(f"{error_msg}: {str(exception)}")
-        else:
-            self.logger.error(error_msg)
+            error_msg = f"{error_msg}: {exception}"
+        self.logger.error(error_msg)
 
         # Use above-the-fold format for errors
-        return self._create_above_fold_response("ERROR", error_msg)
+        return ErrorResult(self._create_above_fold_response("ERROR", error_msg))
 
     def _validate_required_params(self, params: dict[str, Any], required_fields: list[str]) -> str | None:
         """Validate that required parameters are present"""
@@ -109,6 +112,25 @@ class BaseHandler(ABC):
         except (TypeError, ValueError) as e:
             self.logger.warning(f"Failed to serialize to JSON: {str(e)}")
             return "[]"
+
+    def _link(self, source_type: str, source_id: str, target_type: str, target_id: str, relationship_type: str):
+        """Record a link in the relationships table, the only place links are stored (idempotent).
+
+        Direction conventions: requirement -> task (implements), requirement -> architecture (addresses),
+        child -> parent (parent), dependent -> dependency (depends/requires/informs), blocker -> blocked (blocks).
+        """
+        self.db.execute_query(
+            "INSERT OR IGNORE INTO relationships "
+            "(id, source_type, source_id, target_type, target_id, relationship_type) VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                f"rel-{source_id}-{target_id}-{relationship_type}",
+                source_type,
+                source_id,
+                target_type,
+                target_id,
+                relationship_type,
+            ],
+        )
 
     def _log_operation(self, entity_type: str, entity_id: str, event_type: str, actor: str = "MCP User"):
         """Log lifecycle events"""

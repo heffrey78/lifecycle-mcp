@@ -82,7 +82,7 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
 
 5. **Project Configuration** (`pyproject.toml`): Standard Python packaging
    - Entry point: `lifecycle-mcp = "lifecycle_mcp.server:main"`
-   - Minimal dependencies: only `mcp>=1.0.0`
+   - Minimal dependencies: only `mcp[cli]>=1.10,<2` (2.x removed the decorator API `server.py` uses)
    - Development dependencies for testing and linting
 
 ### Key Design Patterns
@@ -147,6 +147,9 @@ The server uses the `LIFECYCLE_DB` environment variable to specify the SQLite da
 ## Important Notes
 
 - **Async Architecture**: All handler methods use async/await for MCP protocol compliance
+- **stdout is the protocol channel**: never `print()` in `src/` (ruff T20 enforces it); log to stderr. `scripts/mcp_handshake_smoke.py` verifies a server end to end
+- **GitHub is opt-in**: issues are only created or synced when `LIFECYCLE_GITHUB=on`. `tests/conftest.py` fails any test that spawns `gh` or `git`; tests needing a real repository are marked `github_live` and close their issues via `github_issue_cleanup`
+- **Tool errors**: handlers return `_create_error_response(...)`; the server raises it as `ToolCallError` so clients receive `isError=true`
 - The server implements strict state transition validation for requirements
 - All entities use structured ID formats (REQ-XXXX-TYPE-VV, TASK-XXXX-YY-ZZ, ADR-XXXX)
 - JSON fields are used extensively for structured data (arrays, objects)

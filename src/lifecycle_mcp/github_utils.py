@@ -6,17 +6,39 @@ Provides GitHub CLI integration for issue management
 
 import asyncio
 import json
+import logging
+import os
 import subprocess
 from datetime import datetime, timezone
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# GitHub integration is opt-in: nothing touches GitHub unless this is set to on/true/yes/1.
+GITHUB_ENV_FLAG = "LIFECYCLE_GITHUB"
+_ENABLED_VALUES = {"1", "true", "yes", "on"}
 
 
 class GitHubUtils:
     """Utilities for GitHub CLI integration"""
 
     @staticmethod
+    def is_github_enabled() -> bool:
+        """Whether the user opted in to GitHub integration via LIFECYCLE_GITHUB."""
+        return os.environ.get(GITHUB_ENV_FLAG, "").strip().lower() in _ENABLED_VALUES
+
+    @staticmethod
+    def unavailable_reason() -> str:
+        """Human-readable reason GitHub sync is not happening, for tool responses."""
+        if not GitHubUtils.is_github_enabled():
+            return f"GitHub sync disabled (set {GITHUB_ENV_FLAG}=on to enable)"
+        return "GitHub CLI not installed, or no github.com origin remote"
+
+    @staticmethod
     def is_github_available() -> bool:
-        """Check if gh CLI is available and we're in a git repo with remote"""
+        """Check the opt-in flag, then that gh CLI is available and we're in a repo with a GitHub remote"""
+        if not GitHubUtils.is_github_enabled():
+            return False
         try:
             # Check if gh CLI is available
             result = subprocess.run(["gh", "--version"], capture_output=True, text=True, timeout=5)
@@ -68,11 +90,11 @@ class GitHubUtils:
                 return stdout.decode().strip()
             else:
                 # Issue creation failed, but don't error the main operation
-                print(f"GitHub issue creation failed: {stderr.decode()}")
+                logger.error(f"GitHub issue creation failed: {stderr.decode()}")
                 return None
 
         except Exception as e:
-            print(f"Error creating GitHub issue: {e}")
+            logger.error(f"Error creating GitHub issue: {e}")
             return None
 
     @staticmethod
@@ -95,7 +117,7 @@ class GitHubUtils:
         )
 
         if not success and error_msg:
-            print(f"Error updating GitHub issue: {error_msg}")
+            logger.error(f"Error updating GitHub issue: {error_msg}")
 
         return success
 
@@ -172,11 +194,11 @@ class GitHubUtils:
                 issue_data["etag"] = GitHubUtils._generate_etag(issue_data)
                 return issue_data
             else:
-                print(f"Error retrieving GitHub issue: {stderr.decode()}")
+                logger.error(f"Error retrieving GitHub issue: {stderr.decode()}")
                 return None
 
         except Exception as e:
-            print(f"Error getting GitHub issue: {e}")
+            logger.error(f"Error getting GitHub issue: {e}")
             return None
 
     @staticmethod
@@ -446,12 +468,17 @@ class GitHubUtils:
     async def check_github_health() -> dict[str, Any]:
         """Check GitHub integration health and configuration"""
         health_status = {
+            "enabled": GitHubUtils.is_github_enabled(),
             "github_cli_available": False,
             "authenticated": False,
             "repository_configured": False,
             "api_accessible": False,
             "error_messages": [],
         }
+
+        if not health_status["enabled"]:
+            health_status["error_messages"].append(GitHubUtils.unavailable_reason())
+            return health_status
 
         try:
             # Check GitHub CLI availability

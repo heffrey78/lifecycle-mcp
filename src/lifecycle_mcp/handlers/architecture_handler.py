@@ -365,10 +365,10 @@ class ArchitectureHandler(BaseHandler):
             # Convert to list of dictionaries with JSON parsing
             decisions_list = []
             for decision in decisions:
-                decision_dict = dict(decision) if hasattr(decision, 'keys') else decision
+                decision_dict = dict(decision) if hasattr(decision, "keys") else decision
 
                 # Parse JSON fields if they exist as strings
-                json_fields = ['consequences', 'decision_drivers', 'considered_options', 'authors']
+                json_fields = ["consequences", "decision_drivers", "considered_options", "authors"]
                 for field in json_fields:
                     if field in decision_dict and isinstance(decision_dict[field], str):
                         try:
@@ -477,7 +477,7 @@ class ArchitectureHandler(BaseHandler):
 
             # Create above-the-fold response for architecture details
             key_info = f"Architecture {arch['id']} details"
-            action_info = f"📐 {arch['title']} | {arch['status']} | {arch.get('type', 'ADR')}"
+            action_info = f"📐 {arch['title']} | {arch['status']} | {arch['type'] or 'ADR'}"
             return self._create_above_fold_response("INFO", key_info, action_info, report)
 
         except Exception as e:

@@ -20,7 +20,7 @@ git clone https://github.com/heffrey78/lifecycle-mcp.git
 cd lifecycle-mcp
 
 # 2. Install globally (easiest for using across projects)
-pip install -e .
+uv tool install .        # or: pip install -e .
 
 # 3. Go to any project where you want to use lifecycle management
 cd /path/to/your/project
@@ -58,8 +58,8 @@ For detailed examples and scenarios, see [USAGE_EXAMPLES.md](USAGE_EXAMPLES.md).
 Install the server globally so it can be used from any project:
 
 ```bash
-# From the lifecycle-mcp directory
-pip install -e .
+# From the lifecycle-mcp directory (add --editable to pick up source changes)
+uv tool install .        # or: pip install -e .
 
 # Now from ANY project directory, add the server:
 claude mcp add lifecycle lifecycle-mcp -e LIFECYCLE_DB=./lifecycle.db
@@ -556,6 +556,7 @@ The server maintains a comprehensive SQLite database with the following key enti
 ## Environment Variables
 
 - `LIFECYCLE_DB`: Path to SQLite database file (default: "./lifecycle.db")
+- `LIFECYCLE_GITHUB`: Set to `on` to create and sync a GitHub issue for each task (default: off). Requires an authenticated `gh` CLI and a github.com `origin` remote in the server's working directory. When off, the server never runs `gh` or `git`.
 
 ## Troubleshooting
 
@@ -563,11 +564,17 @@ The server maintains a comprehensive SQLite database with the following key enti
 
 **"MCP error -32000: Connection closed"**
 
-This error typically occurs when there are async/await mismatches in the server implementation. If you encounter this:
+The server exited or wrote something other than protocol messages to stdout. To check an installation:
 
-1. Ensure the package is properly installed:
+```bash
+python3 scripts/mcp_handshake_smoke.py lifecycle-mcp
+```
+
+This starts the server twice against a temporary database and reports whether the MCP handshake succeeds with clean stdout. If it fails:
+
+1. Reinstall so the pinned MCP SDK (`mcp[cli]>=1.10,<2`) is used:
    ```bash
-   pip install -e .
+   uv tool install --force .
    ```
 
 2. Re-add the MCP server:

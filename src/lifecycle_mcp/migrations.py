@@ -4,7 +4,10 @@ Database migration utilities for MCP Lifecycle Management Server
 Handles schema updates and data migrations
 """
 
+import logging
 import sqlite3
+
+logger = logging.getLogger(__name__)
 
 
 def apply_github_integration_migration(db_path: str) -> bool:
@@ -33,14 +36,14 @@ def apply_github_integration_migration(db_path: str) -> bool:
             cursor.execute("ALTER TABLE tasks ADD COLUMN github_issue_url TEXT")
 
             conn.commit()
-            print("GitHub integration migration applied successfully")
+            logger.info("GitHub integration migration applied successfully")
             return True
         else:
-            print("GitHub integration migration already applied")
+            logger.info("GitHub integration migration already applied")
             return True
 
     except Exception as e:
-        print(f"Error applying GitHub integration migration: {e}")
+        logger.error(f"Error applying GitHub integration migration: {e}")
         return False
     finally:
         if "conn" in locals():
@@ -77,7 +80,7 @@ def get_schema_version(db_path: str) -> int:
             return 0
 
     except Exception as e:
-        print(f"Error getting schema version: {e}")
+        logger.error(f"Error getting schema version: {e}")
         return 0
     finally:
         if "conn" in locals():
@@ -102,7 +105,7 @@ def set_schema_version(db_path: str, version: int, description: str) -> bool:
         return True
 
     except Exception as e:
-        print(f"Error setting schema version: {e}")
+        logger.error(f"Error setting schema version: {e}")
         return False
     finally:
         if "conn" in locals():
@@ -135,14 +138,14 @@ def apply_github_sync_metadata_migration(db_path: str) -> bool:
             cursor.execute("ALTER TABLE tasks ADD COLUMN github_last_sync TEXT")
 
             conn.commit()
-            print("GitHub sync metadata migration applied successfully")
+            logger.info("GitHub sync metadata migration applied successfully")
             return True
         else:
-            print("GitHub sync metadata migration already applied")
+            logger.info("GitHub sync metadata migration already applied")
             return True
 
     except Exception as e:
-        print(f"Error applying GitHub sync metadata migration: {e}")
+        logger.error(f"Error applying GitHub sync metadata migration: {e}")
         return False
     finally:
         if "conn" in locals():
@@ -337,14 +340,14 @@ def apply_decomposition_extension_migration(db_path: str) -> bool:
             """)
 
             conn.commit()
-            print("Decomposition extension migration applied successfully")
+            logger.info("Decomposition extension migration applied successfully")
             return True
         else:
-            print("Decomposition extension migration already applied")
+            logger.info("Decomposition extension migration already applied")
             return True
 
     except Exception as e:
-        print(f"Error applying decomposition extension migration: {e}")
+        logger.error(f"Error applying decomposition extension migration: {e}")
         return False
     finally:
         if "conn" in locals():
@@ -397,11 +400,11 @@ def fix_blocked_items_view_migration(db_path: str) -> bool:
         """)
 
         conn.commit()
-        print("Blocked items view migration applied successfully")
+        logger.info("Blocked items view migration applied successfully")
         return True
 
     except Exception as e:
-        print(f"Error applying blocked items view migration: {e}")
+        logger.error(f"Error applying blocked items view migration: {e}")
         return False
     finally:
         if "conn" in locals():
@@ -434,7 +437,10 @@ def apply_relationship_schema_migration(db_path: str) -> bool:
                     source_id TEXT NOT NULL,
                     target_type TEXT NOT NULL CHECK (target_type IN ('requirement', 'task', 'architecture')),
                     target_id TEXT NOT NULL,
-                    relationship_type TEXT NOT NULL CHECK (relationship_type IN ('implements', 'addresses', 'depends', 'blocks', 'informs', 'requires', 'parent', 'refines', 'conflicts', 'relates')),
+                    relationship_type TEXT NOT NULL CHECK (relationship_type IN (
+                        'implements', 'addresses', 'depends', 'blocks', 'informs',
+                        'requires', 'parent', 'refines', 'conflicts', 'relates'
+                    )),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(source_type, source_id, target_type, target_id, relationship_type)
                 )
@@ -446,12 +452,20 @@ def apply_relationship_schema_migration(db_path: str) -> bool:
             cursor.execute("CREATE INDEX idx_relationships_type ON relationships(relationship_type)")
 
             conn.commit()
-            print("Relationship schema migration applied successfully")
+            logger.info("Relationship schema migration applied successfully")
 
             # Validate table creation
             cursor.execute("PRAGMA table_info(relationships)")
             table_info = cursor.fetchall()
-            expected_columns = ['id', 'source_type', 'source_id', 'target_type', 'target_id', 'relationship_type', 'created_at']
+            expected_columns = [
+                "id",
+                "source_type",
+                "source_id",
+                "target_type",
+                "target_id",
+                "relationship_type",
+                "created_at",
+            ]
             actual_columns = [column[1] for column in table_info]
 
             for expected_col in expected_columns:
@@ -460,11 +474,11 @@ def apply_relationship_schema_migration(db_path: str) -> bool:
 
             return True
         else:
-            print("Relationship schema migration already applied")
+            logger.info("Relationship schema migration already applied")
             return True
 
     except Exception as e:
-        print(f"Error applying relationship schema migration: {e}")
+        logger.error(f"Error applying relationship schema migration: {e}")
         if "conn" in locals():
             conn.rollback()
         return False
@@ -492,10 +506,10 @@ def apply_relationship_consolidation_migration(db_path: str) -> bool:
         existing_relationships = cursor.fetchone()[0]
 
         if existing_relationships > 0:
-            print("Relationship consolidation migration already applied")
+            logger.info("Relationship consolidation migration already applied")
             return True
 
-        print("Starting relationship data consolidation...")
+        logger.info("Starting relationship data consolidation...")
 
         # 1. Migrate parent_task_id relationships from tasks table
         cursor.execute("""
@@ -507,11 +521,14 @@ def apply_relationship_consolidation_migration(db_path: str) -> bool:
 
         for task_id, parent_task_id, title in parent_relationships:
             relationship_id = f"rel-{task_id}-{parent_task_id}-parent"
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO relationships (id, source_type, source_id, target_type, target_id, relationship_type)
                 VALUES (?, 'task', ?, 'task', ?, 'parent')
-            """, (relationship_id, task_id, parent_task_id))
-            print(f"Migrated parent relationship: {task_id} → {parent_task_id}")
+            """,
+                (relationship_id, task_id, parent_task_id),
+            )
+            logger.info(f"Migrated parent relationship: {task_id} → {parent_task_id}")
 
         # 2. Migrate requirement_tasks junction table data
         cursor.execute("""
@@ -522,11 +539,15 @@ def apply_relationship_consolidation_migration(db_path: str) -> bool:
 
         for req_id, task_id, created_at in requirement_task_relationships:
             relationship_id = f"rel-{req_id}-{task_id}-implements"
-            cursor.execute("""
-                INSERT INTO relationships (id, source_type, source_id, target_type, target_id, relationship_type, created_at)
+            cursor.execute(
+                """
+                INSERT INTO relationships
+                    (id, source_type, source_id, target_type, target_id, relationship_type, created_at)
                 VALUES (?, 'requirement', ?, 'task', ?, 'implements', ?)
-            """, (relationship_id, req_id, task_id, created_at))
-            print(f"Migrated requirement→task relationship: {req_id} → {task_id}")
+            """,
+                (relationship_id, req_id, task_id, created_at),
+            )
+            logger.info(f"Migrated requirement→task relationship: {req_id} → {task_id}")
 
         # 3. Migrate requirement_architecture junction table data (if any)
         cursor.execute("""
@@ -538,13 +559,16 @@ def apply_relationship_consolidation_migration(db_path: str) -> bool:
         for req_id, arch_id, rel_type in req_arch_relationships:
             # Default to 'addresses' if relationship_type is None or empty
             if not rel_type:
-                rel_type = 'addresses'
+                rel_type = "addresses"
             relationship_id = f"rel-{req_id}-{arch_id}-{rel_type}"
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO relationships (id, source_type, source_id, target_type, target_id, relationship_type)
                 VALUES (?, 'requirement', ?, 'architecture', ?, ?)
-            """, (relationship_id, req_id, arch_id, rel_type))
-            print(f"Migrated requirement→architecture relationship: {req_id} → {arch_id} ({rel_type})")
+            """,
+                (relationship_id, req_id, arch_id, rel_type),
+            )
+            logger.info(f"Migrated requirement→architecture relationship: {req_id} → {arch_id} ({rel_type})")
 
         # 4. Migrate task_dependencies table data (if any)
         cursor.execute("""
@@ -556,13 +580,16 @@ def apply_relationship_consolidation_migration(db_path: str) -> bool:
         for task_id, depends_on_task_id, dep_type in task_deps:
             # Default to 'depends' if dependency_type is None or empty
             if not dep_type:
-                dep_type = 'depends'
+                dep_type = "depends"
             relationship_id = f"rel-{task_id}-{depends_on_task_id}-{dep_type}"
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO relationships (id, source_type, source_id, target_type, target_id, relationship_type)
                 VALUES (?, 'task', ?, 'task', ?, ?)
-            """, (relationship_id, task_id, depends_on_task_id, dep_type))
-            print(f"Migrated task dependency: {task_id} → {depends_on_task_id} ({dep_type})")
+            """,
+                (relationship_id, task_id, depends_on_task_id, dep_type),
+            )
+            logger.info(f"Migrated task dependency: {task_id} → {depends_on_task_id} ({dep_type})")
 
         # 5. Migrate requirement_dependencies table data (if any)
         cursor.execute("""
@@ -574,13 +601,16 @@ def apply_relationship_consolidation_migration(db_path: str) -> bool:
         for req_id, depends_on_req_id, dep_type in req_deps:
             # Default to 'depends' if dependency_type is None or empty
             if not dep_type:
-                dep_type = 'depends'
+                dep_type = "depends"
             relationship_id = f"rel-{req_id}-{depends_on_req_id}-{dep_type}"
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO relationships (id, source_type, source_id, target_type, target_id, relationship_type)
                 VALUES (?, 'requirement', ?, 'requirement', ?, ?)
-            """, (relationship_id, req_id, depends_on_req_id, dep_type))
-            print(f"Migrated requirement dependency: {req_id} → {depends_on_req_id} ({dep_type})")
+            """,
+                (relationship_id, req_id, depends_on_req_id, dep_type),
+            )
+            logger.info(f"Migrated requirement dependency: {req_id} → {depends_on_req_id} ({dep_type})")
 
         conn.commit()
 
@@ -588,16 +618,26 @@ def apply_relationship_consolidation_migration(db_path: str) -> bool:
         cursor.execute("SELECT COUNT(*) FROM relationships")
         final_count = cursor.fetchone()[0]
 
-        total_migrated = len(parent_relationships) + len(requirement_task_relationships) + len(req_arch_relationships) + len(task_deps) + len(req_deps)
+        total_migrated = (
+            len(parent_relationships)
+            + len(requirement_task_relationships)
+            + len(req_arch_relationships)
+            + len(task_deps)
+            + len(req_deps)
+        )
 
         if final_count != total_migrated:
-            raise Exception(f"Migration verification failed: expected {total_migrated} relationships, found {final_count}")
+            raise Exception(
+                f"Migration verification failed: expected {total_migrated} relationships, found {final_count}"
+            )
 
-        print(f"Relationship consolidation migration completed successfully: {final_count} relationships migrated")
+        logger.info(
+            f"Relationship consolidation migration completed successfully: {final_count} relationships migrated"
+        )
         return True
 
     except Exception as e:
-        print(f"Error applying relationship consolidation migration: {e}")
+        logger.error(f"Error applying relationship consolidation migration: {e}")
         if "conn" in locals():
             conn.rollback()
         return False
@@ -615,7 +655,7 @@ def apply_relationship_cleanup_migration(db_path: str) -> bool:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
-        print("Starting relationship table cleanup migration...")
+        logger.info("Starting relationship table cleanup migration...")
 
         # Check if cleanup already applied by checking if any tables exist
         cursor.execute("""
@@ -627,27 +667,29 @@ def apply_relationship_cleanup_migration(db_path: str) -> bool:
         # Also check if parent_task_id column exists
         cursor.execute("PRAGMA table_info(tasks)")
         columns_info_check = cursor.fetchall()
-        has_parent_task_id_check = any(col[1] == 'parent_task_id' for col in columns_info_check)
+        has_parent_task_id_check = any(col[1] == "parent_task_id" for col in columns_info_check)
 
         if not existing_tables and not has_parent_task_id_check:
-            print("Relationship cleanup migration already applied")
+            logger.info("Relationship cleanup migration already applied")
             return True
 
-        print(f"Found {len(existing_tables)} tables to clean up: {existing_tables}")
+        logger.info(f"Found {len(existing_tables)} tables to clean up: {existing_tables}")
         if has_parent_task_id_check:
-            print("parent_task_id column needs to be removed")
+            logger.info("parent_task_id column needs to be removed")
 
         # Verify data has been migrated to relationships table
         cursor.execute("SELECT COUNT(*) FROM relationships")
         relationship_count = cursor.fetchone()[0]
 
         if relationship_count == 0:
-            raise Exception("Cannot cleanup: no relationships found in unified table. Data consolidation may not have completed.")
+            raise Exception(
+                "Cannot cleanup: no relationships found in unified table. Data consolidation may not have completed."
+            )
 
-        print(f"Found {relationship_count} relationships in unified table, proceeding with cleanup...")
+        logger.info(f"Found {relationship_count} relationships in unified table, proceeding with cleanup...")
 
         # 1. Drop task_dependencies table (verify data migrated to unified table)
-        if 'task_dependencies' in existing_tables:
+        if "task_dependencies" in existing_tables:
             cursor.execute("SELECT COUNT(*) FROM task_dependencies")
             old_count = cursor.fetchone()[0]
 
@@ -667,15 +709,18 @@ def apply_relationship_cleanup_migration(db_path: str) -> bool:
                 unmigrated_count = cursor.fetchone()[0]
 
                 if unmigrated_count > 0:
-                    raise Exception(f"Cannot drop task_dependencies: {unmigrated_count} relationships not found in unified table. Data consolidation incomplete.")
+                    raise Exception(
+                        f"Cannot drop task_dependencies: {unmigrated_count} relationships not found in unified table. "
+                        "Data consolidation incomplete."
+                    )
 
-                print(f"Verified {old_count} task dependencies migrated to unified table")
+                logger.info(f"Verified {old_count} task dependencies migrated to unified table")
 
             cursor.execute("DROP TABLE task_dependencies")
-            print("Dropped task_dependencies table")
+            logger.info("Dropped task_dependencies table")
 
         # 2. Drop requirement_dependencies table (verify data migrated to unified table)
-        if 'requirement_dependencies' in existing_tables:
+        if "requirement_dependencies" in existing_tables:
             cursor.execute("SELECT COUNT(*) FROM requirement_dependencies")
             old_count = cursor.fetchone()[0]
 
@@ -695,15 +740,18 @@ def apply_relationship_cleanup_migration(db_path: str) -> bool:
                 unmigrated_count = cursor.fetchone()[0]
 
                 if unmigrated_count > 0:
-                    raise Exception(f"Cannot drop requirement_dependencies: {unmigrated_count} relationships not found in unified table. Data consolidation incomplete.")
+                    raise Exception(
+                        f"Cannot drop requirement_dependencies: {unmigrated_count} relationships "
+                        "not found in unified table. Data consolidation incomplete."
+                    )
 
-                print(f"Verified {old_count} requirement dependencies migrated to unified table")
+                logger.info(f"Verified {old_count} requirement dependencies migrated to unified table")
 
             cursor.execute("DROP TABLE requirement_dependencies")
-            print("Dropped requirement_dependencies table")
+            logger.info("Dropped requirement_dependencies table")
 
         # 3. Drop requirement_architecture table (verify data migrated to unified table)
-        if 'requirement_architecture' in existing_tables:
+        if "requirement_architecture" in existing_tables:
             cursor.execute("SELECT COUNT(*) FROM requirement_architecture")
             old_count = cursor.fetchone()[0]
 
@@ -723,12 +771,15 @@ def apply_relationship_cleanup_migration(db_path: str) -> bool:
                 unmigrated_count = cursor.fetchone()[0]
 
                 if unmigrated_count > 0:
-                    raise Exception(f"Cannot drop requirement_architecture: {unmigrated_count} relationships not found in unified table. Data consolidation incomplete.")
+                    raise Exception(
+                        f"Cannot drop requirement_architecture: {unmigrated_count} relationships "
+                        "not found in unified table. Data consolidation incomplete."
+                    )
 
-                print(f"Verified {old_count} requirement->architecture relationships migrated to unified table")
+                logger.info(f"Verified {old_count} requirement->architecture relationships migrated to unified table")
 
             cursor.execute("DROP TABLE requirement_architecture")
-            print("Dropped requirement_architecture table")
+            logger.info("Dropped requirement_architecture table")
 
         # 4. Remove parent_task_id column from tasks table
         # SQLite doesn't support DROP COLUMN, so we need to recreate the table
@@ -736,7 +787,7 @@ def apply_relationship_cleanup_migration(db_path: str) -> bool:
         columns_info = cursor.fetchall()
 
         # Check if parent_task_id column exists
-        has_parent_task_id = any(col[1] == 'parent_task_id' for col in columns_info)
+        has_parent_task_id = any(col[1] == "parent_task_id" for col in columns_info)
 
         if has_parent_task_id:
             # Verify parent relationships were migrated to unified table
@@ -760,13 +811,16 @@ def apply_relationship_cleanup_migration(db_path: str) -> bool:
                 unmigrated_count = cursor.fetchone()[0]
 
                 if unmigrated_count > 0:
-                    raise Exception(f"Cannot remove parent_task_id: {unmigrated_count} parent relationships not found in unified table. Data consolidation incomplete.")
+                    raise Exception(
+                        f"Cannot remove parent_task_id: {unmigrated_count} parent relationships "
+                        "not found in unified table. Data consolidation incomplete."
+                    )
 
-                print(f"Verified {parent_count} parent task relationships migrated to unified table")
+                logger.info(f"Verified {parent_count} parent task relationships migrated to unified table")
 
             # Get all columns except parent_task_id
-            columns_to_keep = [col[1] for col in columns_info if col[1] != 'parent_task_id']
-            columns_str = ', '.join(columns_to_keep)
+            columns_to_keep = [col[1] for col in columns_info if col[1] != "parent_task_id"]
+            columns_str = ", ".join(columns_to_keep)
 
             # Create new tasks table without parent_task_id
             cursor.execute(f"""
@@ -810,7 +864,7 @@ def apply_relationship_cleanup_migration(db_path: str) -> bool:
                 END
             """)
 
-            print("Removed parent_task_id column from tasks table")
+            logger.info("Removed parent_task_id column from tasks table")
 
         # 5. Update requirement task completion trigger to use new relationships table
         cursor.execute("DROP TRIGGER IF EXISTS update_requirement_task_completion")
@@ -839,7 +893,7 @@ def apply_relationship_cleanup_migration(db_path: str) -> bool:
                 );
             END
         """)
-        print("Updated requirement task completion trigger for unified relationships table")
+        logger.info("Updated requirement task completion trigger for unified relationships table")
 
         # 6. Update requirement task count trigger to use new relationships table
         cursor.execute("DROP TRIGGER IF EXISTS update_requirement_task_count_insert")
@@ -859,7 +913,7 @@ def apply_relationship_cleanup_migration(db_path: str) -> bool:
                 WHERE id = NEW.source_id;
             END
         """)
-        print("Updated requirement task count trigger for unified relationships table")
+        logger.info("Updated requirement task count trigger for unified relationships table")
 
         # 7. Update requirement_progress view to use new relationships table
         cursor.execute("DROP VIEW IF EXISTS requirement_progress")
@@ -884,7 +938,7 @@ def apply_relationship_cleanup_migration(db_path: str) -> bool:
             WHERE r.status != 'Deprecated'
             GROUP BY r.id
         """)
-        print("Updated requirement_progress view for unified relationships table")
+        logger.info("Updated requirement_progress view for unified relationships table")
 
         # 8. Update requirement_hierarchy view to use new relationships table
         cursor.execute("DROP VIEW IF EXISTS requirement_hierarchy")
@@ -939,7 +993,7 @@ def apply_relationship_cleanup_migration(db_path: str) -> bool:
             )
             SELECT * FROM requirement_tree
         """)
-        print("Updated requirement_hierarchy view for unified relationships table")
+        logger.info("Updated requirement_hierarchy view for unified relationships table")
 
         # 9. Update blocked_items view to use new relationships table
         cursor.execute("DROP VIEW IF EXISTS blocked_items")
@@ -977,7 +1031,7 @@ def apply_relationship_cleanup_migration(db_path: str) -> bool:
             AND dr.status NOT IN ('Validated', 'Deprecated')
             GROUP BY r.id
         """)
-        print("Updated blocked_items view for unified relationships table")
+        logger.info("Updated blocked_items view for unified relationships table")
 
         conn.commit()
 
@@ -994,14 +1048,14 @@ def apply_relationship_cleanup_migration(db_path: str) -> bool:
         # Verify parent_task_id column removed
         cursor.execute("PRAGMA table_info(tasks)")
         columns_after = cursor.fetchall()
-        if any(col[1] == 'parent_task_id' for col in columns_after):
+        if any(col[1] == "parent_task_id" for col in columns_after):
             raise Exception("Cleanup verification failed: parent_task_id column still exists in tasks table")
 
-        print(f"Relationship cleanup migration completed successfully")
+        logger.info("Relationship cleanup migration completed successfully")
         return True
 
     except Exception as e:
-        print(f"Error applying relationship cleanup migration: {e}")
+        logger.error(f"Error applying relationship cleanup migration: {e}")
         if "conn" in locals():
             conn.rollback()
         return False
@@ -1026,12 +1080,12 @@ def apply_all_migrations(db_path: str) -> bool:
 
     for version, description, migration_func in migrations:
         if current_version < version:
-            print(f"Applying migration {version}: {description}")
+            logger.info(f"Applying migration {version}: {description}")
             if migration_func(db_path):
                 set_schema_version(db_path, version, description)
                 current_version = version
             else:
-                print(f"Migration {version} failed")
+                logger.error(f"Migration {version} failed")
                 return False
 
     return True

@@ -16,6 +16,10 @@ from ..database_manager import DatabaseManager
 logger = logging.getLogger(__name__)
 
 
+class ErrorResult(list):
+    """Content for a failed tool call. The server reports it to the client with isError=true."""
+
+
 class BaseHandler(ABC):
     """Abstract base class for all MCP tool handlers"""
 
@@ -76,14 +80,13 @@ class BaseHandler(ABC):
         return f"Found {count} {entity_type}(s)"
 
     def _create_error_response(self, error_msg: str, exception: Exception | None = None) -> list[TextContent]:
-        """Create standardized error response"""
+        """Create standardized error response; the exception's message is included so agents can act on it"""
         if exception:
-            self.logger.error(f"{error_msg}: {str(exception)}")
-        else:
-            self.logger.error(error_msg)
+            error_msg = f"{error_msg}: {exception}"
+        self.logger.error(error_msg)
 
         # Use above-the-fold format for errors
-        return self._create_above_fold_response("ERROR", error_msg)
+        return ErrorResult(self._create_above_fold_response("ERROR", error_msg))
 
     def _validate_required_params(self, params: dict[str, Any], required_fields: list[str]) -> str | None:
         """Validate that required parameters are present"""

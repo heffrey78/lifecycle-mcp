@@ -1,0 +1,34 @@
+name: Install smoke test
+
+# A clean install from source, ignoring uv.lock, must produce a server that completes an MCP
+# handshake with clean stdout. This catches unbounded dependency ranges resolving to breaking
+# releases, which the locked test suite cannot see (roadmap R1).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-install:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install lifecycle-mcp into a clean tool environment
+        run: uv tool install --python ${{ matrix.python-version }} .
+
+      - name: MCP handshake against the installed server
+        run: python3 scripts/mcp_handshake_smoke.py "$(uv tool dir --bin)/lifecycle-mcp"

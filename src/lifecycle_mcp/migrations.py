@@ -479,7 +479,54 @@ def stop_using_decomposition_columns(conn: sqlite3.Connection) -> None:
     conn.execute(REQUIREMENT_HIERARCHY_SQL)
 
 
+# --- migration 11 ------------------------------------------------------------------------------
+
+# Columns no tool can set and nothing reads: the never-wired LLM decomposition feature, technical design
+# document fields, and a few unused requirement fields (roadmap R6b).
+DEAD_COLUMNS = {
+    "requirements": (
+        "decomposition_metadata",
+        "decomposition_source",
+        "complexity_score",
+        "scope_assessment",
+        "decomposition_level",
+        "architecture_review",
+        "gap_analysis",
+        "impact_of_not_acting",
+        "interface_requirements",
+    ),
+    "tasks": ("behavioral_specs", "context_research"),
+    "architecture": ("executive_summary", "system_design", "key_decisions", "performance_considerations", "pros_cons"),
+}
+
+
+def drop_dead_columns(conn: sqlite3.Connection) -> None:
+    """Drop the dead columns. Their CHECK constraints are column constraints and go with them."""
+    conn.execute("DROP INDEX IF EXISTS idx_requirements_decomposition")
+    for table, columns in DEAD_COLUMNS.items():
+        existing = _columns(conn, table)
+        for column in columns:
+            if column in existing:
+                conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+
+
 # --- runner ------------------------------------------------------------------------------------
+
+
+def log_architecture_status_changes(conn: sqlite3.Connection) -> None:
+    """Record architecture decision status changes as requirements and tasks already do."""
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS log_architecture_status_change
+        AFTER UPDATE OF status ON architecture
+        WHEN OLD.status != NEW.status
+        BEGIN
+            INSERT INTO lifecycle_events (entity_type, entity_id, event_type, from_value, to_value)
+            VALUES ('architecture', NEW.id, 'status_change', OLD.status, NEW.status);
+        END
+        """
+    )
+
 
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "GitHub integration fields", add_github_integration_columns),
@@ -492,6 +539,8 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (8, "Consolidate all links into relationships", consolidate_links),
     (9, "Edit tracking: revision counters and per-field change events", add_edit_tracking),
     (10, "Stop using requirement decomposition columns", stop_using_decomposition_columns),
+    (11, "Drop dead columns", drop_dead_columns),
+    (12, "Log architecture status changes", log_architecture_status_changes),
 ]
 
 

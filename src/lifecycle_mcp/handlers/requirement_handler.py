@@ -9,7 +9,26 @@ from typing import Any
 
 from mcp.types import TextContent
 
-from .base_handler import BaseHandler
+from .base_handler import BaseHandler, DeleteRefused
+
+# Records that depend on a requirement and therefore block deleting it.
+REQUIREMENT_DELETE_BLOCKERS = [
+    (
+        "tasks",
+        "SELECT target_id FROM relationships WHERE source_type = 'requirement' AND source_id = ? "
+        "AND target_type = 'task' AND relationship_type = 'implements'",
+    ),
+    (
+        "architecture decisions",
+        "SELECT target_id FROM relationships WHERE source_type = 'requirement' AND source_id = ? "
+        "AND target_type = 'architecture' AND relationship_type = 'addresses'",
+    ),
+    (
+        "requirements linking to it",
+        "SELECT source_id FROM relationships WHERE target_type = 'requirement' AND target_id = ? "
+        "AND source_type = 'requirement'",
+    ),
+]
 
 
 class RequirementHandler(BaseHandler):
@@ -112,6 +131,18 @@ class RequirementHandler(BaseHandler):
                     "required": ["requirement_id"],
                 },
             },
+            {
+                "name": "delete_requirement",
+                "description": (
+                    "Delete a Draft requirement created by mistake. Refused when tasks, architecture decisions "
+                    "or other requirements link to it; move anything else to Deprecated instead."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"requirement_id": {"type": "string"}},
+                    "required": ["requirement_id"],
+                },
+            },
         ]
 
     async def handle_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
@@ -129,10 +160,32 @@ class RequirementHandler(BaseHandler):
                 return self._get_requirement_details(**arguments)
             elif tool_name == "trace_requirement":
                 return self._trace_requirement(**arguments)
+            elif tool_name == "delete_requirement":
+                return self._delete_requirement(**arguments)
             else:
                 return self._create_error_response(f"Unknown tool: {tool_name}")
         except Exception as e:
             return self._create_error_response(f"Error handling {tool_name}", e)
+
+    def _delete_requirement(self, **params) -> list[TextContent]:
+        """Delete a Draft requirement that nothing depends on"""
+        error = self._validate_required_params(params, ["requirement_id"])
+        if error:
+            return self._create_error_response(error)
+        requirement_id = params["requirement_id"]
+        try:
+            removed = self._delete_entity(
+                "requirements",
+                "requirement",
+                requirement_id,
+                deletable_status="Draft",
+                blockers=REQUIREMENT_DELETE_BLOCKERS,
+            )
+        except (LookupError, DeleteRefused) as e:
+            return self._create_error_response(str(e))
+        return self._create_above_fold_response(
+            "SUCCESS", f"Requirement {requirement_id} deleted", f"🗑️ Removed {removed} link(s) it owned"
+        )
 
     async def _create_requirement(self, **params) -> list[TextContent]:
         """Create a new requirement with LLM-enhanced analysis"""

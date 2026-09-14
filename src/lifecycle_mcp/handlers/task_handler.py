@@ -10,7 +10,28 @@ from typing import Any
 from mcp.types import TextContent
 
 from ..github_utils import GitHubUtils
-from .base_handler import BaseHandler
+from .base_handler import BaseHandler, DeleteRefused
+
+# Records that depend on a task and therefore block deleting it. "blocks" links point blocker -> blocked.
+TASK_DELETE_BLOCKERS = [
+    (
+        "subtasks",
+        "SELECT source_id FROM relationships WHERE target_type = 'task' AND target_id = ? "
+        "AND relationship_type = 'parent'",
+    ),
+    (
+        "tasks depending on it",
+        "SELECT source_id FROM relationships WHERE target_type = 'task' AND target_id = ? "
+        "AND source_type = 'task' AND relationship_type IN ('depends', 'requires', 'informs') "
+        "UNION SELECT target_id FROM relationships WHERE source_type = 'task' AND source_id = ? "
+        "AND relationship_type = 'blocks'",
+    ),
+    (
+        "GitHub issue",
+        "SELECT '#' || github_issue_number FROM tasks WHERE id = ? "
+        "AND github_issue_number IS NOT NULL AND github_issue_number != ''",
+    ),
+]
 
 
 class TaskHandler(BaseHandler):
@@ -103,6 +124,18 @@ class TaskHandler(BaseHandler):
                 "description": "Sync all tasks with their GitHub issues",
                 "inputSchema": {"type": "object", "properties": {}},
             },
+            {
+                "name": "delete_task",
+                "description": (
+                    "Delete a Not Started task created by mistake. Refused when it has subtasks, other tasks "
+                    "depend on it or it is linked to a GitHub issue; mark anything else Abandoned instead."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"task_id": {"type": "string"}},
+                    "required": ["task_id"],
+                },
+            },
         ]
 
     async def handle_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
@@ -125,10 +158,28 @@ class TaskHandler(BaseHandler):
                 return await self._sync_from_github(task_id)
             elif tool_name == "bulk_sync_github_tasks":
                 return await self._bulk_sync_with_github(**arguments)
+            elif tool_name == "delete_task":
+                return self._delete_task(**arguments)
             else:
                 return self._create_error_response(f"Unknown tool: {tool_name}")
         except Exception as e:
             return self._create_error_response(f"Error handling {tool_name}", e)
+
+    def _delete_task(self, **params) -> list[TextContent]:
+        """Delete a Not Started task that nothing depends on"""
+        error = self._validate_required_params(params, ["task_id"])
+        if error:
+            return self._create_error_response(error)
+        task_id = params["task_id"]
+        try:
+            removed = self._delete_entity(
+                "tasks", "task", task_id, deletable_status="Not Started", blockers=TASK_DELETE_BLOCKERS
+            )
+        except (LookupError, DeleteRefused) as e:
+            return self._create_error_response(str(e))
+        return self._create_above_fold_response(
+            "SUCCESS", f"Task {task_id} deleted", f"🗑️ Removed {removed} link(s) it owned"
+        )
 
     async def _create_task(self, **params) -> list[TextContent]:
         """Create task linked to requirements"""
@@ -203,6 +254,7 @@ class TaskHandler(BaseHandler):
 
             # Insert task
             self.db.insert_record("tasks", task_data)
+            self._log_operation("task", task_id, "created", params.get("assignee") or "MCP User")
 
             # Create parent-child relationship if this is a subtask
             if params.get("parent_task_id"):

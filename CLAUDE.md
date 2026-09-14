@@ -73,11 +73,12 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
    - Handles database path configuration via LIFECYCLE_DB environment variable
    - Implements connection pooling and error handling
 
-4. **Database Schema** (`src/lifecycle_mcp/lifecycle-schema.sql`): Comprehensive SQLite schema
-   - Requirements table with full lifecycle states and metadata
-   - Tasks table with hierarchical structure and effort tracking
-   - Architecture decisions (ADRs) tracking with decision drivers
-   - Many-to-many relationships for full traceability between entities
+4. **Database Schema** (`src/lifecycle_mcp/lifecycle-schema.sql` + `src/lifecycle_mcp/migrations.py`)
+   - `lifecycle-schema.sql` is the version 0 baseline; every change after it is a migration, and new and
+     existing databases take the same migration path. Never edit the baseline to change the schema.
+   - Each migration runs in one transaction with its `schema_version` row; a failure rolls back and
+     `MigrationError` stops the server from starting
+   - Requirements, tasks and architecture decisions (ADRs), linked through the `relationships` table
    - Automated triggers for status updates and denormalized metrics
 
 5. **Project Configuration** (`pyproject.toml`): Standard Python packaging
@@ -100,8 +101,15 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
 - **Requirements**: Central entity with comprehensive metadata including functional requirements, acceptance criteria, business value
 - **Tasks**: Implementation work items linked to requirements with effort estimation and assignee tracking
 - **Architecture**: ADRs and technical design documents with decision drivers and consequences
-- **Relationships**: requirement_tasks, requirement_architecture, task_dependencies tables provide full traceability
-- **Views**: requirement_progress, task_hierarchy, blocked_items provide common query patterns
+- **Relationships**: the `relationships` table is the only place links are stored (migration 8 removed the old
+  `requirement_tasks`, `requirement_architecture`, `task_dependencies`, `requirement_dependencies` tables and
+  `tasks.parent_task_id`). Write links with `BaseHandler._link()`. Direction conventions: requirement → task
+  (`implements`), requirement → architecture (`addresses`), child → parent (`parent`), dependent → dependency
+  (`depends`/`requires`/`informs`), blocker → blocked (`blocks`). `create_relationship` normalizes reversed
+  requirement links.
+- **Views**: requirement_progress, task_hierarchy, blocked_items, requirement_hierarchy (all over `relationships`)
+- **Triggers on relationships**: keep `requirements.task_count`/`tasks_completed` current and enforce requirement
+  decomposition depth and no circular parents
 
 ### MCP Tools Available
 

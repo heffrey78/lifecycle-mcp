@@ -1,5 +1,10 @@
 -- Software Lifecycle Management Database Schema
 -- Designed for MCP server integration with Claude Code and human interfaces
+--
+-- This is the version 0 baseline. New databases are created from it and then brought up to date by
+-- src/lifecycle_mcp/migrations.py, the same path existing databases take. The link tables and
+-- tasks.parent_task_id below are replaced by the relationships table in migration 8; do not add
+-- new objects here, add a migration instead.
 
 -- Requirements table - the source of truth for what needs to be built
 CREATE TABLE IF NOT EXISTS requirements (

@@ -12,6 +12,21 @@ from mcp.types import TextContent
 
 from .base_handler import BaseHandler
 
+# Task-to-task dependency edges as (task_id depends on depends_on_task_id). "blocks" links point
+# blocker -> blocked, every other dependency kind points dependent -> dependency.
+TASK_DEPENDENCY_EDGES = """
+    SELECT e.task_id, e.depends_on_task_id
+    FROM (
+        SELECT source_id AS task_id, target_id AS depends_on_task_id FROM relationships
+        WHERE source_type = 'task' AND target_type = 'task' AND relationship_type IN ('depends', 'requires', 'informs')
+        UNION
+        SELECT target_id, source_id FROM relationships
+        WHERE source_type = 'task' AND target_type = 'task' AND relationship_type = 'blocks'
+    ) e
+    JOIN tasks t1 ON e.task_id = t1.id
+    JOIN tasks t2 ON e.depends_on_task_id = t2.id
+"""
+
 
 class ExportHandler(BaseHandler):
     """Handler for export and diagram generation MCP tools"""
@@ -230,8 +245,9 @@ class ExportHandler(BaseHandler):
                 linked_reqs = self.db.execute_query(
                     """
                     SELECT r.id, r.title FROM requirements r
-                    JOIN requirement_tasks rt ON r.id = rt.requirement_id
-                    WHERE rt.task_id = ?
+                    JOIN relationships rel ON rel.source_id = r.id
+                    WHERE rel.source_type = 'requirement' AND rel.target_type = 'task'
+                      AND rel.target_id = ? AND rel.relationship_type = 'implements'
                 """,
                     [task["id"]],
                     fetch_all=True,
@@ -310,8 +326,9 @@ class ExportHandler(BaseHandler):
             linked_reqs = self.db.execute_query(
                 """
                 SELECT r.id, r.title FROM requirements r
-                JOIN requirement_architecture ra ON r.id = ra.requirement_id
-                WHERE ra.architecture_id = ?
+                JOIN relationships rel ON rel.source_id = r.id
+                WHERE rel.source_type = 'requirement' AND rel.target_type = 'architecture'
+                  AND rel.target_id = ? AND rel.relationship_type = 'addresses'
             """,
                 [arch["id"]],
                 fetch_all=True,
@@ -486,8 +503,9 @@ class ExportHandler(BaseHandler):
             tasks = self.db.execute_query(
                 f"""
                 SELECT DISTINCT t.* FROM tasks t
-                JOIN requirement_tasks rt ON t.id = rt.task_id
-                WHERE rt.requirement_id IN ({placeholders})
+                JOIN relationships rel ON rel.target_id = t.id
+                WHERE rel.source_type = 'requirement' AND rel.target_type = 'task'
+                  AND rel.relationship_type = 'implements' AND rel.source_id IN ({placeholders})
                 ORDER BY t.task_number, t.subtask_number
             """,
                 requirement_ids,
@@ -501,6 +519,17 @@ class ExportHandler(BaseHandler):
             return ""
 
         mermaid_content = "flowchart TD\n"
+        parent_of = {
+            row["source_id"]: row["target_id"]
+            for row in self.db.execute_query(
+                """
+                SELECT source_id, target_id FROM relationships
+                WHERE source_type = 'task' AND target_type = 'task' AND relationship_type = 'parent'
+            """,
+                fetch_all=True,
+                row_factory=True,
+            )
+        }
 
         # Add task nodes
         for task in tasks:
@@ -518,8 +547,8 @@ class ExportHandler(BaseHandler):
             mermaid_content += f"    style {node_id} {status_color}\n"
 
             # Add parent-child relationships
-            if task["parent_task_id"]:
-                parent_id = task["parent_task_id"].replace("-", "_")
+            if task["id"] in parent_of:
+                parent_id = parent_of[task["id"]].replace("-", "_")
                 mermaid_content += f"    {parent_id} --> {node_id}\n"
 
         return mermaid_content
@@ -532,8 +561,9 @@ class ExportHandler(BaseHandler):
             architecture = self.db.execute_query(
                 f"""
                 SELECT DISTINCT a.* FROM architecture a
-                JOIN requirement_architecture ra ON a.id = ra.architecture_id
-                WHERE ra.requirement_id IN ({placeholders})
+                JOIN relationships rel ON rel.target_id = a.id
+                WHERE rel.source_type = 'requirement' AND rel.target_type = 'architecture'
+                  AND rel.relationship_type = 'addresses' AND rel.source_id IN ({placeholders})
                 ORDER BY a.created_at DESC
             """,
                 requirement_ids,
@@ -578,8 +608,9 @@ class ExportHandler(BaseHandler):
             tasks = self.db.execute_query(
                 f"""
                 SELECT DISTINCT t.* FROM tasks t
-                JOIN requirement_tasks rt ON t.id = rt.task_id
-                WHERE rt.requirement_id IN ({placeholders})
+                JOIN relationships rel ON rel.target_id = t.id
+                WHERE rel.source_type = 'requirement' AND rel.target_type = 'task'
+                  AND rel.relationship_type = 'implements' AND rel.source_id IN ({placeholders})
                 ORDER BY t.task_number, t.subtask_number
             """,
                 requirement_ids,
@@ -589,8 +620,9 @@ class ExportHandler(BaseHandler):
             architecture = self.db.execute_query(
                 f"""
                 SELECT DISTINCT a.* FROM architecture a
-                JOIN requirement_architecture ra ON a.id = ra.architecture_id
-                WHERE ra.requirement_id IN ({placeholders})
+                JOIN relationships rel ON rel.target_id = a.id
+                WHERE rel.source_type = 'requirement' AND rel.target_type = 'architecture'
+                  AND rel.relationship_type = 'addresses' AND rel.source_id IN ({placeholders})
                 ORDER BY a.created_at DESC
             """,
                 requirement_ids,
@@ -632,8 +664,9 @@ class ExportHandler(BaseHandler):
         if include_relationships:
             req_tasks = self.db.execute_query(
                 """
-                SELECT rt.requirement_id, rt.task_id
-                FROM requirement_tasks rt
+                SELECT source_id AS requirement_id, target_id AS task_id
+                FROM relationships
+                WHERE source_type = 'requirement' AND target_type = 'task' AND relationship_type = 'implements'
                 LIMIT 20
             """,
                 fetch_all=True,
@@ -665,8 +698,9 @@ class ExportHandler(BaseHandler):
             placeholders = ",".join(["?"] * len(requirement_ids))
             task_ids_query = self.db.execute_query(
                 f"""
-                SELECT DISTINCT task_id FROM requirement_tasks
-                WHERE requirement_id IN ({placeholders})
+                SELECT DISTINCT target_id AS task_id FROM relationships
+                WHERE source_type = 'requirement' AND target_type = 'task'
+                  AND relationship_type = 'implements' AND source_id IN ({placeholders})
             """,
                 requirement_ids,
                 fetch_all=True,
@@ -678,12 +712,9 @@ class ExportHandler(BaseHandler):
                 task_placeholders = ",".join(["?"] * len(task_ids))
                 dependencies = self.db.execute_query(
                     f"""
-                    SELECT td.task_id, td.depends_on_task_id
-                    FROM task_dependencies td
-                    JOIN tasks t1 ON td.task_id = t1.id
-                    JOIN tasks t2 ON td.depends_on_task_id = t2.id
-                    WHERE td.task_id IN ({task_placeholders})
-                       OR td.depends_on_task_id IN ({task_placeholders})
+                    {TASK_DEPENDENCY_EDGES}
+                    WHERE e.task_id IN ({task_placeholders})
+                       OR e.depends_on_task_id IN ({task_placeholders})
                 """,
                     task_ids + task_ids,
                     fetch_all=True,
@@ -692,16 +723,7 @@ class ExportHandler(BaseHandler):
             else:
                 dependencies = []
         else:
-            dependencies = self.db.execute_query(
-                """
-                SELECT td.task_id, td.depends_on_task_id
-                FROM task_dependencies td
-                JOIN tasks t1 ON td.task_id = t1.id
-                JOIN tasks t2 ON td.depends_on_task_id = t2.id
-            """,
-                fetch_all=True,
-                row_factory=True,
-            )
+            dependencies = self.db.execute_query(TASK_DEPENDENCY_EDGES, fetch_all=True, row_factory=True)
 
         if not dependencies:
             return "flowchart TD\n    NoDeps[No task dependencies found]\n"

@@ -206,20 +206,11 @@ class TaskHandler(BaseHandler):
 
             # Create parent-child relationship if this is a subtask
             if params.get("parent_task_id"):
-                relationship_id = f"rel-{task_id}-{params['parent_task_id']}-parent"
-                relationship_data = {
-                    "id": relationship_id,
-                    "source_type": "task",
-                    "source_id": task_id,
-                    "target_type": "task",
-                    "target_id": params["parent_task_id"],
-                    "relationship_type": "parent",
-                }
-                self.db.insert_record("relationships", relationship_data)
+                self._link("task", task_id, "task", params["parent_task_id"], "parent")
 
             # Link to requirements
             for req_id in params["requirement_ids"]:
-                self.db.insert_record("requirement_tasks", {"requirement_id": req_id, "task_id": task_id})
+                self._link("requirement", req_id, "task", task_id, "implements")
 
             # Create GitHub issue if available
             github_url = None
@@ -389,8 +380,9 @@ class TaskHandler(BaseHandler):
                 tasks = self.db.execute_query(
                     """
                     SELECT t.* FROM tasks t
-                    JOIN requirement_tasks rt ON t.id = rt.task_id
-                    WHERE rt.requirement_id = ?
+                    JOIN relationships rel ON rel.target_id = t.id
+                    WHERE rel.source_type = 'requirement' AND rel.source_id = ?
+                      AND rel.target_type = 'task' AND rel.relationship_type = 'implements'
                     ORDER BY t.priority, t.created_at DESC
                 """,
                     [params["requirement_id"]],
@@ -457,8 +449,9 @@ class TaskHandler(BaseHandler):
                 tasks = self.db.execute_query(
                     """
                     SELECT t.* FROM tasks t
-                    JOIN requirement_tasks rt ON t.id = rt.task_id
-                    WHERE rt.requirement_id = ?
+                    JOIN relationships rel ON rel.target_id = t.id
+                    WHERE rel.source_type = 'requirement' AND rel.source_id = ?
+                      AND rel.target_type = 'task' AND rel.relationship_type = 'implements'
                     ORDER BY t.priority, t.created_at DESC
                 """,
                     [params["requirement_id"]],
@@ -743,8 +736,9 @@ class TaskHandler(BaseHandler):
             requirements = self.db.execute_query(
                 """
                 SELECT r.id, r.title FROM requirements r
-                JOIN requirement_tasks rt ON r.id = rt.requirement_id
-                WHERE rt.task_id = ?
+                JOIN relationships rel ON rel.source_id = r.id
+                WHERE rel.source_type = 'requirement' AND rel.target_type = 'task'
+                  AND rel.target_id = ? AND rel.relationship_type = 'implements'
             """,
                 [params["task_id"]],
                 fetch_all=True,

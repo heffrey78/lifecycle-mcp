@@ -113,6 +113,25 @@ class BaseHandler(ABC):
             self.logger.warning(f"Failed to serialize to JSON: {str(e)}")
             return "[]"
 
+    def _link(self, source_type: str, source_id: str, target_type: str, target_id: str, relationship_type: str):
+        """Record a link in the relationships table, the only place links are stored (idempotent).
+
+        Direction conventions: requirement -> task (implements), requirement -> architecture (addresses),
+        child -> parent (parent), dependent -> dependency (depends/requires/informs), blocker -> blocked (blocks).
+        """
+        self.db.execute_query(
+            "INSERT OR IGNORE INTO relationships "
+            "(id, source_type, source_id, target_type, target_id, relationship_type) VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                f"rel-{source_id}-{target_id}-{relationship_type}",
+                source_type,
+                source_id,
+                target_type,
+                target_id,
+                relationship_type,
+            ],
+        )
+
     def _log_operation(self, entity_type: str, entity_id: str, event_type: str, actor: str = "MCP User"):
         """Log lifecycle events"""
         try:

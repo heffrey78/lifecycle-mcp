@@ -137,6 +137,10 @@ class RelationshipHandler(BaseHandler):
         if not self._validate_relationship(source_type, target_type, rel_type):
             return self._create_error_response(f"Invalid relationship: {source_type} -> {target_type} ({rel_type})")
 
+        source_id, target_id, source_type, target_type = self._normalize_direction(
+            source_id, target_id, source_type, target_type
+        )
+
         # Check if relationship already exists
         if self._relationship_exists(source_id, target_id, rel_type):
             return self._create_error_response(f"Relationship already exists: {source_id} -> {target_id} ({rel_type})")
@@ -172,6 +176,10 @@ class RelationshipHandler(BaseHandler):
 
         if not source_type or not target_type:
             return self._create_error_response(f"Invalid entity IDs: {source_id}, {target_id}")
+
+        source_id, target_id, source_type, target_type = self._normalize_direction(
+            source_id, target_id, source_type, target_type
+        )
 
         # Delete the relationship
         deleted_count = self._delete_relationship_record(source_id, target_id, source_type, target_type, rel_type)
@@ -259,6 +267,13 @@ class RelationshipHandler(BaseHandler):
         elif entity_id.startswith("ADR-") or entity_id.startswith("TDD-"):
             return "architecture"
         return None
+
+    @staticmethod
+    def _normalize_direction(source_id: str, target_id: str, source_type: str, target_type: str):
+        """Requirement links are stored requirement -> task/architecture; accept either direction from callers."""
+        if target_type == "requirement" and source_type in ("task", "architecture"):
+            return target_id, source_id, target_type, source_type
+        return source_id, target_id, source_type, target_type
 
     def _validate_relationship(self, source_type: str, target_type: str, rel_type: str) -> bool:
         """Validate that relationship type is valid for entity types"""

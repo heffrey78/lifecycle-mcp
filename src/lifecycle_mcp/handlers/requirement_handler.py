@@ -443,14 +443,7 @@ Guidelines:
     def _create_requirement_dependency(self, requirement_id: str, depends_on_id: str, dependency_type: str):
         """Create a requirement dependency relationship"""
         try:
-            self.db.insert_record(
-                "requirement_dependencies",
-                {
-                    "requirement_id": requirement_id,
-                    "depends_on_requirement_id": depends_on_id,
-                    "dependency_type": dependency_type,
-                },
-            )
+            self._link("requirement", requirement_id, "requirement", depends_on_id, dependency_type)
             self._log_operation(
                 "requirement_dependency",
                 requirement_id,
@@ -482,8 +475,10 @@ Guidelines:
                 incomplete_tasks = self.db.execute_query(
                     """
                     SELECT t.id, t.title, t.status FROM tasks t
-                    JOIN requirement_tasks rt ON t.id = rt.task_id
-                    WHERE rt.requirement_id = ? AND t.status != 'Complete'
+                    JOIN relationships rel ON rel.target_id = t.id
+                    WHERE rel.source_type = 'requirement' AND rel.source_id = ?
+                      AND rel.target_type = 'task' AND rel.relationship_type = 'implements'
+                      AND t.status != 'Complete'
                 """,
                     [params["requirement_id"]],
                     fetch_all=True,
@@ -706,8 +701,9 @@ Guidelines:
             tasks = self.db.execute_query(
                 """
                 SELECT t.* FROM tasks t
-                JOIN requirement_tasks rt ON t.id = rt.task_id
-                WHERE rt.requirement_id = ?
+                JOIN relationships rel ON rel.target_id = t.id
+                WHERE rel.source_type = 'requirement' AND rel.source_id = ?
+                  AND rel.target_type = 'task' AND rel.relationship_type = 'implements'
             """,
                 [params["requirement_id"]],
                 fetch_all=True,
@@ -747,8 +743,9 @@ Guidelines:
             parent_requirements = self.db.execute_query(
                 """
                 SELECT r.* FROM requirements r
-                JOIN requirement_dependencies rd ON r.id = rd.depends_on_requirement_id
-                WHERE rd.requirement_id = ? AND rd.dependency_type = 'parent'
+                JOIN relationships rel ON rel.target_id = r.id
+                WHERE rel.source_type = 'requirement' AND rel.source_id = ?
+                  AND rel.target_type = 'requirement' AND rel.relationship_type = 'parent'
             """,
                 [params["requirement_id"]],
                 fetch_all=True,
@@ -759,8 +756,9 @@ Guidelines:
             child_requirements = self.db.execute_query(
                 """
                 SELECT r.* FROM requirements r
-                JOIN requirement_dependencies rd ON r.id = rd.requirement_id
-                WHERE rd.depends_on_requirement_id = ? AND rd.dependency_type = 'parent'
+                JOIN relationships rel ON rel.source_id = r.id
+                WHERE rel.target_type = 'requirement' AND rel.target_id = ?
+                  AND rel.source_type = 'requirement' AND rel.relationship_type = 'parent'
                 ORDER BY r.created_at
             """,
                 [params["requirement_id"]],
@@ -772,8 +770,9 @@ Guidelines:
             tasks = self.db.execute_query(
                 """
                 SELECT t.* FROM tasks t
-                JOIN requirement_tasks rt ON t.id = rt.task_id
-                WHERE rt.requirement_id = ?
+                JOIN relationships rel ON rel.target_id = t.id
+                WHERE rel.source_type = 'requirement' AND rel.source_id = ?
+                  AND rel.target_type = 'task' AND rel.relationship_type = 'implements'
                 ORDER BY t.task_number, t.subtask_number
             """,
                 [params["requirement_id"]],
@@ -785,8 +784,9 @@ Guidelines:
             architecture = self.db.execute_query(
                 """
                 SELECT a.* FROM architecture a
-                JOIN requirement_architecture ra ON a.id = ra.architecture_id
-                WHERE ra.requirement_id = ?
+                JOIN relationships rel ON rel.target_id = a.id
+                WHERE rel.source_type = 'requirement' AND rel.source_id = ?
+                  AND rel.target_type = 'architecture' AND rel.relationship_type = 'addresses'
             """,
                 [params["requirement_id"]],
                 fetch_all=True,

@@ -176,10 +176,7 @@ class ArchitectureHandler(BaseHandler):
 
             # Link to requirements
             for req_id in params["requirement_ids"]:
-                self.db.insert_record(
-                    "requirement_architecture",
-                    {"requirement_id": req_id, "architecture_id": adr_id, "relationship_type": "addresses"},
-                )
+                self._link("requirement", req_id, "architecture", adr_id, "addresses")
 
             # Analyze ADR for diagram suggestions using LLM
             diagram_suggestions = await self._analyze_adr_for_diagrams(arch_data)
@@ -248,8 +245,9 @@ class ArchitectureHandler(BaseHandler):
             if params.get("requirement_id"):
                 base_query = """
                     SELECT a.* FROM architecture a
-                    JOIN requirement_architecture ra ON a.id = ra.architecture_id
-                    WHERE ra.requirement_id = ?
+                    JOIN relationships rel ON rel.target_id = a.id
+                    WHERE rel.source_type = 'requirement' AND rel.source_id = ?
+                      AND rel.target_type = 'architecture' AND rel.relationship_type = 'addresses'
                 """
                 where_params.append(params["requirement_id"])
 
@@ -280,7 +278,8 @@ class ArchitectureHandler(BaseHandler):
                 else:
                     base_query += " WHERE " + " AND ".join(where_clauses)
 
-            base_query += " ORDER BY created_at DESC"
+            # relationships also has created_at, so qualify it when joined
+            base_query += " ORDER BY a.created_at DESC" if params.get("requirement_id") else " ORDER BY created_at DESC"
 
             decisions = self.db.execute_query(base_query, where_params, fetch_all=True, row_factory=True)
 
@@ -326,8 +325,9 @@ class ArchitectureHandler(BaseHandler):
             if params.get("requirement_id"):
                 base_query = """
                     SELECT a.* FROM architecture a
-                    JOIN requirement_architecture ra ON a.id = ra.architecture_id
-                    WHERE ra.requirement_id = ?
+                    JOIN relationships rel ON rel.target_id = a.id
+                    WHERE rel.source_type = 'requirement' AND rel.source_id = ?
+                      AND rel.target_type = 'architecture' AND rel.relationship_type = 'addresses'
                 """
                 where_params.append(params["requirement_id"])
 
@@ -358,7 +358,8 @@ class ArchitectureHandler(BaseHandler):
                 else:
                     base_query += " WHERE " + " AND ".join(where_clauses)
 
-            base_query += " ORDER BY created_at DESC"
+            # relationships also has created_at, so qualify it when joined
+            base_query += " ORDER BY a.created_at DESC" if params.get("requirement_id") else " ORDER BY created_at DESC"
 
             decisions = self.db.execute_query(base_query, where_params, fetch_all=True, row_factory=True)
 
@@ -445,8 +446,9 @@ class ArchitectureHandler(BaseHandler):
             requirements = self.db.execute_query(
                 """
                 SELECT r.id, r.title FROM requirements r
-                JOIN requirement_architecture ra ON r.id = ra.requirement_id
-                WHERE ra.architecture_id = ?
+                JOIN relationships rel ON rel.source_id = r.id
+                WHERE rel.source_type = 'requirement' AND rel.target_type = 'architecture'
+                  AND rel.target_id = ? AND rel.relationship_type = 'addresses'
             """,
                 [params["architecture_id"]],
                 fetch_all=True,

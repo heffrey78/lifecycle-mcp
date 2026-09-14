@@ -255,7 +255,7 @@ async def test_project_metrics_consistency(
 ):
     """Test that project metrics remain consistent regardless of data volume"""
     # Clear any existing data to ensure clean state for each hypothesis example
-    db_manager.execute_query("DELETE FROM requirement_tasks")
+    db_manager.execute_query("DELETE FROM relationships")
     db_manager.execute_query("DELETE FROM tasks")
     db_manager.execute_query("DELETE FROM requirements")
 
@@ -296,6 +296,9 @@ async def test_project_metrics_consistency(
     # Verify each requirement has correct task count
     for req_id in created_reqs:
         req_tasks = db_manager.execute_query(
-            "SELECT COUNT(*) FROM requirement_tasks WHERE requirement_id = ?", [req_id], fetch_one=True
+            "SELECT COUNT(*) FROM relationships "
+            "WHERE source_type = 'requirement' AND source_id = ? AND relationship_type = 'implements'",
+            [req_id],
+            fetch_one=True,
         )[0]
         assert req_tasks == num_tasks_per_req

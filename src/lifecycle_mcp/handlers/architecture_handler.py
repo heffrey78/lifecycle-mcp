@@ -9,7 +9,7 @@ from typing import Any
 
 from mcp.types import TextContent
 
-from .base_handler import BaseHandler, DeleteRefused
+from .base_handler import EDIT_OPTION_PROPERTIES, BaseHandler, DeleteRefused, EditRefused, RevisionConflict
 
 # Records that depend on an architecture decision and therefore block deleting it. The requirement links it
 # addresses belong to the decision itself and are removed with it.
@@ -21,6 +21,19 @@ ARCHITECTURE_DELETE_BLOCKERS = [
         "AND relationship_type != 'addresses'",
     ),
 ]
+
+
+# update_architecture parameter -> column. Parameters are named as in create_architecture_decision.
+ARCHITECTURE_EDIT_COLUMNS = {
+    "title": "title",
+    "context": "context",
+    "decision": "decision_outcome",
+    "decision_drivers": "decision_drivers",
+    "considered_options": "considered_options",
+    "consequences": "consequences",
+    "authors": "authors",
+}
+ARCHITECTURE_JSON_FIELDS = ("decision_drivers", "considered_options", "consequences", "authors")
 
 
 class ArchitectureHandler(BaseHandler):
@@ -138,6 +151,28 @@ class ArchitectureHandler(BaseHandler):
                     "required": ["architecture_id"],
                 },
             },
+            {
+                "name": "update_architecture",
+                "description": (
+                    "Edit a Proposed architecture decision in place. Decisions in any other status are refused: "
+                    "record a new decision that supersedes them instead."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "architecture_id": {"type": "string"},
+                        "title": {"type": "string"},
+                        "context": {"type": "string"},
+                        "decision": {"type": "string"},
+                        "consequences": {"type": "object"},
+                        "decision_drivers": {"type": "array", "items": {"type": "string"}},
+                        "considered_options": {"type": "array", "items": {"type": "string"}},
+                        "authors": {"type": "array", "items": {"type": "string"}},
+                        **EDIT_OPTION_PROPERTIES,
+                    },
+                    "required": ["architecture_id"],
+                },
+            },
         ]
 
     async def handle_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
@@ -157,6 +192,8 @@ class ArchitectureHandler(BaseHandler):
                 return self._add_architecture_review(**arguments)
             elif tool_name == "delete_architecture":
                 return self._delete_architecture(**arguments)
+            elif tool_name == "update_architecture":
+                return self._update_architecture(**arguments)
             else:
                 return self._create_error_response(f"Unknown tool: {tool_name}")
         except Exception as e:
@@ -180,6 +217,45 @@ class ArchitectureHandler(BaseHandler):
             return self._create_error_response(str(e))
         return self._create_above_fold_response(
             "SUCCESS", f"Architecture decision {architecture_id} deleted", f"🗑️ Removed {removed} link(s) it owned"
+        )
+
+    def _update_architecture(self, **params) -> list[TextContent]:
+        """Edit a Proposed architecture decision; decided ones change through a superseding decision"""
+        error = self._validate_required_params(params, ["architecture_id"])
+        if error:
+            return self._create_error_response(error)
+        architecture_id = params["architecture_id"]
+        changes = {column: params[name] for name, column in ARCHITECTURE_EDIT_COLUMNS.items() if name in params}
+        if not changes:
+            return self._create_error_response(
+                f"Nothing to update: pass at least one of {', '.join(ARCHITECTURE_EDIT_COLUMNS)}"
+            )
+
+        def only_while_proposed(before: dict[str, Any]) -> None:
+            if before["status"] != "Proposed":
+                raise EditRefused(
+                    f"Architecture decision {architecture_id} is {before['status']}; only Proposed decisions can be "
+                    "edited. Record the change as a new decision with create_architecture_decision and move this "
+                    "one to Superseded."
+                )
+
+        try:
+            result = self._apply_edit(
+                "architecture",
+                "architecture",
+                architecture_id,
+                changes,
+                editable=ARCHITECTURE_EDIT_COLUMNS.values(),
+                json_fields=ARCHITECTURE_JSON_FIELDS,
+                actor=params.get("actor") or "MCP User",
+                reason=params.get("reason"),
+                if_revision=params.get("if_revision"),
+                check=only_while_proposed,
+            )
+        except (LookupError, RevisionConflict, EditRefused) as e:
+            return self._create_error_response(str(e))
+        return self._create_above_fold_response(
+            "SUCCESS", f"Architecture decision {architecture_id} updated", self._describe_edit(result)
         )
 
     async def _create_architecture_decision(self, **params) -> list[TextContent]:
@@ -455,6 +531,7 @@ class ArchitectureHandler(BaseHandler):
 - **Status**: {arch["status"]}
 - **Created**: {arch["created_at"]}
 - **Updated**: {arch["updated_at"]}
+- **Revision**: {arch["revision"]}
 - **Authors**: {arch["authors"] or "Not specified"}
 
 ## Context

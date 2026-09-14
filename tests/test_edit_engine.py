@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from lifecycle_mcp.handlers.base_handler import RevisionConflict
+from lifecycle_mcp.handlers.base_handler import EditRefused, RevisionConflict
 
 REQ = "REQ-0001-FUNC-00"
 EDITABLE = {"title", "priority", "acceptance_criteria", "business_value"}
@@ -111,3 +111,44 @@ def test_a_rejected_value_rolls_back_every_field(handler):
 def test_missing_record_raises_lookup_error(handler):
     with pytest.raises(LookupError, match="not found"):
         handler._apply_edit("requirements", "requirement", "REQ-9999-FUNC-00", {"title": "x"}, editable=EDITABLE)
+
+
+def links(handler):
+    return handler.db.execute_query("SELECT COUNT(*) FROM relationships WHERE source_id = ?", [REQ], fetch_one=True)[0]
+
+
+def test_check_sees_the_stored_record_and_its_refusal_writes_nothing(handler):
+    def refuse(before):
+        assert before["title"] == "Original"
+        raise EditRefused("not now")
+
+    with pytest.raises(EditRefused, match="not now"):
+        edit(handler, {"title": "Renamed"}, check=refuse)
+
+    assert stored(handler)["title"] == "Original"
+    assert edit_events(handler) == []
+
+
+def test_link_changes_share_the_revision_bump_and_are_logged(handler):
+    def relink(cur, before):
+        handler._link("requirement", REQ, "requirement", "REQ-0002-FUNC-00", "informs", cursor=cur)
+        return {"informs": (None, "REQ-0002-FUNC-00")}
+
+    result = edit(handler, {"title": "Renamed"}, relink=relink, reason="split out")
+
+    assert result.changed == ["title", "informs"] and result.revision == 1
+    assert edit_events(handler)[-1] == ("informs", None, "REQ-0002-FUNC-00", "MCP User", "split out")
+    assert links(handler) == 1
+
+
+def test_a_refused_relink_rolls_back_the_links_it_already_wrote(handler):
+    def relink(cur, before):
+        handler._link("requirement", REQ, "requirement", "REQ-0002-FUNC-00", "informs", cursor=cur)
+        raise EditRefused("second link not allowed")
+
+    with pytest.raises(EditRefused):
+        edit(handler, {"title": "Renamed"}, relink=relink)
+
+    assert links(handler) == 0
+    record = stored(handler)
+    assert record["title"] == "Original" and record["revision"] == 0

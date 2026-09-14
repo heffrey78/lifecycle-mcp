@@ -4,13 +4,40 @@ Task Handler for MCP Lifecycle Management Server
 Handles all task-related operations
 """
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
 from mcp.types import TextContent
 
 from ..github_utils import GitHubUtils
-from .base_handler import BaseHandler, DeleteRefused
+from .base_handler import EDIT_OPTION_PROPERTIES, BaseHandler, DeleteRefused, EditRefused, RevisionConflict
+
+# Fields update_task changes directly; parent_task_id and requirement_ids are links and handled separately.
+TASK_EDITABLE = ("title", "priority", "effort", "user_story", "acceptance_criteria", "assignee")
+TASK_JSON_FIELDS = ("acceptance_criteria",)
+
+# Requirement statuses tasks may be linked to, by create_task and update_task alike.
+APPROVED_REQUIREMENT_STATUSES = ("Approved", "Architecture", "Ready", "Implemented", "Validated")
+
+PARENT_OF_TASK_SQL = (
+    "SELECT target_id FROM relationships WHERE source_type = 'task' AND source_id = ? "
+    "AND target_type = 'task' AND relationship_type = 'parent'"
+)
+REQUIREMENTS_OF_TASK_SQL = (
+    "SELECT source_id FROM relationships WHERE source_type = 'requirement' AND target_type = 'task' "
+    "AND target_id = ? AND relationship_type = 'implements' ORDER BY source_id"
+)
+# Returns a row when the second task is the first task or one of its ancestors.
+TASK_ANCESTOR_SQL = """
+    WITH RECURSIVE ancestors(id) AS (
+        SELECT ?
+        UNION
+        SELECT rel.target_id FROM relationships rel JOIN ancestors a ON rel.source_id = a.id
+        WHERE rel.source_type = 'task' AND rel.target_type = 'task' AND rel.relationship_type = 'parent'
+    )
+    SELECT 1 FROM ancestors WHERE id = ?
+"""
 
 # Records that depend on a task and therefore block deleting it. "blocks" links point blocker -> blocked.
 TASK_DELETE_BLOCKERS = [
@@ -136,6 +163,37 @@ class TaskHandler(BaseHandler):
                     "required": ["task_id"],
                 },
             },
+            {
+                "name": "update_task",
+                "description": (
+                    "Edit a task's content, move it under another parent or change the requirements it implements. "
+                    "The task ID never changes; status moves go through update_task_status."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "title": {"type": "string"},
+                        "priority": {"type": "string", "enum": ["P0", "P1", "P2", "P3"]},
+                        "effort": {"type": "string", "enum": ["XS", "S", "M", "L", "XL"]},
+                        "user_story": {"type": "string"},
+                        "acceptance_criteria": {"type": "array", "items": {"type": "string"}},
+                        "assignee": {"type": "string"},
+                        "parent_task_id": {
+                            "type": "string",
+                            "description": "New parent task; an empty string makes it a top-level task",
+                        },
+                        "requirement_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 1,
+                            "description": "Replaces the requirements it implements; added ones must be approved",
+                        },
+                        **EDIT_OPTION_PROPERTIES,
+                    },
+                    "required": ["task_id"],
+                },
+            },
         ]
 
     async def handle_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
@@ -160,6 +218,8 @@ class TaskHandler(BaseHandler):
                 return await self._bulk_sync_with_github(**arguments)
             elif tool_name == "delete_task":
                 return self._delete_task(**arguments)
+            elif tool_name == "update_task":
+                return self._update_task(**arguments)
             else:
                 return self._create_error_response(f"Unknown tool: {tool_name}")
         except Exception as e:
@@ -181,6 +241,114 @@ class TaskHandler(BaseHandler):
             "SUCCESS", f"Task {task_id} deleted", f"🗑️ Removed {removed} link(s) it owned"
         )
 
+    def _update_task(self, **params) -> list[TextContent]:
+        """Edit task content, move it to another parent or replace its requirement links; the ID never changes"""
+        error = self._validate_required_params(params, ["task_id"])
+        if error:
+            return self._create_error_response(error)
+        task_id = params["task_id"]
+        changes = {name: params[name] for name in TASK_EDITABLE if name in params}
+        if not changes and "parent_task_id" not in params and "requirement_ids" not in params:
+            fields = ", ".join((*TASK_EDITABLE, "parent_task_id", "requirement_ids"))
+            return self._create_error_response(f"Nothing to update: pass at least one of {fields}")
+
+        def relink(cur, _before: dict[str, Any]) -> dict[str, tuple[Any, Any]]:
+            links = {}
+            if "parent_task_id" in params:
+                links.update(self._move_to_parent(cur, task_id, params["parent_task_id"] or None))
+            if "requirement_ids" in params:
+                links.update(self._replace_requirement_links(cur, task_id, params["requirement_ids"]))
+            return links
+
+        try:
+            result = self._apply_edit(
+                "tasks",
+                "task",
+                task_id,
+                changes,
+                editable=TASK_EDITABLE,
+                json_fields=TASK_JSON_FIELDS,
+                actor=params.get("actor") or "MCP User",
+                reason=params.get("reason"),
+                if_revision=params.get("if_revision"),
+                relink=relink,
+            )
+        except (LookupError, RevisionConflict, EditRefused) as e:
+            return self._create_error_response(str(e))
+        return self._create_above_fold_response("SUCCESS", f"Task {task_id} updated", self._describe_edit(result))
+
+    def _move_to_parent(self, cur, task_id: str, parent_id: str | None) -> dict[str, tuple[Any, Any]]:
+        """Replace the task's parent link inside the edit transaction; parent_id None makes it top-level"""
+        row = cur.execute(PARENT_OF_TASK_SQL, [task_id]).fetchone()
+        current_id = row[0] if row else None
+        if parent_id == current_id:
+            return {}
+        if parent_id == task_id:
+            raise EditRefused(f"Task {task_id} cannot be its own parent")
+        if parent_id is not None:
+            if cur.execute("SELECT 1 FROM tasks WHERE id = ?", [parent_id]).fetchone() is None:
+                raise EditRefused(f"Parent task {parent_id} not found")
+            if cur.execute(TASK_ANCESTOR_SQL, [parent_id, task_id]).fetchone():
+                raise EditRefused(
+                    f"Task {parent_id} sits below {task_id} in the task hierarchy, so it cannot become its parent "
+                    "(that would create a cycle)"
+                )
+        cur.execute(
+            "DELETE FROM relationships WHERE source_type = 'task' AND source_id = ? "
+            "AND target_type = 'task' AND relationship_type = 'parent'",
+            [task_id],
+        )
+        if parent_id is not None:
+            self._link("task", task_id, "task", parent_id, "parent", cursor=cur)
+        return {"parent_task_id": (current_id, parent_id)}
+
+    def _replace_requirement_links(self, cur, task_id: str, requirement_ids: list[str]) -> dict[str, tuple[Any, Any]]:
+        """Make the task implement exactly these requirements inside the edit transaction"""
+        wanted = sorted(set(requirement_ids))
+        if not wanted:
+            raise EditRefused(f"Task {task_id} must implement at least one requirement")
+        current = [row[0] for row in cur.execute(REQUIREMENTS_OF_TASK_SQL, [task_id]).fetchall()]
+        if wanted == current:
+            return {}
+        added = [req_id for req_id in wanted if req_id not in current]
+        statuses = {}
+        for req_id in added:
+            row = cur.execute("SELECT status FROM requirements WHERE id = ?", [req_id]).fetchone()
+            statuses[req_id] = row[0] if row else None
+        error = self._requirement_gate_error(statuses, "link tasks to")
+        if error:
+            raise EditRefused(error)
+        for req_id in current:
+            if req_id not in wanted:
+                cur.execute(
+                    "DELETE FROM relationships WHERE source_type = 'requirement' AND source_id = ? "
+                    "AND target_type = 'task' AND target_id = ? AND relationship_type = 'implements'",
+                    [req_id, task_id],
+                )
+        for req_id in added:
+            self._link("requirement", req_id, "task", task_id, "implements", cursor=cur)
+        return {"requirement_ids": (json.dumps(current), json.dumps(wanted))}
+
+    @staticmethod
+    def _requirement_gate_error(statuses: dict[str, str | None], action: str) -> str | None:
+        """Why tasks cannot be linked to these requirements (ID -> status, None when missing); None when they can"""
+        missing = [req_id for req_id, status in statuses.items() if status is None]
+        if missing:
+            return f"Requirement {missing[0]} not found"
+        unapproved = [
+            f"- {req_id} (status: {status})"
+            for req_id, status in statuses.items()
+            if status not in APPROVED_REQUIREMENT_STATUSES
+        ]
+        if not unapproved:
+            return None
+        return (
+            f"Cannot {action} unapproved requirements. The following requirements must be approved first:\n"
+            + "\n".join(unapproved)
+            + "\n\nRequirements must be in one of these states: "
+            + ", ".join(sorted(APPROVED_REQUIREMENT_STATUSES))
+        )
+
     async def _create_task(self, **params) -> list[TextContent]:
         """Create task linked to requirements"""
         # Validate required parameters
@@ -188,27 +356,14 @@ class TaskHandler(BaseHandler):
         if error:
             return self._create_error_response(error)
 
-        # Validate requirement approval status
-        approved_statuses = {"Approved", "Architecture", "Ready", "Implemented", "Validated"}
-        unapproved_reqs = []
-
+        # Tasks may only implement approved requirements
+        statuses = {}
         for req_id in params["requirement_ids"]:
-            req_status = self.db.get_records("requirements", "status", "id = ?", [req_id])
-
-            if not req_status:
-                return self._create_error_response(f"Requirement {req_id} not found")
-
-            status = req_status[0]["status"]
-            if status not in approved_statuses:
-                unapproved_reqs.append(f"{req_id} (status: {status})")
-
-        if unapproved_reqs:
-            error_msg = (
-                "Cannot create tasks for unapproved requirements. The following requirements must be approved first:\n"
-            )
-            error_msg += "\n".join(f"- {req}" for req in unapproved_reqs)
-            error_msg += "\n\nRequirements must be in one of these states: " + ", ".join(sorted(approved_statuses))
-            return self._create_error_response(error_msg)
+            rows = self.db.get_records("requirements", "status", "id = ?", [req_id])
+            statuses[req_id] = rows[0]["status"] if rows else None
+        error = self._requirement_gate_error(statuses, "create tasks for")
+        if error:
+            return self._create_error_response(error)
 
         try:
             # Get next task number
@@ -217,23 +372,13 @@ class TaskHandler(BaseHandler):
             # Determine subtask number
             subtask_number = 0
             if params.get("parent_task_id"):
-                # For subtasks, find the parent's task number and get next subtask number
+                # Subtasks share the parent's task number and take the next subtask number in use under it.
+                # Counting the parent's current subtasks would reuse an ID once one is deleted or moved away.
                 parent_info = self.db.get_records("tasks", "task_number", "id = ?", [params["parent_task_id"]])
-
-                if parent_info:
-                    parent_task_number = parent_info[0]["task_number"]
-                    # Count existing subtasks using relationships table
-                    existing_subtasks = self.db.get_records(
-                        "relationships",
-                        "COUNT(*) as count",
-                        "target_type = 'task' AND target_id = ? AND relationship_type = 'parent'",
-                        [params["parent_task_id"]],
-                    )
-                    subtask_number = existing_subtasks[0]["count"] + 1 if existing_subtasks else 1
-                    task_number = parent_task_number
-                else:
-                    # Parent task not found
+                if not parent_info:
                     return self._create_error_response(f"Parent task {params['parent_task_id']} not found")
+                task_number = parent_info[0]["task_number"]
+                subtask_number = self.db.get_next_id("tasks", "subtask_number", "task_number = ?", [task_number])
 
             task_id = f"TASK-{task_number:04d}-{subtask_number:02d}-00"
 
@@ -761,7 +906,8 @@ class TaskHandler(BaseHandler):
 - **Effort**: {task["effort"] or "Not specified"}
 - **Assignee**: {task["assignee"] or "Unassigned"}
 - **Created**: {task["created_at"]}
-- **Updated**: {task["updated_at"]}"""
+- **Updated**: {task["updated_at"]}
+- **Revision**: {task["revision"]}"""
 
             if task["github_issue_number"]:
                 task_info += f"\n- **GitHub Issue**: #{task['github_issue_number']} - {task['github_issue_url']}"

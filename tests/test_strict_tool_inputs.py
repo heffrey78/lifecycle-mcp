@@ -29,10 +29,9 @@ async def test_every_tool_names_the_unexpected_field(mcp_server):  # noqa: F811
 
 
 async def test_unknown_field_is_refused_through_the_mcp_layer_and_nothing_is_written(mcp_server):  # noqa: F811
-    # decomposition_source was a requirements column until migration 11 dropped it; no tool declares it.
-    result = await call(mcp_server, "create_requirement", {**REQUIREMENT, "decomposition_source": "llm"})
+    result = await call(mcp_server, "create_requirement", {**REQUIREMENT, UNEXPECTED: ["Mobile apps"]})
     assert result.isError is True
-    assert "decomposition_source" in text_of(result)
+    assert UNEXPECTED in text_of(result)
 
     listing = await call(mcp_server, "query_requirements", {})
     assert "No requirements found" in text_of(listing)

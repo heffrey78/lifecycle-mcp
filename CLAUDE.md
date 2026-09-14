@@ -52,7 +52,7 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
 ### Core Components
 
 1. **LifecycleMCPServer** (`src/lifecycle_mcp/server.py`): Refactored main server using modular handler architecture
-   - Exposes 22 tools for lifecycle management across 6 handler modules
+   - Exposes 39 tools for lifecycle management across 7 handler modules
    - Uses async architecture for proper MCP protocol compliance
    - Implements clean separation of concerns with handler registry for tool routing
    - Validates state transitions and business rules through domain-specific handlers
@@ -60,9 +60,10 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
 
 2. **Handler Architecture** (`src/lifecycle_mcp/handlers/`): Modular async handlers for different domains
    - `BaseHandler`: Abstract base class with common async patterns, utilities, and standardized response formatting
-   - `RequirementHandler`: Requirements lifecycle management (5 tools) - create, update, query, details, trace
-   - `TaskHandler`: Task creation and progress tracking (4 tools) - create, update, query, details
-   - `ArchitectureHandler`: ADR management and reviews (5 tools) - create, update, query, details, review
+   - `RequirementHandler`: Requirements lifecycle management (8 tools) - create, edit, status, delete, query (text and JSON), details, trace
+   - `TaskHandler`: Task creation and progress tracking (9 tools) - create, edit, status, delete, query (text and JSON), details, GitHub sync (one and bulk)
+   - `ArchitectureHandler`: ADR management and reviews (8 tools) - create, edit, status, delete, query (text and JSON), details, review
+   - `RelationshipHandler`: Links and history (6 tools) - create, delete, three link queries, entity history
    - `InterviewHandler`: Interactive requirement gathering (4 tools) - start/continue interviews and conversations
    - `ExportHandler`: Documentation generation (2 tools) - export docs, create diagrams
    - `StatusHandler`: Project health monitoring (2 tools) - project status and metrics
@@ -92,7 +93,7 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
 - **Entity Lifecycle States**: Requirements follow Draft → Under Review → Approved → Architecture → Ready → Implemented → Validated → Deprecated
 - **Hierarchical Task Structure**: Tasks can have parent-child relationships with automatic numbering (TASK-XXXX-YY-ZZ)
 - **Requirement Traceability**: Many-to-many relationships link requirements to tasks and architecture decisions
-- **Event Logging**: Automatic logging of status changes and lifecycle events
+- **Event Logging**: Automatic logging of status changes, per-field edits (before, after, actor, reason) and lifecycle events
 - **Denormalized Metrics**: Task counts and completion percentages stored directly on requirements for performance
 - **Modular Handlers**: Domain-specific handlers inherit from `BaseHandler` with common async utilities
 
@@ -113,27 +114,39 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
 
 ### MCP Tools Available
 
-The server exposes 22 tools across 6 handler modules:
+The server exposes 39 tools across 7 handler modules:
 
-**Requirement Management (5 tools):**
+**Requirement Management (8 tools):**
 - `create_requirement` - Create new requirements with validation
+- `update_requirement` - Edit content in place; reason required at Approved or later
 - `update_requirement_status` - Move requirements through lifecycle with state validation
-- `query_requirements` - Search and filter requirements
+- `delete_requirement` - Delete an unlinked Draft requirement
+- `query_requirements` / `query_requirements_json` - Search and filter requirements (text or JSON)
 - `get_requirement_details` - Full requirement information with relationships
 - `trace_requirement` - Full lifecycle traceability
 
-**Task Management (4 tools):**
+**Task Management (9 tools):**
 - `create_task` - Create tasks linked to requirements
+- `update_task` - Edit content, move to another parent, replace requirement links
 - `update_task_status` - Update task progress
-- `query_tasks` - Search and filter tasks
+- `delete_task` - Delete a Not Started task nothing depends on
+- `query_tasks` / `query_tasks_json` - Search and filter tasks (text or JSON)
 - `get_task_details` - Complete task information
+- `sync_task_from_github` / `bulk_sync_github_tasks` - Sync tasks from GitHub issues (opt-in)
 
-**Architecture Management (5 tools):**
+**Architecture Management (8 tools):**
 - `create_architecture_decision` - Record ADRs
+- `update_architecture` - Edit content while Proposed
 - `update_architecture_status` - Update ADR status
-- `query_architecture_decisions` - Search architecture decisions
+- `delete_architecture` - Delete an unlinked Proposed ADR
+- `query_architecture_decisions` / `query_architecture_decisions_json` - Search architecture decisions (text or JSON)
 - `get_architecture_details` - Full ADR information
 - `add_architecture_review` - Add review comments
+
+**Relationships and History (6 tools):**
+- `create_relationship` / `delete_relationship` - Add or remove a link
+- `query_relationships` / `get_entity_relationships` / `query_all_relationships` - Read links
+- `get_entity_history` - Creation, field edits, status changes, comments and deletion for one record
 
 **Interactive Interviews (4 tools):**
 - `start_requirement_interview` - Begin requirement gathering
@@ -147,6 +160,7 @@ The server exposes 22 tools across 6 handler modules:
 
 **Status Monitoring (2 tools):**
 - `get_project_status` - Project health dashboard
+- `get_project_metrics` - Structured metrics
 
 ### Database Environment
 
@@ -158,6 +172,12 @@ The server uses the `LIFECYCLE_DB` environment variable to specify the SQLite da
 - **stdout is the protocol channel**: never `print()` in `src/` (ruff T20 enforces it); log to stderr. `scripts/mcp_handshake_smoke.py` verifies a server end to end
 - **GitHub is opt-in**: issues are only created or synced when `LIFECYCLE_GITHUB=on`. `tests/conftest.py` fails any test that spawns `gh` or `git`; tests needing a real repository are marked `github_live` and close their issues via `github_issue_cleanup`
 - **Tool errors**: handlers return `_create_error_response(...)`; the server raises it as `ToolCallError` so clients receive `isError=true`
+- **Strict tool inputs**: `server.py` adds `additionalProperties: false` to every tool schema, so undeclared fields are refused by name. Declare every new parameter in the tool definition
+- **Editing records**: every update tool goes through `BaseHandler._apply_edit`. It bumps `revision` once, logs a `field_edit` event per changed field, honours `if_revision`, and takes a `check` hook for lifecycle rules (raise `EditRefused`) and a `relink` hook for link changes inside the same transaction. Rules:
+  - requirement edits at Approved or later need a reason
+  - ADRs are editable only while Proposed
+  - deletes (`BaseHandler._delete_entity`) only remove early-stage records nothing depends on
+- **Changed since last review is derived, not stored**: `changes_since_review()` in `requirement_handler.py` finds field edits after a reviewed requirement's latest status change. The next transition clears it and its comment is the acknowledgement. Don't add a marker column or an acknowledgement tool (owner decision, TASK-0019)
 - The server implements strict state transition validation for requirements
 - All entities use structured ID formats (REQ-XXXX-TYPE-VV, TASK-XXXX-YY-ZZ, ADR-XXXX)
 - JSON fields are used extensively for structured data (arrays, objects)

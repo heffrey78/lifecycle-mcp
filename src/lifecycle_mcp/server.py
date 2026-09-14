@@ -125,11 +125,14 @@ class LifecycleMCPServer:
                 handler_tools = handler.get_tool_definitions()
                 # Convert to Tool objects
                 for tool_def in handler_tools:
+                    # Reject undeclared fields instead of silently dropping them. The MCP layer validates
+                    # calls against this schema, so every tool gets it unless its definition opts out.
+                    input_schema = {"additionalProperties": False, **tool_def["inputSchema"]}
                     tools.append(
                         Tool(
                             name=tool_def["name"],
                             description=tool_def["description"],
-                            inputSchema=tool_def["inputSchema"],
+                            inputSchema=input_schema,
                         )
                     )
 

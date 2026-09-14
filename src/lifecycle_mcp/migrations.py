@@ -420,6 +420,65 @@ def consolidate_links(conn: sqlite3.Connection) -> None:
     """)
 
 
+# --- migrations 9-10 ---------------------------------------------------------------------------
+
+
+def add_edit_tracking(conn: sqlite3.Connection) -> None:
+    """Revision counters for optimistic concurrency and per-field change events (roadmap R6a)."""
+    for table in ("requirements", "tasks", "architecture"):
+        if "revision" not in _columns(conn, table):
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN revision INTEGER NOT NULL DEFAULT 0")
+    event_columns = _columns(conn, "lifecycle_events")
+    for column in ("field", "reason"):
+        if column not in event_columns:
+            conn.execute(f"ALTER TABLE lifecycle_events ADD COLUMN {column} TEXT")
+
+
+REQUIREMENT_HIERARCHY_SQL = """CREATE VIEW requirement_hierarchy AS
+    WITH RECURSIVE requirement_tree AS (
+        SELECT
+            r.id, r.title, r.status, r.priority,
+            NULL AS parent_requirement_id,
+            0 AS hierarchy_level,
+            r.id AS root_requirement_id,
+            r.type || '-' || CAST(r.requirement_number AS TEXT) AS path
+        FROM requirements r
+        WHERE NOT EXISTS (
+            SELECT 1 FROM relationships rel
+            WHERE rel.source_type = 'requirement' AND rel.source_id = r.id
+              AND rel.target_type = 'requirement' AND rel.relationship_type = 'parent'
+        )
+        UNION ALL
+        SELECT
+            r.id, r.title, r.status, r.priority,
+            rel.target_id,
+            rt.hierarchy_level + 1,
+            rt.root_requirement_id,
+            rt.path || ' > ' || r.type || '-' || CAST(r.requirement_number AS TEXT)
+        FROM relationships rel
+        JOIN requirements r ON r.id = rel.source_id
+        JOIN requirement_tree rt ON rt.id = rel.target_id
+        WHERE rel.source_type = 'requirement' AND rel.target_type = 'requirement'
+          AND rel.relationship_type = 'parent'
+          -- guards against cycles stored before prevent_circular_dependencies existed
+          AND rt.hierarchy_level < 32
+    )
+    SELECT * FROM requirement_tree"""
+
+
+def stop_using_decomposition_columns(conn: sqlite3.Connection) -> None:
+    """Remove the objects that read requirement decomposition columns so a later migration can drop them.
+
+    The decomposition depth limit only served the never-wired LLM decomposition feature (roadmap R6b).
+    prevent_circular_dependencies does not use these columns and stays.
+    """
+    conn.execute("DROP VIEW IF EXISTS decomposition_candidates")
+    conn.execute("DROP TRIGGER IF EXISTS validate_decomposition_level")
+    conn.execute("DROP TRIGGER IF EXISTS set_decomposition_level")
+    conn.execute("DROP VIEW IF EXISTS requirement_hierarchy")
+    conn.execute(REQUIREMENT_HIERARCHY_SQL)
+
+
 # --- runner ------------------------------------------------------------------------------------
 
 MIGRATIONS: list[tuple[int, str, Migration]] = [
@@ -431,6 +490,8 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (6, "Consolidate relationship data (superseded by 8)", superseded),
     (7, "Remove redundant relationship tables (superseded by 8)", superseded),
     (8, "Consolidate all links into relationships", consolidate_links),
+    (9, "Edit tracking: revision counters and per-field change events", add_edit_tracking),
+    (10, "Stop using requirement decomposition columns", stop_using_decomposition_columns),
 ]
 
 

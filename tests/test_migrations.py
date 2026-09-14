@@ -183,6 +183,62 @@ def test_database_damaged_by_the_partial_migration_7_gets_working_views_and_trig
         ).fetchone() == (1, 1)
 
 
+def test_database_left_without_tasks_by_the_old_migration_7_rebuild_is_restored(tmp_path):
+    db = database_at(tmp_path / "half-rebuilt.db", version=6)
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        SEED
+        + """
+        INSERT INTO requirement_tasks (requirement_id, task_id) VALUES ('REQ-0001-FUNC-00', 'TASK-0001-01-00');
+        INSERT INTO relationships (id, source_type, source_id, target_type, target_id, relationship_type)
+            VALUES ('rel-parent', 'task', 'TASK-0001-01-00', 'task', 'TASK-0001-00-00', 'parent');
+        -- What the old migration 7 left behind when its tasks rebuild failed before the rename: the rows in
+        -- an unconstrained copy without parent_task_id, and no tasks table, task indexes or task triggers.
+        CREATE TABLE tasks_new AS SELECT id, task_number, subtask_number, version, title, status, priority, effort,
+            user_story, context_research, acceptance_criteria, behavioral_specs, implementation_plan, test_plan,
+            definition_of_done, assignee, created_at, updated_at, completed_at, github_issue_number,
+            github_issue_url, github_etag, github_last_sync
+        FROM tasks;
+        DROP TABLE tasks;
+        DROP TABLE task_dependencies;
+        DROP TABLE requirement_dependencies;
+        DROP TABLE requirement_architecture;
+    """
+    )
+    conn.close()
+    fresh = str(tmp_path / "fresh.db")
+    DatabaseManager(fresh).close()
+
+    assert apply_all_migrations(db) == LATEST
+
+    assert "tasks_new" not in names(db, "table")
+    for kind in ("index", "trigger", "view"):
+        assert names(db, kind) == names(fresh, kind), kind
+    with sqlite3.connect(db) as conn, sqlite3.connect(fresh) as reference:
+        assert (
+            conn.execute("PRAGMA table_info(tasks)").fetchall()
+            == reference.execute("PRAGMA table_info(tasks)").fetchall()
+        )
+        assert conn.execute("SELECT id, status FROM tasks ORDER BY id").fetchall() == [
+            ("TASK-0001-00-00", "In Progress"),
+            ("TASK-0001-01-00", "Complete"),
+            ("TASK-0002-00-00", "Not Started"),
+        ]
+        assert ("TASK-0001-01-00", "TASK-0001-00-00", 1) in conn.execute(
+            "SELECT id, parent_task_id, level FROM task_hierarchy"
+        ).fetchall()
+        assert conn.execute(
+            "SELECT task_count, tasks_completed FROM requirements WHERE id = 'REQ-0001-FUNC-00'"
+        ).fetchone() == (1, 1)
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE tasks SET priority = 'P9' WHERE id = 'TASK-0002-00-00'")
+        # Task triggers are back: a status change is logged again.
+        conn.execute("UPDATE tasks SET status = 'In Progress' WHERE id = 'TASK-0002-00-00'")
+        assert conn.execute(
+            "SELECT to_value FROM lifecycle_events WHERE entity_id = 'TASK-0002-00-00' AND event_type = 'status_change'"
+        ).fetchone() == ("In Progress",)
+
+
 def test_failed_migration_rolls_back_and_stops_startup(tmp_path, monkeypatch):
     db = str(tmp_path / "atomic.db")
     DatabaseManager(db).close()

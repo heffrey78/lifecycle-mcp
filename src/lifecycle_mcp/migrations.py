@@ -367,13 +367,87 @@ LINK_TRIGGER_SQL = [
 ]
 
 
+# The old migration 7 rebuilt tasks without parent_task_id through `CREATE TABLE tasks_new AS SELECT ...`,
+# dropped tasks and could fail before renaming the copy. That left the rows in a table without constraints
+# and took the task indexes and triggers with it. This is tasks as the baseline and migrations 1-2 define
+# it, minus parent_task_id, which this migration removes anyway.
+RESTORED_TASKS_SQL = """CREATE TABLE tasks (
+    id TEXT PRIMARY KEY,
+    task_number INTEGER NOT NULL,
+    subtask_number INTEGER NOT NULL DEFAULT 0,
+    version INTEGER NOT NULL DEFAULT 0,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Not Started' CHECK (status IN (
+        'Not Started', 'In Progress', 'Blocked', 'Complete', 'Abandoned'
+    )),
+    priority TEXT NOT NULL CHECK (priority IN ('P0', 'P1', 'P2', 'P3')),
+    effort TEXT CHECK (effort IN ('XS', 'S', 'M', 'L', 'XL')),
+    user_story TEXT,
+    context_research TEXT,
+    acceptance_criteria TEXT,
+    behavioral_specs TEXT,
+    implementation_plan TEXT,
+    test_plan TEXT,
+    definition_of_done TEXT,
+    assignee TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP,
+    github_issue_number TEXT,
+    github_issue_url TEXT,
+    github_etag TEXT,
+    github_last_sync TEXT,
+    UNIQUE(task_number, subtask_number, version)
+)"""
+
+RESTORED_TASK_OBJECTS_SQL = [
+    "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee)",
+    """CREATE TRIGGER IF NOT EXISTS update_task_timestamp
+    AFTER UPDATE ON tasks
+    BEGIN
+        UPDATE tasks SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+    END""",
+    """CREATE TRIGGER IF NOT EXISTS log_task_status_change
+    AFTER UPDATE OF status ON tasks
+    WHEN OLD.status != NEW.status
+    BEGIN
+        INSERT INTO lifecycle_events (entity_type, entity_id, event_type, from_value, to_value)
+        VALUES ('task', NEW.id, 'status_change', OLD.status, NEW.status);
+        UPDATE tasks
+        SET completed_at = CASE WHEN NEW.status = 'Complete' THEN CURRENT_TIMESTAMP ELSE NULL END
+        WHERE id = NEW.id;
+    END""",
+]
+
+
+def _restore_half_rebuilt_tasks(conn: sqlite3.Connection) -> None:
+    """Put tasks back when the old migration 7 left only its tasks_new copy.
+
+    Rows that break a tasks constraint make the migration fail and roll back rather than being dropped.
+    """
+    tables = _tables(conn)
+    if "tasks" in tables or "tasks_new" not in tables:
+        return
+    logger.warning("tasks is missing and tasks_new holds its rows (left by the old migration 7); restoring tasks")
+    conn.execute(RESTORED_TASKS_SQL)
+    columns = ", ".join(sorted(_columns(conn, "tasks") & _columns(conn, "tasks_new")))
+    conn.execute(f"INSERT INTO tasks ({columns}) SELECT {columns} FROM tasks_new")
+    conn.execute("DROP TABLE tasks_new")
+    for statement in RESTORED_TASK_OBJECTS_SQL:
+        conn.execute(statement)
+
+
 def consolidate_links(conn: sqlite3.Connection) -> None:
     """Make relationships the only link store.
 
     Works on every database state seen in the field: intact legacy tables, databases where the old
-    migration 7 dropped some legacy tables before failing, and databases where it completed. Links in
-    tables that were already dropped cannot be recovered; views and triggers are rebuilt regardless.
+    migration 7 dropped some legacy tables before failing, databases where it failed in the middle of
+    rebuilding tasks, and databases where it completed. Links in tables that were already dropped cannot
+    be recovered; tasks is restored from its copy, and views and triggers are rebuilt regardless.
     """
+    _restore_half_rebuilt_tasks(conn)
+
     # Old views and triggers reference legacy tables and tasks.parent_task_id; they would block the
     # column drop and break once the tables go, so remove them first.
     for view in LINK_VIEWS:

@@ -29,7 +29,7 @@ class StatusHandler(BaseHandler):
                 "name": "get_project_metrics",
                 "description": "Get structured project metrics for programmatic use",
                 "inputSchema": {"type": "object", "properties": {}},
-            }
+            },
         ]
 
     async def handle_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
@@ -250,25 +250,22 @@ class StatusHandler(BaseHandler):
                     "by_status": requirements_by_status,
                     "by_priority": requirements_by_priority,
                     "total": total_requirements,
-                    "completion_percentage": req_completion_pct
+                    "completion_percentage": req_completion_pct,
                 },
                 "tasks": {
                     "by_status": tasks_by_status,
                     "by_priority": tasks_by_priority,
                     "by_assignee": tasks_by_assignee,
                     "total": total_tasks,
-                    "completion_percentage": task_completion_pct
+                    "completion_percentage": task_completion_pct,
                 },
-                "architecture": {
-                    "by_status": architecture_by_status,
-                    "total": total_architecture
-                },
+                "architecture": {"by_status": architecture_by_status, "total": total_architecture},
                 "summary": {
                     "total_requirements": total_requirements,
                     "total_tasks": total_tasks,
                     "completed_requirements": completed_requirements,
-                    "completed_tasks": completed_tasks
-                }
+                    "completed_tasks": completed_tasks,
+                },
             }
 
             # Return as JSON string in text content

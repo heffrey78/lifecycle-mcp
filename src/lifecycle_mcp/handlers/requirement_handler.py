@@ -173,7 +173,7 @@ class RequirementHandler(BaseHandler):
     async def _analyze_requirement_with_llm(self, params: dict[str, Any]) -> dict[str, Any] | None:
         """Analyze requirement using LLM sampling for decomposition"""
         # Skip LLM analysis in test environments
-        if hasattr(self, '_testing_mode') and self._testing_mode:
+        if hasattr(self, "_testing_mode") and self._testing_mode:
             return None
 
         if not self.mcp_client:
@@ -630,10 +630,10 @@ Guidelines:
             requirements_list = []
             for req in requirements:
                 # Convert row object to dictionary and handle any special fields
-                req_dict = dict(req) if hasattr(req, 'keys') else req
+                req_dict = dict(req) if hasattr(req, "keys") else req
 
                 # Parse JSON fields if they exist as strings
-                json_fields = ['functional_requirements', 'acceptance_criteria', 'business_value']
+                json_fields = ["functional_requirements", "acceptance_criteria", "business_value"]
                 for field in json_fields:
                     if field in req_dict and isinstance(req_dict[field], str):
                         try:

@@ -29,15 +29,15 @@ class RelationshipHandler(BaseHandler):
                             "type": "string",
                             "enum": [
                                 "implements",  # task implements requirement
-                                "addresses",   # architecture addresses requirement
-                                "depends",     # entity depends on another
-                                "blocks",      # entity blocks another
-                                "informs",     # entity informs another
-                                "requires",    # entity requires another
-                                "parent",      # parent-child relationship
-                                "refines",     # refines another entity
-                                "conflicts",   # conflicts with another entity
-                                "relates",     # generic relationship
+                                "addresses",  # architecture addresses requirement
+                                "depends",  # entity depends on another
+                                "blocks",  # entity blocks another
+                                "informs",  # entity informs another
+                                "requires",  # entity requires another
+                                "parent",  # parent-child relationship
+                                "refines",  # refines another entity
+                                "conflicts",  # conflicts with another entity
+                                "relates",  # generic relationship
                             ],
                         },
                     },
@@ -135,15 +135,11 @@ class RelationshipHandler(BaseHandler):
 
         # Validate relationship makes sense
         if not self._validate_relationship(source_type, target_type, rel_type):
-            return self._create_error_response(
-                f"Invalid relationship: {source_type} -> {target_type} ({rel_type})"
-            )
+            return self._create_error_response(f"Invalid relationship: {source_type} -> {target_type} ({rel_type})")
 
         # Check if relationship already exists
         if self._relationship_exists(source_id, target_id, rel_type):
-            return self._create_error_response(
-                f"Relationship already exists: {source_id} -> {target_id} ({rel_type})"
-            )
+            return self._create_error_response(f"Relationship already exists: {source_id} -> {target_id} ({rel_type})")
 
         # Create the relationship in appropriate table
         success = self._insert_relationship(source_id, target_id, source_type, target_type, rel_type)
@@ -189,9 +185,7 @@ class RelationshipHandler(BaseHandler):
                 f"Deleted {deleted_count} relationship(s): {source_id} -> {target_id}",
             )
         else:
-            return self._create_error_response(
-                f"No relationship found between {source_id} and {target_id}"
-            )
+            return self._create_error_response(f"No relationship found between {source_id} and {target_id}")
 
     async def _query_relationships(self, args: dict[str, Any]) -> list[TextContent]:
         """Query relationships for a specific entity or type"""
@@ -299,32 +293,39 @@ class RelationshipHandler(BaseHandler):
             "relationships",
             "1",
             "source_type = ? AND source_id = ? AND target_type = ? AND target_id = ? AND relationship_type = ?",
-            [source_type, source_id, target_type, target_id, rel_type]
+            [source_type, source_id, target_type, target_id, rel_type],
         )
         return len(results) > 0
 
-    def _insert_relationship(self, source_id: str, target_id: str, source_type: str, target_type: str, rel_type: str) -> bool:
+    def _insert_relationship(
+        self, source_id: str, target_id: str, source_type: str, target_type: str, rel_type: str
+    ) -> bool:
         """Insert relationship into unified relationships table"""
         try:
             # Generate unique relationship ID
             relationship_id = f"rel-{source_id}-{target_id}-{rel_type}"
 
             # Insert into unified relationships table
-            self.db.insert_record("relationships", {
-                "id": relationship_id,
-                "source_type": source_type,
-                "source_id": source_id,
-                "target_type": target_type,
-                "target_id": target_id,
-                "relationship_type": rel_type
-            })
+            self.db.insert_record(
+                "relationships",
+                {
+                    "id": relationship_id,
+                    "source_type": source_type,
+                    "source_id": source_id,
+                    "target_type": target_type,
+                    "target_id": target_id,
+                    "relationship_type": rel_type,
+                },
+            )
 
             return True
         except Exception as e:
             self.logger.error(f"Failed to insert relationship: {str(e)}")
             return False
 
-    def _delete_relationship_record(self, source_id: str, target_id: str, source_type: str, target_type: str, rel_type: str | None = None) -> int:
+    def _delete_relationship_record(
+        self, source_id: str, target_id: str, source_type: str, target_type: str, rel_type: str | None = None
+    ) -> int:
         """Delete relationship record from unified relationships table and return count of deleted records"""
         try:
             if not source_type or not target_type:
@@ -332,7 +333,9 @@ class RelationshipHandler(BaseHandler):
 
             # Build WHERE clause for unified relationships table
             if rel_type:
-                where_clause = "source_type = ? AND source_id = ? AND target_type = ? AND target_id = ? AND relationship_type = ?"
+                where_clause = (
+                    "source_type = ? AND source_id = ? AND target_type = ? AND target_id = ? AND relationship_type = ?"
+                )
                 params = [source_type, source_id, target_type, target_id, rel_type]
             else:
                 where_clause = "source_type = ? AND source_id = ? AND target_type = ? AND target_id = ?"
@@ -395,13 +398,15 @@ class RelationshipHandler(BaseHandler):
                 if target_rows:
                     target_title = target_rows[0]["title"]
 
-            relationships.append({
-                "source_id": source_id,
-                "target_id": target_id,
-                "type": row["relationship_type"],
-                "source_title": source_title,
-                "target_title": target_title
-            })
+            relationships.append(
+                {
+                    "source_id": source_id,
+                    "target_id": target_id,
+                    "type": row["relationship_type"],
+                    "source_title": source_title,
+                    "target_title": target_title,
+                }
+            )
 
         return relationships
 
@@ -416,7 +421,9 @@ class RelationshipHandler(BaseHandler):
             target_title = rel.get("target_title", rel["target_id"])
             rel_type = rel["type"]
 
-            lines.append(f"- **{source_title}** ({rel['source_id']}) → **{target_title}** ({rel['target_id']}) [{rel_type}]")
+            lines.append(
+                f"- **{source_title}** ({rel['source_id']}) → **{target_title}** ({rel['target_id']}) [{rel_type}]"
+            )
 
         return "\n".join(lines)
 
@@ -457,12 +464,14 @@ class RelationshipHandler(BaseHandler):
         # Simplify relationships for JSON output
         simplified = []
         for rel in relationships:
-            simplified.append({
-                "source": rel["source_id"],
-                "target": rel["target_id"],
-                "type": rel["type"],
-                "source_title": rel.get("source_title", ""),
-                "target_title": rel.get("target_title", "")
-            })
+            simplified.append(
+                {
+                    "source": rel["source_id"],
+                    "target": rel["target_id"],
+                    "type": rel["type"],
+                    "source_title": rel.get("source_title", ""),
+                    "target_title": rel.get("target_title", ""),
+                }
+            )
 
         return f"```json\n{json.dumps(simplified, indent=2)}\n```"

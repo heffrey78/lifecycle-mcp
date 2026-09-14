@@ -20,7 +20,6 @@ LINK_VIEWS = (
     "task_hierarchy",
     "blocked_items",
     "requirement_hierarchy",
-    "decomposition_candidates",
 )
 
 
@@ -198,6 +197,70 @@ def test_failed_migration_rolls_back_and_stops_startup(tmp_path, monkeypatch):
         DatabaseManager(db)
     assert schema_version(db) == LATEST
     assert "should_not_survive" not in names(db, "table")
+
+
+# --- edit tracking and decomposition clean-up (roadmap R6a / R6b) --------------------------------
+
+EVENT_COLUMNS = "id, entity_type, entity_id, event_type, from_value, to_value, actor, occurred_at"
+
+
+def test_edit_tracking_adds_revisions_and_event_fields_without_touching_existing_events(tmp_path):
+    db = database_at(tmp_path / "events.db", version=8)
+    with sqlite3.connect(db) as conn:
+        conn.executescript(SEED)
+        conn.execute(
+            "INSERT INTO lifecycle_events (entity_type, entity_id, event_type, from_value, to_value, actor) "
+            "VALUES ('requirement', 'REQ-0001-FUNC-00', 'status_change', 'Draft', 'Approved', 'tests')"
+        )
+        before = conn.execute(f"SELECT {EVENT_COLUMNS} FROM lifecycle_events ORDER BY id").fetchall()
+
+    assert apply_all_migrations(db) == LATEST
+
+    with sqlite3.connect(db) as conn:
+        for table in ("requirements", "tasks", "architecture"):
+            assert conn.execute(f"SELECT DISTINCT revision FROM {table}").fetchall() == [(0,)]
+        assert {"field", "reason"} <= {row[1] for row in conn.execute("PRAGMA table_info(lifecycle_events)")}
+        assert conn.execute(f"SELECT {EVENT_COLUMNS} FROM lifecycle_events ORDER BY id").fetchall() == before
+
+
+def test_decomposition_objects_are_gone_but_hierarchy_and_cycle_check_remain(tmp_path):
+    db = str(tmp_path / "decomposition.db")
+    DatabaseManager(db).close()
+
+    assert "decomposition_candidates" not in names(db, "view")
+    assert not {"validate_decomposition_level", "set_decomposition_level"} & names(db, "trigger")
+    assert "prevent_circular_dependencies" in names(db, "trigger")
+
+    with sqlite3.connect(db) as conn:
+        view_columns = {column[0] for column in conn.execute("SELECT * FROM requirement_hierarchy").description}
+        assert not {"decomposition_level", "complexity_score", "scope_assessment"} & view_columns
+
+        conn.executescript(
+            SEED
+            + """
+            INSERT INTO requirements (id, requirement_number, type, title, priority, author, status) VALUES
+                ('REQ-0003-FUNC-00', 3, 'FUNC', 'Level 2', 'P1', 'tests', 'Draft'),
+                ('REQ-0004-FUNC-00', 4, 'FUNC', 'Level 3', 'P1', 'tests', 'Draft'),
+                ('REQ-0005-FUNC-00', 5, 'FUNC', 'Level 4', 'P1', 'tests', 'Draft');
+        """
+        )
+        chain = ["REQ-0001-FUNC-00", "REQ-0002-FUNC-00", "REQ-0003-FUNC-00", "REQ-0004-FUNC-00", "REQ-0005-FUNC-00"]
+        # The old depth trigger refused a parent at level 3; a four-level chain is now allowed.
+        for parent, child in zip(chain, chain[1:], strict=False):
+            conn.execute(
+                "INSERT INTO relationships (id, source_type, source_id, target_type, target_id, relationship_type) "
+                "VALUES (?, 'requirement', ?, 'requirement', ?, 'parent')",
+                (f"rel-{child}-{parent}-parent", child, parent),
+            )
+        assert conn.execute(
+            "SELECT hierarchy_level, root_requirement_id FROM requirement_hierarchy WHERE id = 'REQ-0005-FUNC-00'"
+        ).fetchone() == (4, "REQ-0001-FUNC-00")
+
+        with pytest.raises(sqlite3.DatabaseError, match="Circular dependency"):
+            conn.execute(
+                "INSERT INTO relationships (id, source_type, source_id, target_type, target_id, relationship_type) "
+                "VALUES ('rel-cycle', 'requirement', 'REQ-0001-FUNC-00', 'requirement', 'REQ-0005-FUNC-00', 'parent')"
+            )
 
 
 # --- through the MCP layer: links survive a restart ------------------------------------------------

@@ -9,7 +9,18 @@ from typing import Any
 
 from mcp.types import TextContent
 
-from .base_handler import BaseHandler
+from .base_handler import BaseHandler, DeleteRefused
+
+# Records that depend on an architecture decision and therefore block deleting it. The requirement links it
+# addresses belong to the decision itself and are removed with it.
+ARCHITECTURE_DELETE_BLOCKERS = [
+    ("decisions superseded by it", "SELECT id FROM architecture WHERE superseded_by = ?"),
+    (
+        "other links",
+        "SELECT source_id FROM relationships WHERE target_type = 'architecture' AND target_id = ? "
+        "AND relationship_type != 'addresses'",
+    ),
+]
 
 
 class ArchitectureHandler(BaseHandler):
@@ -115,6 +126,18 @@ class ArchitectureHandler(BaseHandler):
                     "required": ["architecture_id", "comment"],
                 },
             },
+            {
+                "name": "delete_architecture",
+                "description": (
+                    "Delete a Proposed architecture decision created by mistake. Refused when another decision "
+                    "is superseded by it or other records link to it; reject or supersede anything else instead."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"architecture_id": {"type": "string"}},
+                    "required": ["architecture_id"],
+                },
+            },
         ]
 
     async def handle_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
@@ -132,10 +155,32 @@ class ArchitectureHandler(BaseHandler):
                 return self._get_architecture_details(**arguments)
             elif tool_name == "add_architecture_review":
                 return self._add_architecture_review(**arguments)
+            elif tool_name == "delete_architecture":
+                return self._delete_architecture(**arguments)
             else:
                 return self._create_error_response(f"Unknown tool: {tool_name}")
         except Exception as e:
             return self._create_error_response(f"Error handling {tool_name}", e)
+
+    def _delete_architecture(self, **params) -> list[TextContent]:
+        """Delete a Proposed architecture decision that nothing depends on"""
+        error = self._validate_required_params(params, ["architecture_id"])
+        if error:
+            return self._create_error_response(error)
+        architecture_id = params["architecture_id"]
+        try:
+            removed = self._delete_entity(
+                "architecture",
+                "architecture",
+                architecture_id,
+                deletable_status="Proposed",
+                blockers=ARCHITECTURE_DELETE_BLOCKERS,
+            )
+        except (LookupError, DeleteRefused) as e:
+            return self._create_error_response(str(e))
+        return self._create_above_fold_response(
+            "SUCCESS", f"Architecture decision {architecture_id} deleted", f"🗑️ Removed {removed} link(s) it owned"
+        )
 
     async def _create_architecture_decision(self, **params) -> list[TextContent]:
         """Create ADR"""
@@ -173,6 +218,7 @@ class ArchitectureHandler(BaseHandler):
 
             # Insert ADR
             self.db.insert_record("architecture", arch_data)
+            self._log_operation("architecture", adr_id, "created", ", ".join(params.get("authors") or ["MCP User"]))
 
             # Link to requirements
             for req_id in params["requirement_ids"]:

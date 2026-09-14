@@ -10,6 +10,8 @@ from mcp.types import TextContent
 
 from .base_handler import BaseHandler
 
+ENTITY_TABLES = {"requirement": "requirements", "task": "tasks", "architecture": "architecture"}
+
 
 class RelationshipHandler(BaseHandler):
     """Handler for entity relationship operations"""
@@ -95,6 +97,18 @@ class RelationshipHandler(BaseHandler):
                     },
                 },
             },
+            {
+                "name": "get_entity_history",
+                "description": (
+                    "Show how a requirement, task or architecture decision changed over time: creation, field "
+                    "edits with before and after values and reasons, status changes, comments and deletion"
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"entity_id": {"type": "string"}},
+                    "required": ["entity_id"],
+                },
+            },
         ]
 
     async def handle_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
@@ -110,11 +124,70 @@ class RelationshipHandler(BaseHandler):
                 return await self._get_entity_relationships(arguments)
             elif tool_name == "query_all_relationships":
                 return await self._query_all_relationships(arguments)
+            elif tool_name == "get_entity_history":
+                return self._get_entity_history(arguments)
             else:
                 return self._create_error_response(f"Unknown tool: {tool_name}")
 
         except Exception as e:
             return self._create_error_response(f"Error in {tool_name}", e)
+
+    def _get_entity_history(self, args: dict[str, Any]) -> list[TextContent]:
+        """Creation, field edits, status changes, comments and deletion for one record, oldest first"""
+        error = self._validate_required_params(args, ["entity_id"])
+        if error:
+            return self._create_error_response(error)
+        entity_id = args["entity_id"]
+        entity_type = self._get_entity_type(entity_id)
+        if not entity_type:
+            return self._create_error_response(f"Invalid entity ID: {entity_id}")
+
+        events = self.db.execute_query(
+            "SELECT occurred_at, id, event_type, field, from_value, to_value, actor, reason FROM lifecycle_events "
+            "WHERE entity_type = ? AND entity_id = ?",
+            [entity_type, entity_id],
+            fetch_all=True,
+            row_factory=True,
+        )
+        comments = self.db.execute_query(
+            "SELECT created_at, id, reviewer, comment FROM reviews WHERE entity_type = ? AND entity_id = ?",
+            [entity_type, entity_id],
+            fetch_all=True,
+            row_factory=True,
+        )
+        exists = self.db.check_exists(ENTITY_TABLES[entity_type], "id = ?", [entity_id])
+        if not events and not comments and not exists:
+            return self._create_error_response(f"No record or history found for {entity_id}")
+
+        # Timestamps have one-second resolution; within a second, events are listed before comments.
+        entries = [(row["occurred_at"], 0, row["id"], self._describe_event(row)) for row in events]
+        entries += [
+            (row["created_at"], 1, row["id"], f"comment by {row['reviewer']}: {self._clip(row['comment'])}")
+            for row in comments
+        ]
+        entries.sort()
+
+        details = f"# History for {entity_id}\n\n" + "\n".join(f"- {when} {text}" for when, _, _, text in entries)
+        state = "" if exists else " | record deleted"
+        return self._create_above_fold_response(
+            "INFO", f"History for {entity_id}", f"🕘 {len(entries)} entries{state}", details
+        )
+
+    @staticmethod
+    def _clip(value: Any, limit: int = 160) -> str:
+        if value is None or value == "":
+            return "(empty)"
+        text = str(value)
+        return text if len(text) <= limit else text[: limit - 1] + "…"
+
+    def _describe_event(self, row) -> str:
+        by = f" by {row['actor']}" if row["actor"] else ""
+        if row["event_type"] == "field_edit":
+            text = f"edited {row['field']}{by}: {self._clip(row['from_value'])} → {self._clip(row['to_value'])}"
+            return text + (f" (reason: {self._clip(row['reason'])})" if row["reason"] else "")
+        if row["event_type"] == "status_change":
+            return f"status {row['from_value']} → {row['to_value']}{by}"
+        return f"{row['event_type']}{by}"
 
     async def _create_relationship(self, args: dict[str, Any]) -> list[TextContent]:
         """Create a relationship between two entities"""

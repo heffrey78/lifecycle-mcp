@@ -263,6 +263,31 @@ def test_decomposition_objects_are_gone_but_hierarchy_and_cycle_check_remain(tmp
             )
 
 
+def test_dead_columns_are_dropped_and_live_data_and_constraints_survive(tmp_path):
+    db = database_at(tmp_path / "dead-columns.db", version=10)
+    with sqlite3.connect(db) as conn:
+        conn.executescript(SEED)
+        conn.execute(
+            "UPDATE requirements SET business_value = 'kept', gap_analysis = 'dropped' WHERE id = 'REQ-0001-FUNC-00'"
+        )
+
+    assert apply_all_migrations(db) == LATEST
+
+    assert "idx_requirements_decomposition" not in names(db, "index")
+    with sqlite3.connect(db) as conn:
+        for table, dead in migrations.DEAD_COLUMNS.items():
+            remaining = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            assert not set(dead) & remaining, table
+        assert conn.execute("SELECT business_value FROM requirements WHERE id = 'REQ-0001-FUNC-00'").fetchone() == (
+            "kept",
+        )
+        assert conn.execute("SELECT COUNT(*) FROM requirements").fetchone() == (2,)
+        for view in LINK_VIEWS:
+            conn.execute(f"SELECT * FROM {view}").fetchall()
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE requirements SET priority = 'P9' WHERE id = 'REQ-0001-FUNC-00'")
+
+
 # --- through the MCP layer: links survive a restart ------------------------------------------------
 
 

@@ -7,6 +7,8 @@ Provides common functionality for all domain handlers
 import json
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
 from mcp.types import TextContent
@@ -18,6 +20,27 @@ logger = logging.getLogger(__name__)
 
 class ErrorResult(list):
     """Content for a failed tool call. The server reports it to the client with isError=true."""
+
+
+class RevisionConflict(Exception):
+    """An edit named an if_revision that is no longer current; nothing was written."""
+
+    def __init__(self, entity_id: str, current: int, expected: int):
+        super().__init__(f"{entity_id} is at revision {current}, not {expected}. Reload it and retry.")
+        self.current = current
+
+
+class DeleteRefused(Exception):
+    """A delete was refused because the record is past its early stage or other records depend on it."""
+
+
+@dataclass
+class EditResult:
+    """Outcome of BaseHandler._apply_edit."""
+
+    changed: list[str]  # fields whose stored value changed, in the order given
+    revision: int  # the record's revision after the edit
+    before: dict[str, Any]  # the record as it was before the edit
 
 
 class BaseHandler(ABC):
@@ -131,6 +154,123 @@ class BaseHandler(ABC):
                 relationship_type,
             ],
         )
+
+    def _apply_edit(
+        self,
+        table: str,
+        entity_type: str,
+        entity_id: str,
+        changes: dict[str, Any],
+        *,
+        editable: Iterable[str],
+        json_fields: Iterable[str] = (),
+        actor: str = "MCP User",
+        reason: str | None = None,
+        if_revision: int | None = None,
+    ) -> EditResult:
+        """Apply content edits to one record atomically; every update tool goes through here.
+
+        In one transaction: checks if_revision, writes only fields whose value actually changes, bumps
+        revision once, and logs one lifecycle_events row per changed field with before and after values,
+        actor and reason. JSON fields are compared by value, not by their stored text.
+
+        Raises ValueError for a field that isn't editable, LookupError when the record doesn't exist and
+        RevisionConflict when if_revision is stale. Nothing is written in any of those cases, nor when a
+        constraint rejects one of the new values.
+        """
+        editable, json_fields = set(editable), set(json_fields)
+        not_editable = set(changes) - editable
+        if not_editable:
+            raise ValueError(f"Not editable: {', '.join(sorted(not_editable))}")
+
+        with self.db.transaction(row_factory=True) as cur:
+            row = cur.execute(f"SELECT * FROM {table} WHERE id = ?", [entity_id]).fetchone()
+            if row is None:
+                raise LookupError(f"{entity_type.capitalize()} {entity_id} not found")
+            before = dict(row)
+            if if_revision is not None and before["revision"] != if_revision:
+                raise RevisionConflict(entity_id, before["revision"], if_revision)
+
+            updates: dict[str, Any] = {}
+            for name, value in changes.items():
+                stored = json.dumps(value) if name in json_fields else value
+                if name in json_fields and before[name] is not None:
+                    try:
+                        unchanged = json.loads(before[name]) == value
+                    except (TypeError, ValueError):
+                        unchanged = False
+                else:
+                    unchanged = before[name] == stored
+                if not unchanged:
+                    updates[name] = stored
+
+            if not updates:
+                return EditResult([], before["revision"], before)
+
+            assignments = ", ".join(f"{name} = ?" for name in updates)
+            cur.execute(
+                f"UPDATE {table} SET {assignments}, revision = revision + 1, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND revision = ?",
+                [*updates.values(), entity_id, before["revision"]],
+            )
+            if cur.rowcount != 1:  # another writer bumped the revision since we read the row
+                current = cur.execute(f"SELECT revision FROM {table} WHERE id = ?", [entity_id]).fetchone()[0]
+                raise RevisionConflict(entity_id, current, before["revision"])
+            for name, stored in updates.items():
+                cur.execute(
+                    "INSERT INTO lifecycle_events "
+                    "(entity_type, entity_id, event_type, field, from_value, to_value, actor, reason) "
+                    "VALUES (?, ?, 'field_edit', ?, ?, ?, ?, ?)",
+                    [entity_type, entity_id, name, before[name], stored, actor, reason],
+                )
+            return EditResult(list(updates), before["revision"] + 1, before)
+
+    def _delete_entity(
+        self,
+        table: str,
+        entity_type: str,
+        entity_id: str,
+        *,
+        deletable_status: str,
+        blockers: list[tuple[str, str]],
+        actor: str = "MCP User",
+    ) -> int:
+        """Delete an early-stage record together with the links it owns; returns how many links went with it.
+
+        blockers are (label, SQL) pairs; each query receives entity_id for every `?` and returns the IDs of
+        records that depend on this one. Raises LookupError when the record doesn't exist and DeleteRefused
+        when it is past deletable_status or anything depends on it; nothing is written in either case.
+        The deletion is logged so get_entity_history still explains what happened.
+        """
+        noun = entity_type.capitalize()
+        with self.db.transaction(row_factory=True) as cur:
+            row = cur.execute(f"SELECT status FROM {table} WHERE id = ?", [entity_id]).fetchone()
+            if row is None:
+                raise LookupError(f"{noun} {entity_id} not found")
+            if row["status"] != deletable_status:
+                raise DeleteRefused(
+                    f"{noun} {entity_id} is {row['status']}; only {deletable_status} records can be deleted. "
+                    "Change its status instead (for example to Deprecated or Abandoned)."
+                )
+            dependents = []
+            for label, sql in blockers:
+                ids = [found[0] for found in cur.execute(sql, [entity_id] * sql.count("?")).fetchall()]
+                if ids:
+                    dependents.append(f"{label}: {', '.join(ids)}")
+            if dependents:
+                raise DeleteRefused(
+                    f"{noun} {entity_id} cannot be deleted because other records depend on it "
+                    f"({'; '.join(dependents)})."
+                )
+            removed = cur.execute(
+                "DELETE FROM relationships WHERE source_id = ? OR target_id = ?", [entity_id, entity_id]
+            ).rowcount
+            cur.execute(f"DELETE FROM {table} WHERE id = ?", [entity_id])
+            cur.execute(
+                "INSERT INTO lifecycle_events (entity_type, entity_id, event_type, actor) VALUES (?, ?, 'deleted', ?)",
+                [entity_type, entity_id, actor],
+            )
+        return removed
 
     def _log_operation(self, entity_type: str, entity_id: str, event_type: str, actor: str = "MCP User"):
         """Log lifecycle events"""

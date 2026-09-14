@@ -10,6 +10,7 @@ A Model Context Protocol (MCP) server for comprehensive software lifecycle manag
 - **Project Dashboards**: Real-time project health metrics and status reporting
 - **Requirement Tracing**: Complete traceability from requirements through implementation
 - **State Validation**: Automatic validation of lifecycle state transitions
+- **Safe Editing and History**: Edit records in place with per-field history, reasons for approved requirements and revision checks; delete records created by mistake
 - **Relationship Tracking**: Many-to-many relationships between requirements, tasks, and architecture
 
 ## Quick Start
@@ -137,32 +138,77 @@ claude mcp add lifecycle /path/to/venv/bin/lifecycle-mcp -e LIFECYCLE_DB=./lifec
 
 ## MCP Tools Reference
 
-The server exposes 22 MCP tools across 6 handler modules for comprehensive lifecycle management:
+The server exposes 39 MCP tools across 7 handler modules for comprehensive lifecycle management. Every tool rejects fields it does not declare, and the error names the field.
 
 ### Tool List
+**Requirements**
 - `create_requirement` - Create new requirements from interview data
+- `update_requirement` - Edit a requirement's content (a reason is required at Approved or later)
 - `update_requirement_status` - Move requirements through lifecycle states
+- `delete_requirement` - Delete a Draft requirement created by mistake
 - `query_requirements` - Search and filter requirements
+- `query_requirements_json` - Query requirements as structured JSON
 - `get_requirement_details` - Get full requirement with relationships
 - `trace_requirement` - Trace requirement through implementation
+
+**Tasks**
 - `create_task` - Create implementation tasks from requirements
+- `update_task` - Edit a task's content, move it to another parent or change its requirements
 - `update_task_status` - Update task progress
+- `delete_task` - Delete a Not Started task created by mistake
 - `query_tasks` - Search and filter tasks
+- `query_tasks_json` - Query tasks as structured JSON
 - `get_task_details` - Get full task details with dependencies
 - `sync_task_from_github` - Sync individual task from GitHub issue changes
 - `bulk_sync_github_tasks` - Sync all tasks with their GitHub issues
+
+**Architecture decisions**
 - `create_architecture_decision` - Record architecture decisions (ADRs)
+- `update_architecture` - Edit a Proposed architecture decision
 - `update_architecture_status` - Update architecture decision status
+- `delete_architecture` - Delete a Proposed architecture decision created by mistake
 - `query_architecture_decisions` - Search and filter architecture decisions
+- `query_architecture_decisions_json` - Query architecture decisions as structured JSON
 - `get_architecture_details` - Get full architecture decision details
 - `add_architecture_review` - Add review comments to architecture decisions
+
+**Relationships and history**
+- `create_relationship` - Link two records (dependencies, refinements, blocks and more)
+- `delete_relationship` - Remove a link between two records
+- `query_relationships` - Query links for visualization
+- `get_entity_relationships` - Get all links for one record
+- `query_all_relationships` - Get every link for building a graph
+- `get_entity_history` - Show how a record changed: creation, edits with before and after values, status changes, comments and deletion
+
+**Status, interviews and export**
 - `get_project_status` - Get project health metrics and dashboards
+- `get_project_metrics` - Get structured project metrics for programmatic use
 - `start_requirement_interview` - Start interactive requirement gathering
 - `continue_requirement_interview` - Continue requirement interview sessions
 - `start_architectural_conversation` - Start interactive architecture discussions
 - `continue_architectural_conversation` - Continue architecture conversations
 - `export_project_documentation` - Export comprehensive markdown documentation
 - `create_architectural_diagrams` - Generate Mermaid diagrams for project visualization
+
+### Editing, Deleting and History
+
+These rules apply to `update_requirement`, `update_task`, `update_architecture` and the delete tools:
+
+- **Edits happen in place.** Update tools change content only; status moves stay with the `update_*_status` tools, and record IDs never change.
+- **Every change is recorded.** Each changed field is logged with its before and after values, the actor and the reason. `get_entity_history` shows the log.
+- **Revisions guard against lost updates.** Each record has a revision, shown in its details, that goes up by one with every update that changes something. Pass `if_revision` to have the update refused, with nothing written, when the record has changed since you read it.
+- **Approved requirements need a reason.** Editing a requirement at Approved or later requires `reason`. The requirement then shows as *Changed Since Last Review* in `get_requirement_details`, `trace_requirement` and `get_project_status`, listing the edited fields.
+- **The next status change is the acknowledgement.** There is no separate acknowledgement step: the requirement's next status transition clears the flag, and that transition's comment records the review.
+- **Decided architecture is not rewritten.** Architecture decisions can be edited only while Proposed. To change a decided one, record a new decision with `create_architecture_decision` and move the old one to Superseded.
+- **Deleting is for mistakes.** Only Draft requirements, Not Started tasks and Proposed architecture decisions can be deleted, and only when nothing depends on them. Refusals name the blocking records. A deleted record's own links go with it, and its history remains.
+
+#### `get_entity_history`
+Show how a requirement, task or architecture decision changed over time, oldest first.
+
+**Parameters:**
+- `entity_id` (required): Requirement, task or architecture decision ID
+
+**Returns:** Creation, field edits with before and after values and reasons, status changes, comments and deletion. Still available after the record is deleted.
 
 ### Requirement Management
 
@@ -238,6 +284,34 @@ Trace a requirement through its complete implementation lifecycle.
 
 **Returns:** Complete trace including requirement details, implementation tasks, and architecture decisions.
 
+#### `update_requirement`
+Edit a requirement's content in place. See [Editing, Deleting and History](#editing-deleting-and-history) for the rules.
+
+**Parameters:**
+- `requirement_id` (required): Requirement ID
+- `title`, `priority`, `risk_level`, `current_state`, `desired_state`, `functional_requirements`, `acceptance_criteria`, `business_value` (at least one): New values, with the same types as in `create_requirement`
+- `reason` (required at Approved or later): Why the change is made
+- `actor` (optional): Who makes the change (default: MCP User)
+- `if_revision` (optional): Refuse the edit unless the requirement is still at this revision
+
+**Example:**
+```json
+{
+  "requirement_id": "REQ-0001-FUNC-00",
+  "acceptance_criteria": ["User can login successfully", "Token expires after 1 hour"],
+  "reason": "Security review shortened token lifetime",
+  "if_revision": 2
+}
+```
+
+#### `delete_requirement`
+Delete a Draft requirement created by mistake.
+
+**Parameters:**
+- `requirement_id` (required): Requirement ID
+
+Refused when the requirement is past Draft (move it to Deprecated instead) or when tasks, architecture decisions or other requirements link to it.
+
 ### Task Management
 
 #### `create_task`
@@ -307,6 +381,26 @@ Sync all tasks with their GitHub issues in batch operation.
 
 **Returns:** Summary of sync operations performed across all tasks with GitHub issue links.
 
+#### `update_task`
+Edit a task's content, move it under another parent or change the requirements it implements. The task ID never changes.
+
+**Parameters:**
+- `task_id` (required): Task ID
+- `title`, `priority`, `effort`, `user_story`, `acceptance_criteria`, `assignee` (optional): New values, with the same types as in `create_task`
+- `parent_task_id` (optional): New parent task; an empty string makes it a top-level task. A task cannot become its own parent or move under one of its subtasks
+- `requirement_ids` (optional): Replaces the requirements the task implements; requirements being added must be approved, as in `create_task`
+- `reason`, `actor`, `if_revision` (optional): As in `update_requirement`
+
+Pass at least one field to change. Changes are not pushed to a linked GitHub issue.
+
+#### `delete_task`
+Delete a Not Started task created by mistake.
+
+**Parameters:**
+- `task_id` (required): Task ID
+
+Refused when the task has started (mark it Abandoned instead), has subtasks, has tasks depending on it or is linked to a GitHub issue.
+
 ### Architecture Management
 
 #### `create_architecture_decision`
@@ -370,6 +464,22 @@ Add review comments to architecture decisions.
 - `architecture_id` (required): Architecture ID
 - `comment` (required): Review comment
 - `reviewer` (optional): Reviewer name (default: "MCP User")
+
+#### `update_architecture`
+Edit an architecture decision's content while it is Proposed. Decisions in any other status are refused: record a new decision with `create_architecture_decision` and move the old one to Superseded.
+
+**Parameters:**
+- `architecture_id` (required): Architecture ID
+- `title`, `context`, `decision`, `consequences`, `decision_drivers`, `considered_options`, `authors` (at least one): New values, with the same types as in `create_architecture_decision`
+- `reason`, `actor`, `if_revision` (optional): As in `update_requirement`
+
+#### `delete_architecture`
+Delete a Proposed architecture decision created by mistake.
+
+**Parameters:**
+- `architecture_id` (required): Architecture ID
+
+Refused when the decision is past Proposed (reject or supersede it instead), when another decision is superseded by it or when records other than its own requirement links point to it.
 
 ### Project Monitoring
 

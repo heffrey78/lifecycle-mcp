@@ -10,7 +10,10 @@ from typing import Any
 
 from mcp.types import TextContent
 
+from .architecture_handler import ARCHITECTURE_LIST_SECTIONS
 from .base_handler import BaseHandler
+from .requirement_handler import REQUIREMENT_LIST_SECTIONS
+from .task_handler import TASK_LIST_SECTIONS
 
 # Task-to-task dependency edges as (task_id depends on depends_on_task_id). "blocks" links point
 # blocker -> blocked, every other dependency kind points dependent -> dependency.
@@ -191,6 +194,8 @@ class ExportHandler(BaseHandler):
                             content += f"- {ac}\n"
                         content += "\n"
 
+                content += self._format_sections(req, REQUIREMENT_LIST_SECTIONS, "**{title}**:\n{body}\n")
+
                 content += "---\n\n"
 
         with open(filepath, "w", encoding="utf-8") as f:
@@ -240,6 +245,8 @@ class ExportHandler(BaseHandler):
                         for ac in acc_criteria:
                             content += f"- {ac}\n"
                         content += "\n"
+
+                content += self._format_sections(task, TASK_LIST_SECTIONS, "**{title}**:\n{body}\n")
 
                 # Get linked requirements
                 linked_reqs = self.db.execute_query(
@@ -292,6 +299,10 @@ class ExportHandler(BaseHandler):
                 if authors:
                     content += f"- **Authors**: {', '.join(authors)}\n\n"
 
+            deciders = self._safe_json_loads(arch["deciders"])
+            if deciders:
+                content += f"- **Deciders**: {', '.join(deciders)}\n\n"
+
             content += f"### Context\n{arch['context']}\n\n"
             content += f"### Decision\n{arch['decision_outcome']}\n\n"
 
@@ -321,6 +332,10 @@ class ExportHandler(BaseHandler):
                     else:
                         content += f"{consequences}\n"
                     content += "\n"
+
+            if arch["implementation_notes"]:
+                content += f"### Implementation Notes\n{arch['implementation_notes']}\n\n"
+            content += self._format_sections(arch, ARCHITECTURE_LIST_SECTIONS, "### {title}\n{body}\n")
 
             # Get linked requirements
             linked_reqs = self.db.execute_query(

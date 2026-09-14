@@ -226,6 +226,11 @@ Create new requirements from interview data or analysis.
 - `business_value` (optional): Business justification
 - `risk_level` (optional): Risk assessment - "High", "Medium", "Low"
 - `author` (optional): Requirement author
+- `nonfunctional_requirements` (optional): Array of non-functional requirements (performance, security, ...)
+- `technical_constraints` (optional): Array of technical constraints
+- `business_rules` (optional): Array of business rules
+- `validation_metrics` (optional): Array of metrics that show the requirement is met
+- `out_of_scope` (optional): Array of things explicitly not covered
 
 **Example:**
 ```json
@@ -289,7 +294,7 @@ Edit a requirement's content in place. See [Editing, Deleting and History](#edit
 
 **Parameters:**
 - `requirement_id` (required): Requirement ID
-- `title`, `priority`, `risk_level`, `current_state`, `desired_state`, `functional_requirements`, `acceptance_criteria`, `business_value` (at least one): New values, with the same types as in `create_requirement`
+- `title`, `priority`, `risk_level`, `current_state`, `desired_state`, `functional_requirements`, `acceptance_criteria`, `business_value`, `nonfunctional_requirements`, `technical_constraints`, `business_rules`, `validation_metrics`, `out_of_scope` (at least one): New values, with the same types as in `create_requirement`
 - `reason` (required at Approved or later): Why the change is made
 - `actor` (optional): Who makes the change (default: MCP User)
 - `if_revision` (optional): Refuse the edit unless the requirement is still at this revision
@@ -326,6 +331,9 @@ Create implementation tasks linked to requirements.
 - `acceptance_criteria` (optional): Array of acceptance criteria
 - `parent_task_id` (optional): Parent task for subtasks
 - `assignee` (optional): Task assignee
+- `implementation_plan` (optional): Array of implementation steps
+- `test_plan` (optional): Array of tests or checks to run
+- `definition_of_done` (optional): Array of conditions for calling the task done
 
 **Example:**
 ```json
@@ -386,7 +394,7 @@ Edit a task's content, move it under another parent or change the requirements i
 
 **Parameters:**
 - `task_id` (required): Task ID
-- `title`, `priority`, `effort`, `user_story`, `acceptance_criteria`, `assignee` (optional): New values, with the same types as in `create_task`
+- `title`, `priority`, `effort`, `user_story`, `acceptance_criteria`, `assignee`, `implementation_plan`, `test_plan`, `definition_of_done` (optional): New values, with the same types as in `create_task`
 - `parent_task_id` (optional): New parent task; an empty string makes it a top-level task. A task cannot become its own parent or move under one of its subtasks
 - `requirement_ids` (optional): Replaces the requirements the task implements; requirements being added must be approved, as in `create_task`
 - `reason`, `actor`, `if_revision` (optional): As in `update_requirement`
@@ -415,6 +423,10 @@ Record architecture decisions (ADRs) with full context.
 - `decision_drivers` (optional): Array of factors driving the decision
 - `considered_options` (optional): Array of alternatives considered
 - `authors` (optional): Array of decision authors
+- `deciders` (optional): Array of people who made the decision
+- `implementation_notes` (optional): Notes for implementing the decision
+- `validation_criteria` (optional): Array of checks that show the decision works
+- `risk_assessment` (optional): Array of risks, each with likelihood, impact and mitigation
 
 **Example:**
 ```json
@@ -470,7 +482,7 @@ Edit an architecture decision's content while it is Proposed. Decisions in any o
 
 **Parameters:**
 - `architecture_id` (required): Architecture ID
-- `title`, `context`, `decision`, `consequences`, `decision_drivers`, `considered_options`, `authors` (at least one): New values, with the same types as in `create_architecture_decision`
+- `title`, `context`, `decision`, `consequences`, `decision_drivers`, `considered_options`, `authors`, `deciders`, `implementation_notes`, `validation_criteria`, `risk_assessment` (at least one): New values, with the same types as in `create_architecture_decision`
 - `reason`, `actor`, `if_revision` (optional): As in `update_requirement`
 
 #### `delete_architecture`

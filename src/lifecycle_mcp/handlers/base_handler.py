@@ -141,6 +141,24 @@ class BaseHandler(ABC):
             self.logger.warning(f"Failed to parse JSON: {json_str}")
             return default or []
 
+    def _format_json_field(self, stored: str | None) -> str:
+        """Markdown bullet lines for a stored JSON list (or object); "" when the field is empty"""
+        value = self._safe_json_loads(stored)
+        if isinstance(value, dict):
+            return "".join(f"- **{key}**: {item}\n" for key, item in value.items())
+        if isinstance(value, list):
+            return "".join(f"- {item}\n" for item in value)
+        return f"{value}\n" if value else ""
+
+    def _format_sections(self, record: Any, sections: Iterable[tuple[str, str]], template: str) -> str:
+        """Render each non-empty (column, title) JSON list field of a record with template ({title}, {body})"""
+        text = ""
+        for column, title in sections:
+            body = self._format_json_field(record[column])
+            if body:
+                text += template.format(title=title, body=body)
+        return text
+
     def _safe_json_dumps(self, data: Any) -> str:
         """Safely dump data to JSON string"""
         try:

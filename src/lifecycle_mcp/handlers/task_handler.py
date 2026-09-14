@@ -14,8 +14,24 @@ from ..github_utils import GitHubUtils
 from .base_handler import EDIT_OPTION_PROPERTIES, BaseHandler, DeleteRefused, EditRefused, RevisionConflict
 
 # Fields update_task changes directly; parent_task_id and requirement_ids are links and handled separately.
-TASK_EDITABLE = ("title", "priority", "effort", "user_story", "acceptance_criteria", "assignee")
-TASK_JSON_FIELDS = ("acceptance_criteria",)
+TASK_EDITABLE = (
+    "title",
+    "priority",
+    "effort",
+    "user_story",
+    "acceptance_criteria",
+    "assignee",
+    "implementation_plan",
+    "test_plan",
+    "definition_of_done",
+)
+# Curated list fields (roadmap R6b), shown after the acceptance criteria in details and export: (column, title).
+TASK_LIST_SECTIONS = (
+    ("implementation_plan", "Implementation Plan"),
+    ("test_plan", "Test Plan"),
+    ("definition_of_done", "Definition of Done"),
+)
+TASK_JSON_FIELDS = ("acceptance_criteria", *(column for column, _ in TASK_LIST_SECTIONS))
 
 # Requirement statuses tasks may be linked to, by create_task and update_task alike.
 APPROVED_REQUIREMENT_STATUSES = ("Approved", "Architecture", "Ready", "Implemented", "Validated")
@@ -81,6 +97,9 @@ class TaskHandler(BaseHandler):
                         "acceptance_criteria": {"type": "array", "items": {"type": "string"}},
                         "parent_task_id": {"type": "string"},
                         "assignee": {"type": "string"},
+                        "implementation_plan": {"type": "array", "items": {"type": "string"}},
+                        "test_plan": {"type": "array", "items": {"type": "string"}},
+                        "definition_of_done": {"type": "array", "items": {"type": "string"}},
                     },
                     "required": ["requirement_ids", "title", "priority"],
                 },
@@ -179,6 +198,9 @@ class TaskHandler(BaseHandler):
                         "user_story": {"type": "string"},
                         "acceptance_criteria": {"type": "array", "items": {"type": "string"}},
                         "assignee": {"type": "string"},
+                        "implementation_plan": {"type": "array", "items": {"type": "string"}},
+                        "test_plan": {"type": "array", "items": {"type": "string"}},
+                        "definition_of_done": {"type": "array", "items": {"type": "string"}},
                         "parent_task_id": {
                             "type": "string",
                             "description": "New parent task; an empty string makes it a top-level task",
@@ -395,6 +417,11 @@ class TaskHandler(BaseHandler):
                 "acceptance_criteria": self._safe_json_dumps(params.get("acceptance_criteria", [])),
                 "assignee": params.get("assignee"),
                 "status": "Not Started",
+                **{
+                    column: self._safe_json_dumps(params[column])
+                    for column, _ in TASK_LIST_SECTIONS
+                    if column in params
+                },
             }
 
             # Insert task
@@ -679,7 +706,7 @@ class TaskHandler(BaseHandler):
                 task_dict = dict(task) if hasattr(task, "keys") else task
 
                 # Parse JSON fields if they exist as strings
-                json_fields = ["acceptance_criteria"]
+                json_fields = TASK_JSON_FIELDS
                 for field in json_fields:
                     if field in task_dict and isinstance(task_dict[field], str):
                         try:
@@ -929,6 +956,8 @@ class TaskHandler(BaseHandler):
                     task_info += "No acceptance criteria defined\n"
             else:
                 task_info += "No acceptance criteria defined\n"
+
+            task_info += self._format_sections(task, TASK_LIST_SECTIONS, "\n## {title}\n{body}")
 
             # Get linked requirements
             requirements = self.db.execute_query(

@@ -1,8 +1,8 @@
 # Tool inventory
 
 Roadmap R15 (REQ-0002-NFUNC-00), TASK-0031. Status: **reviewed by the owner on 2026-09-14**; see
-[Owner decisions](#owner-decisions). The decision is recorded in the tool surface ADR (TASK-0032). Nothing here
-removes or renames a tool; R16 does that.
+[Owner decisions](#owner-decisions). The decision is recorded in ADR-0002, "Tool surface target: per-type tools
+only where inputs differ", accepted on 2026-09-14 (TASK-0032). Nothing here removes or renames a tool; R16 does that.
 
 Every tool the server lists today is classified below:
 

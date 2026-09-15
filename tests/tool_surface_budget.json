@@ -1,6 +1,6 @@
 {
-  "_note": "Tool count and tools/list definition size (compact JSON characters) per handler, checked by tests/test_tool_surface_budget.py. Raise a number only on purpose, in the same change that grows the surface; scripts/tool_surface_report.py shows the current sizes. Recorded at 39 tools / 17136 chars on 2026-09-14 (roadmap R15); lowered to 37 / 16766 when query_relationships absorbed two tools (R16, TASK-0035).",
-  "total": {"tools": 37, "chars": 16766},
+  "_note": "Tool count and tools/list definition size (compact JSON characters) per handler, checked by tests/test_tool_surface_budget.py. Raise a number only on purpose, in the same change that grows the surface; scripts/tool_surface_report.py shows the current sizes. Recorded at 39 tools / 17136 chars on 2026-09-14 (roadmap R15); lowered to 37 / 16766 when query_relationships absorbed two tools (R16, TASK-0035); lowered to 35 / 16378 when GitHub sync became one tool listed only with LIFECYCLE_GITHUB=on (R16, TASK-0036). Budgets measure the default surface, GitHub off.",
+  "total": {"tools": 35, "chars": 16378},
   "handlers": {
     "Architecture": {"tools": 8, "chars": 4040},
     "Export": {"tools": 2, "chars": 1381},
@@ -8,6 +8,6 @@
     "Relationship": {"tools": 4, "chars": 1596},
     "Requirement": {"tools": 8, "chars": 4251},
     "Status": {"tools": 2, "chars": 368},
-    "Task": {"tools": 9, "chars": 3941}
+    "Task": {"tools": 7, "chars": 3553}
   }
 }

@@ -75,8 +75,7 @@ class LifecycleMCPServer:
             "query_tasks": self.task_handler,
             "query_tasks_json": self.task_handler,
             "get_task_details": self.task_handler,
-            "sync_task_from_github": self.task_handler,
-            "bulk_sync_github_tasks": self.task_handler,
+            "sync_github_tasks": self.task_handler,  # listed and routed only when LIFECYCLE_GITHUB=on
             "delete_task": self.task_handler,
             "update_task": self.task_handler,
             # Relationship tools

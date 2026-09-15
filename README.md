@@ -159,8 +159,7 @@ The server exposes 39 MCP tools across 7 handler modules for comprehensive lifec
 - `query_tasks` - Search and filter tasks
 - `query_tasks_json` - Query tasks as structured JSON
 - `get_task_details` - Get full task details with dependencies
-- `sync_task_from_github` - Sync individual task from GitHub issue changes
-- `bulk_sync_github_tasks` - Sync all tasks with their GitHub issues
+- `sync_github_tasks` - Sync one task, or every linked task, from GitHub issues (listed only when `LIFECYCLE_GITHUB=on`)
 
 **Architecture decisions**
 - `create_architecture_decision` - Record architecture decisions (ADRs)
@@ -372,20 +371,13 @@ Get comprehensive task information including dependencies and relationships.
 
 **Returns:** Detailed report with basic info, description, acceptance criteria, and linked requirements.
 
-#### `sync_task_from_github`
-Sync individual task from GitHub issue changes with conflict detection.
+#### `sync_github_tasks`
+Sync tasks from their linked GitHub issues, with conflict detection. Listed only when `LIFECYCLE_GITHUB=on`.
 
 **Parameters:**
-- `task_id` (required): Task ID to sync with its linked GitHub issue
+- `task_id` (optional): Task to sync with its linked GitHub issue; omit it to sync every task linked to an issue
 
-**Returns:** Sync status and any updates applied from GitHub issue data.
-
-#### `bulk_sync_github_tasks`
-Sync all tasks with their GitHub issues in batch operation.
-
-**Parameters:** None
-
-**Returns:** Summary of sync operations performed across all tasks with GitHub issue links.
+**Returns:** Sync status and any updates applied from the GitHub issue data.
 
 #### `update_task`
 Edit a task's content, move it under another parent or change the requirements it implements. The task ID never changes.
@@ -676,7 +668,7 @@ The server maintains a comprehensive SQLite database with the following key enti
 ## Environment Variables
 
 - `LIFECYCLE_DB`: Path to SQLite database file (default: "./lifecycle.db")
-- `LIFECYCLE_GITHUB`: Set to `on` to create and sync a GitHub issue for each task (default: off). Requires an authenticated `gh` CLI and a github.com `origin` remote in the server's working directory. When off, the server never runs `gh` or `git`.
+- `LIFECYCLE_GITHUB`: Set to `on` to create and sync a GitHub issue for each task (default: off). Requires an authenticated `gh` CLI and a github.com `origin` remote in the server's working directory. When off, the server never runs `gh` or `git`, and the `sync_github_tasks` tool is not listed.
 - `LIFECYCLE_CALL_LOG`: Path to a file where the server appends one JSON line per tool call: tool name, argument names (not values), duration, whether it failed and response size. Off by default. `scripts/tool_usage_report.py` summarises these logs.
 
 ## Troubleshooting

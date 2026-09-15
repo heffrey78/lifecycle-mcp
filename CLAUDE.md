@@ -61,7 +61,7 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
 2. **Handler Architecture** (`src/lifecycle_mcp/handlers/`): Modular async handlers for different domains
    - `BaseHandler`: Abstract base class with common async patterns, utilities, and standardized response formatting
    - `RequirementHandler`: Requirements lifecycle management (8 tools) - create, edit, status, delete, query (text and JSON), details, trace
-   - `TaskHandler`: Task creation and progress tracking (9 tools) - create, edit, status, delete, query (text and JSON), details, GitHub sync (one and bulk)
+   - `TaskHandler`: Task creation and progress tracking (7 tools, plus `sync_github_tasks` when GitHub is on) - create, edit, status, delete, query (text and JSON), details
    - `ArchitectureHandler`: ADR management and reviews (8 tools) - create, edit, status, delete, query (text and JSON), details, review
    - `RelationshipHandler`: Links and history (6 tools) - create, delete, three link queries, entity history
    - `InterviewHandler`: Interactive requirement gathering (4 tools) - start/continue interviews and conversations
@@ -125,14 +125,14 @@ The server exposes 39 tools across 7 handler modules:
 - `get_requirement_details` - Full requirement information with relationships
 - `trace_requirement` - Full lifecycle traceability
 
-**Task Management (9 tools):**
+**Task Management (7 tools, plus 1 when GitHub is on):**
 - `create_task` - Create tasks linked to requirements
 - `update_task` - Edit content, move to another parent, replace requirement links
 - `update_task_status` - Update task progress
 - `delete_task` - Delete a Not Started task nothing depends on
 - `query_tasks` / `query_tasks_json` - Search and filter tasks (text or JSON)
 - `get_task_details` - Complete task information
-- `sync_task_from_github` / `bulk_sync_github_tasks` - Sync tasks from GitHub issues (opt-in)
+- `sync_github_tasks` - Sync one task or every linked task from GitHub issues (listed only when `LIFECYCLE_GITHUB=on`)
 
 **Architecture Management (8 tools):**
 - `create_architecture_decision` - Record ADRs

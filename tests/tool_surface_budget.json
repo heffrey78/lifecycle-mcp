@@ -1,8 +1,8 @@
 {
-  "_note": "Tool count and tools/list definition size (compact JSON characters) per handler, checked by tests/test_tool_surface_budget.py. Raise a number only on purpose, in the same change that grows the surface; scripts/tool_surface_report.py shows the current sizes. Recorded at 39 tools / 17136 chars on 2026-09-14 (roadmap R15); lowered to 37 / 16766 when query_relationships absorbed two tools (R16, TASK-0035); lowered to 35 / 16378 when GitHub sync became one tool listed only with LIFECYCLE_GITHUB=on (R16, TASK-0036); lowered to 31 / 15052 when the four interview tools and the diagrams tool's interactive parameter were removed (R16, TASK-0037); lowered to 27 / 13954 when get_details, delete_record and add_comment replaced seven per-type tools (R16, TASK-0034). Budgets measure the default surface, GitHub off. Lowered to 27 / 12818 when tool and parameter descriptions were trimmed (R16, TASK-0038). Lowered to 24 / 11962 when the three *_json query tools folded into structured results (R10, TASK-0041). Lowered to 23 / 11815 when get_project_metrics folded into get_project_status (R10, TASK-0042). Raised to 23 / 12169 when the three status tools gained a list form of their ID (R9, TASK-0045, ADR-0003). Raised to 23 / 12231 when update_requirement_status described its multi-step moves (R9, TASK-0046). Raised to 23 / 12341 when create_relationship gained supersedes and described link direction, and update_architecture_status said where Superseded comes from (R9, TASK-0047).",
+  "_note": "Tool count and tools/list definition size (compact JSON characters) per handler, checked by tests/test_tool_surface_budget.py. Raise a number only on purpose, in the same change that grows the surface; scripts/tool_surface_report.py shows the current sizes. Recorded at 39 tools / 17136 chars on 2026-09-14 (roadmap R15); lowered to 37 / 16766 when query_relationships absorbed two tools (R16, TASK-0035); lowered to 35 / 16378 when GitHub sync became one tool listed only with LIFECYCLE_GITHUB=on (R16, TASK-0036); lowered to 31 / 15052 when the four interview tools and the diagrams tool's interactive parameter were removed (R16, TASK-0037); lowered to 27 / 13954 when get_details, delete_record and add_comment replaced seven per-type tools (R16, TASK-0034). Budgets measure the default surface, GitHub off. Lowered to 27 / 12818 when tool and parameter descriptions were trimmed (R16, TASK-0038). Lowered to 24 / 11962 when the three *_json query tools folded into structured results (R10, TASK-0041). Lowered to 23 / 11815 when get_project_metrics folded into get_project_status (R10, TASK-0042). Raised to 23 / 12169 when the three status tools gained a list form of their ID (R9, TASK-0045, ADR-0003). Raised to 23 / 12231 when update_requirement_status described its multi-step moves (R9, TASK-0046). Raised to 23 / 12341 when create_relationship gained supersedes and described link direction, and update_architecture_status said where Superseded comes from (R9, TASK-0047). Raised to 23 / 12456 when query_tasks gained ready (R7, TASK-0050).",
   "total": {
     "tools": 23,
-    "chars": 12341
+    "chars": 12456
   },
   "handlers": {
     "Architecture": {
@@ -31,7 +31,7 @@
     },
     "Task": {
       "tools": 4,
-      "chars": 2645
+      "chars": 2760
     }
   }
 }

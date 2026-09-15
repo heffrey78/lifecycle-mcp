@@ -457,6 +457,7 @@ class ArchitectureHandler(BaseHandler):
 
             arch = arch_decisions[0]
             deciders = ", ".join(self._safe_json_loads(arch["deciders"])) or "Not specified"
+            superseded = f"\n- **Superseded By**: {arch['superseded_by']}" if arch["superseded_by"] else ""
 
             # Build detailed report
             report = f"""# Architecture Decision: {arch["id"]}
@@ -469,7 +470,7 @@ class ArchitectureHandler(BaseHandler):
 - **Updated**: {arch["updated_at"]}
 - **Revision**: {arch["revision"]}
 - **Authors**: {arch["authors"] or "Not specified"}
-- **Deciders**: {deciders}
+- **Deciders**: {deciders}{superseded}
 
 ## Context
 {arch["context"]}
@@ -523,6 +524,22 @@ class ArchitectureHandler(BaseHandler):
                 report += f"\n## Linked Requirements ({len(requirements)})\n"
                 for req in requirements:
                     report += f"- {req['id']}: {req['title']}\n"
+
+            # Design links (roadmap R9): tasks implementing this decision and the decisions it supersedes.
+            report += self._format_linked(
+                "Implemented By",
+                "SELECT t.id, t.title, t.status FROM tasks t JOIN relationships rel ON rel.source_id = t.id "
+                "WHERE rel.source_type = 'task' AND rel.target_type = 'architecture' AND rel.target_id = ? "
+                "AND rel.relationship_type = 'implements' ORDER BY t.id",
+                arch["id"],
+            )
+            report += self._format_linked(
+                "Supersedes",
+                "SELECT a.id, a.title, a.status FROM architecture a JOIN relationships rel ON rel.target_id = a.id "
+                "WHERE rel.source_type = 'architecture' AND rel.source_id = ? AND rel.target_type = 'architecture' "
+                "AND rel.relationship_type = 'supersedes' ORDER BY a.id",
+                arch["id"],
+            )
 
             report += self._format_comments("architecture", arch["id"])
 

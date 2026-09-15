@@ -506,6 +506,14 @@ class BaseHandler(ABC):
         lines = "".join(f"- **{row['reviewer']}** ({row['created_at']}): {row['comment']}\n" for row in rows)
         return f"\n## Comments ({len(rows)})\n{lines}"
 
+    def _format_linked(self, title: str, sql: str, entity_id: str) -> str:
+        """Details section listing the records sql returns (id, title, status) for entity_id; "" when there are none"""
+        rows = self.db.execute_query(sql, [entity_id], fetch_all=True, row_factory=True) or []
+        if not rows:
+            return ""
+        lines = "".join(f"- {row['id']}: {row['title']} [{row['status']}]\n" for row in rows)
+        return f"\n## {title} ({len(rows)})\n{lines}"
+
     @abstractmethod
     def get_tool_definitions(self) -> list[dict[str, Any]]:
         """Return list of tool definitions this handler provides"""

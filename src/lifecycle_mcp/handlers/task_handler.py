@@ -928,6 +928,15 @@ class TaskHandler(BaseHandler):
                     task_info += "\n## Parent Task\n"
                     task_info += f"- {parent['id']}: {parent['title']} [{parent['status']}]\n"
 
+            # Architecture decisions this task implements (roadmap R9)
+            task_info += self._format_linked(
+                "Implements Decisions",
+                "SELECT a.id, a.title, a.status FROM architecture a JOIN relationships rel ON rel.target_id = a.id "
+                "WHERE rel.source_type = 'task' AND rel.source_id = ? AND rel.target_type = 'architecture' "
+                "AND rel.relationship_type = 'implements' ORDER BY a.id",
+                task["id"],
+            )
+
             task_info += self._format_comments("task", task["id"])
 
             # Create above-the-fold summary

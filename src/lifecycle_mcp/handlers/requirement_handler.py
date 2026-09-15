@@ -285,9 +285,18 @@ class RequirementHandler(BaseHandler):
 
         action_info = self._describe_edit(result)
         status = result.before["status"]
-        if result.changed and status in REVIEWED_STATUSES:
+        flagged = bool(result.changed) and status in REVIEWED_STATUSES
+        if flagged:
             action_info += f" | ⚠️ changed since last review ({status}) until its next status change"
-        return self._create_above_fold_response("SUCCESS", f"Requirement {requirement_id} updated", action_info)
+        structured = {
+            "id": requirement_id,
+            "changed": result.changed,
+            "revision": result.revision,
+            "changed_since_review": flagged,
+        }
+        return self._create_structured_response(
+            "SUCCESS", f"Requirement {requirement_id} updated", structured, action_info
+        )
 
     def _changed_since_review_line(self, requirement_id: str) -> str:
         """Report line flagging edits made since the latest status change, or "" when there are none"""
@@ -699,8 +708,9 @@ Guidelines:
             # Create above-the-fold response
             key_info = f"Requirement {params['requirement_id']} updated"
             action_info = f"📈 {current_status} → {new_status}"
+            structured = {"id": params["requirement_id"], "from_status": current_status, "to_status": new_status}
 
-            return self._create_above_fold_response("SUCCESS", key_info, action_info)
+            return self._create_structured_response("SUCCESS", key_info, structured, action_info)
 
         except Exception as e:
             return self._create_error_response("Failed to update requirement status", e)

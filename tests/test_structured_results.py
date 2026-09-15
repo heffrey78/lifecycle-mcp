@@ -85,3 +85,93 @@ async def test_the_json_twins_are_gone(mcp_server):  # noqa: F811
     for name in ("query_requirements_json", "query_tasks_json", "query_architecture_decisions_json"):
         result = await call(mcp_server, name, {})
         assert result.isError and "Unknown tool" in text_of(result), name
+
+
+# --- create, update and status tools (TASK-0043) --------------------------------------------------------
+
+
+async def structured(server, name: str, arguments: dict) -> dict:
+    result = await call(server, name, arguments)
+    assert result.isError is False, text_of(result)
+    return result.structuredContent
+
+
+async def test_create_tools_return_the_new_records_id_and_status(mcp_server):  # noqa: F811
+    ids = await populate(mcp_server)
+    task = {"requirement_ids": [ids["requirement"]], "title": "Rank results", "priority": "P1"}
+    decision = {
+        "requirement_ids": [ids["requirement"]],
+        "title": "Use BM25",
+        "context": "Ranking",
+        "decision": "bm25()",
+    }
+
+    assert await structured(mcp_server, "create_task", {**task, "parent_task_id": ids["task"]}) == {
+        "id": "TASK-0001-01-00",
+        "status": "Not Started",
+        "requirement_ids": [ids["requirement"]],
+        "parent_task_id": ids["task"],
+        "github_issue_url": None,
+    }
+    assert await structured(mcp_server, "create_architecture_decision", decision) == {
+        "id": "ADR-0002",
+        "status": "Proposed",
+        "requirement_ids": [ids["requirement"]],
+    }
+
+
+async def test_update_tools_return_the_changed_fields_and_new_revision(mcp_server):  # noqa: F811
+    ids = await populate(mcp_server)
+
+    requirement = {"requirement_id": ids["requirement"], "business_value": "Faster lookup", "reason": "Value stated"}
+    assert await structured(mcp_server, "update_requirement", requirement) == {
+        "id": ids["requirement"],
+        "changed": ["business_value"],
+        "revision": 1,
+        "changed_since_review": True,
+    }
+    assert await structured(mcp_server, "update_task", {"task_id": ids["task"], "title": "Build FTS index"}) == {
+        "id": ids["task"],
+        "changed": ["title"],
+        "revision": 1,
+    }
+    decision = {"architecture_id": ids["adr"], "title": "Use FTS5 with trigrams"}
+    assert await structured(mcp_server, "update_architecture", decision) == {
+        "id": ids["adr"],
+        "changed": ["title"],
+        "revision": 1,
+    }
+
+
+async def test_status_tools_return_the_old_and_new_status(mcp_server):  # noqa: F811
+    ids = await populate(mcp_server)
+
+    changes = [
+        (
+            "update_requirement_status",
+            {"requirement_id": ids["requirement"], "new_status": "Ready"},
+            ids["requirement"],
+            "Approved",
+            "Ready",
+        ),
+        (
+            "update_task_status",
+            {"task_id": ids["task"], "new_status": "In Progress"},
+            ids["task"],
+            "Not Started",
+            "In Progress",
+        ),
+        (
+            "update_architecture_status",
+            {"architecture_id": ids["adr"], "new_status": "Accepted"},
+            ids["adr"],
+            "Proposed",
+            "Accepted",
+        ),
+    ]
+    for tool, arguments, record_id, before, after in changes:
+        assert await structured(mcp_server, tool, arguments) == {
+            "id": record_id,
+            "from_status": before,
+            "to_status": after,
+        }, tool

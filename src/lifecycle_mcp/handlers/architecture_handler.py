@@ -225,8 +225,11 @@ class ArchitectureHandler(BaseHandler):
             )
         except (LookupError, RevisionConflict, EditRefused) as e:
             return self._create_error_response(str(e))
-        return self._create_above_fold_response(
-            "SUCCESS", f"Architecture decision {architecture_id} updated", self._describe_edit(result)
+        return self._create_structured_response(
+            "SUCCESS",
+            f"Architecture decision {architecture_id} updated",
+            {"id": architecture_id, "changed": result.changed, "revision": result.revision},
+            self._describe_edit(result),
         )
 
     async def _create_architecture_decision(self, **params) -> list[TextContent]:
@@ -280,6 +283,7 @@ class ArchitectureHandler(BaseHandler):
 
             # Analyze ADR for diagram suggestions using LLM
             diagram_suggestions = await self._analyze_adr_for_diagrams(arch_data)
+            structured = {"id": adr_id, "status": "Proposed", "requirement_ids": params["requirement_ids"]}
 
             if diagram_suggestions and diagram_suggestions.get("suggested_diagrams"):
                 # Format diagram suggestions for user
@@ -287,12 +291,12 @@ class ArchitectureHandler(BaseHandler):
                 key_info = f"Architecture decision {adr_id} created with diagram suggestions"
                 suggestions_count = len(diagram_suggestions["suggested_diagrams"])
                 action_info = f"📐 {params['title']} | {suggestions_count} diagram suggestions"
-                return self._create_above_fold_response("SUCCESS", key_info, action_info, suggestions_text)
+                return self._create_structured_response("SUCCESS", key_info, structured, action_info, suggestions_text)
             else:
                 # Standard response without suggestions
                 key_info = f"Architecture decision {adr_id} created"
                 action_info = f"📐 {params['title']} | {params.get('status', 'Proposed')} | ADR"
-                return self._create_above_fold_response("SUCCESS", key_info, action_info)
+                return self._create_structured_response("SUCCESS", key_info, structured, action_info)
 
         except Exception as e:
             return self._create_error_response("Failed to create architecture decision", e)
@@ -329,7 +333,8 @@ class ArchitectureHandler(BaseHandler):
             # Create above-the-fold response
             key_info = f"Architecture {params['architecture_id']} updated"
             action_info = f"📈 {current_status} → {new_status}"
-            return self._create_above_fold_response("SUCCESS", key_info, action_info)
+            structured = {"id": params["architecture_id"], "from_status": current_status, "to_status": new_status}
+            return self._create_structured_response("SUCCESS", key_info, structured, action_info)
 
         except Exception as e:
             return self._create_error_response("Failed to update architecture status", e)

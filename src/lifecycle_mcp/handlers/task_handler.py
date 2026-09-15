@@ -243,7 +243,12 @@ class TaskHandler(BaseHandler):
             )
         except (LookupError, RevisionConflict, EditRefused) as e:
             return self._create_error_response(str(e))
-        return self._create_above_fold_response("SUCCESS", f"Task {task_id} updated", self._describe_edit(result))
+        return self._create_structured_response(
+            "SUCCESS",
+            f"Task {task_id} updated",
+            {"id": task_id, "changed": result.changed, "revision": result.revision},
+            self._describe_edit(result),
+        )
 
     def _move_to_parent(self, cur, task_id: str, parent_id: str | None) -> dict[str, tuple[Any, Any]]:
         """Replace the task's parent link inside the edit transaction; parent_id None makes it top-level"""
@@ -435,7 +440,14 @@ class TaskHandler(BaseHandler):
             elif github_error:
                 github_info = f"⚠️ GitHub: {github_error}"
 
-            return self._create_above_fold_response("SUCCESS", key_info, action_info, github_info)
+            structured = {
+                "id": task_id,
+                "status": "Not Started",
+                "requirement_ids": params["requirement_ids"],
+                "parent_task_id": params.get("parent_task_id"),
+                "github_issue_url": github_url,
+            }
+            return self._create_structured_response("SUCCESS", key_info, structured, action_info, github_info)
 
         except Exception as e:
             return self._create_error_response("Failed to create task", e)
@@ -534,7 +546,8 @@ class TaskHandler(BaseHandler):
             elif github_error:
                 github_info = f"⚠️ GitHub sync failed: {github_error}"
 
-            return self._create_above_fold_response("SUCCESS", key_info, action_info, github_info)
+            structured = {"id": params["task_id"], "from_status": current_status, "to_status": new_status}
+            return self._create_structured_response("SUCCESS", key_info, structured, action_info, github_info)
 
         except Exception as e:
             return self._create_error_response("Failed to update task", e)

@@ -1,7 +1,8 @@
 # Tool inventory
 
-Roadmap R15 (REQ-0002-NFUNC-00), TASK-0031. Status: **draft for owner review**. The decision itself belongs to
-the tool surface ADR (TASK-0032); nothing here removes or renames a tool.
+Roadmap R15 (REQ-0002-NFUNC-00), TASK-0031. Status: **reviewed by the owner on 2026-09-14**; see
+[Owner decisions](#owner-decisions). The decision is recorded in the tool surface ADR (TASK-0032). Nothing here
+removes or renames a tool; R16 does that.
 
 Every tool the server lists today is classified below:
 
@@ -86,10 +87,10 @@ R11 decides their replacement.
 
 | Tool | Chars | Calls (re-run / original) | Class | Where the capability goes | Roadmap |
 |---|---:|---|---|---|---|
-| `start_requirement_interview` | 253 | 1 / 2 | remove | replacement decided by R11 (schema-driven interview or a requirement template) | R11 |
-| `continue_requirement_interview` | 272 | 4 / 8 | remove | as above | R11 |
-| `start_architectural_conversation` | 376 | 1 / 1 | remove | diagrams are requested directly with `create_architectural_diagrams` | R11, R13 |
-| `continue_architectural_conversation` | 288 | 3 / 3 | remove | as above | R11, R13 |
+| `start_requirement_interview` | 253 | 1 / 2 | remove | any replacement is decided by R11 (schema-driven interview or a requirement template) | R16 removes; R11 replaces |
+| `continue_requirement_interview` | 272 | 4 / 8 | remove | as above | R16 removes; R11 replaces |
+| `start_architectural_conversation` | 376 | 1 / 1 | remove | diagrams are requested directly with `create_architectural_diagrams` | R16 |
+| `continue_architectural_conversation` | 288 | 3 / 3 | remove | as above | R16 |
 
 ### Status and export
 
@@ -98,7 +99,7 @@ R11 decides their replacement.
 | `get_project_status` | 193 | 6 / 3 | keep | returns structured results too | R10 |
 | `get_project_metrics` | 175 | 1 / 1 | fold | `get_project_status` structured result | R10 |
 | `export_project_documentation` | 537 | 1 / 1 | keep | | |
-| `create_architectural_diagrams` | 844 | 2 / 4 | keep | drop `interactive`, which only starts the conversation tools (727 chars without it) | R13 |
+| `create_architectural_diagrams` | 844 | 2 / 4 | keep | drop `interactive`, which only starts the conversation tools (727 chars without it) | R16 drops `interactive`; R13 reworks the output |
 
 ## Proposed principles for the ADR
 
@@ -111,34 +112,36 @@ Drawn from the classification, for TASK-0032 to accept, change or reject:
    `structuredContent` without declaring an `outputSchema` unless the budget allows it; output schemas count
    against it too.
 3. **Opt-in features register only when enabled.** GitHub sync is listed only with `LIFECYCLE_GITHUB=on`.
-4. **No multi-step conversation tools without persisted state.** Interviews are replaced under R11, not kept as they
-   are.
+4. **No multi-step conversation tools without persisted state.** The interview tools are removed in R16; R11 decides
+   any replacement, which must fit the budget.
 5. **The budget moves with the change.** Growth raises `tests/tool_surface_budget.json` in the same change, and each
    fold lowers it to the new measured size.
 
-## Open questions for the owner
+## Owner decisions
 
-1. **Status tools.** They get about half of all calls. Folding the three into one `update_status(entity_id,
-   new_status, comment)` would save two more tools, but the agent would lose each type's valid statuses in the
-   schema. The target keeps them; R9's bulk transitions touch the same tools, so decide both together.
-2. **Renames.** `get_details`, `delete_record` and `add_comment` replace per-type names. Existing clients break once;
-   R16 lists every removal and its replacement in a changelog. Keep the old names as aliases for one release, or not?
-3. **Interviews.** Remove them now (R16), or keep them until R11 ships a replacement?
-4. **Descriptions.** Description text is 21% of the definition size today (3,578 chars). The three update tools'
-   parameter descriptions alone are 641 chars, mostly the repeated `reason`, `actor` and `if_revision` explanations.
-   Trim them as part of R16?
-5. **Responses.** Responses in the re-run totalled 43,201 characters, 2.5 times the definitions. Should R10 set a
-   response budget as well?
+Answered by the owner on 2026-09-14:
+
+1. **Status tools stay per record type.** They get about half of all calls, and each schema lists that type's valid
+   statuses. Folding them into one `update_status` was declined; R9's bulk transitions build on the three tools.
+2. **No aliases for renamed tools.** `get_details`, `delete_record` and `add_comment` replace the per-type names
+   outright. Clients break once, and R16's changelog lists every removed tool and its replacement.
+3. **Interviews are removed in R16**, without waiting for R11. R11 decides any replacement later, within the budget.
+4. **Descriptions are trimmed in R16.** Description text is 21% of the definition size (3,578 chars); the three update
+   tools' parameter descriptions alone are 641 chars. Trimming keeps the rules agents need, such as the reason at
+   Approved and Proposed-only ADR edits.
+
+Still open, for R10: responses in the re-run totalled 43,201 characters, 2.5 times the definitions. Whether to give
+responses a budget as well is R10's decision.
 
 ## One change per tool
 
 | Roadmap item | Tools it changes |
 |---|---|
 | R10 quiet, structured responses | fold the three `*_json` tools and `get_project_metrics`; structured results for the three query tools and `get_project_status` |
-| R11 interviews | remove the four interview tools; decide their replacement |
-| R13 diagrams | `create_architectural_diagrams` (drop `interactive` once the conversation tools are gone) |
-| R9 traceability and bulk transitions | the three status tools (bulk form, `superseded_by`); decide open question 1 at the same time |
-| R16 streamline | `get_details`, `delete_record`, `add_comment`, the extended `query_relationships`, `sync_github_tasks` and conditional registration; parameter description trimming; lower the budget |
+| R11 interviews | decide any replacement for guided requirement capture (the interview tools are already gone after R16) |
+| R13 diagrams | `create_architectural_diagrams` output (its `interactive` parameter goes in R16) |
+| R9 traceability and bulk transitions | the three status tools, which stay per record type (bulk form, `superseded_by`) |
+| R16 streamline | `get_details`, `delete_record`, `add_comment`, the extended `query_relationships`, `sync_github_tasks` and conditional registration; remove the four interview tools and `interactive`; trim descriptions; changelog; lower the budget |
 
 ## Measuring the target
 

@@ -140,6 +140,8 @@ claude mcp add lifecycle /path/to/venv/bin/lifecycle-mcp -e LIFECYCLE_DB=./lifec
 
 The server exposes 23 MCP tools (24 with GitHub integration on) across 7 handler modules for comprehensive lifecycle management. Every tool rejects fields it does not declare, and the error names the field. [CHANGELOG.md](CHANGELOG.md) lists tools that were removed or renamed, with their replacements.
 
+Results are text for the model to read. Most tools also return the same facts as data in `structuredContent`: create tools return the new ID and status, edit tools the changed fields and new revision, status tools the old and new status, and query tools the full records. No tool declares an `outputSchema`.
+
 ### Tool List
 **Requirements**
 - `create_requirement` - Create new requirements

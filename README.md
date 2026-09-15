@@ -175,9 +175,7 @@ The server exposes 39 MCP tools across 7 handler modules for comprehensive lifec
 **Relationships and history**
 - `create_relationship` - Link two records (dependencies, refinements, blocks and more)
 - `delete_relationship` - Remove a link between two records
-- `query_relationships` - Query links for visualization
-- `get_entity_relationships` - Get all links for one record
-- `query_all_relationships` - Get every link for building a graph
+- `query_relationships` - Query links: one record's links by direction and type, or every link as JSON for a graph
 - `get_entity_history` - Show how a record changed: creation, edits with before and after values, status changes, comments and deletion
 
 **Status, interviews and export**

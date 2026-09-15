@@ -83,8 +83,6 @@ class LifecycleMCPServer:
             "create_relationship": self.relationship_handler,
             "delete_relationship": self.relationship_handler,
             "query_relationships": self.relationship_handler,
-            "get_entity_relationships": self.relationship_handler,
-            "query_all_relationships": self.relationship_handler,
             "get_entity_history": self.relationship_handler,
             # Architecture tools
             "create_architecture_decision": self.architecture_handler,

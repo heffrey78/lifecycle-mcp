@@ -143,9 +143,9 @@ The server exposes 39 tools across 7 handler modules:
 - `get_architecture_details` - Full ADR information
 - `add_architecture_review` - Add review comments
 
-**Relationships and History (6 tools):**
+**Relationships and History (4 tools):**
 - `create_relationship` / `delete_relationship` - Add or remove a link
-- `query_relationships` / `get_entity_relationships` / `query_all_relationships` - Read links
+- `query_relationships` - One record's links (by direction and type) or every link as JSON
 - `get_entity_history` - Creation, field edits, status changes, comments and deletion for one record
 
 **Interactive Interviews (4 tools):**

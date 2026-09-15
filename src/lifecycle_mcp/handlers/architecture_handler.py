@@ -329,12 +329,10 @@ class ArchitectureHandler(BaseHandler):
             current_status = current_arch[0]["status"]
             new_status = params["new_status"]
 
-            # Update status
-            self.db.update_record(
-                "architecture",
-                {"status": new_status, "updated_at": "CURRENT_TIMESTAMP"},
-                "id = ?",
-                [params["architecture_id"]],
+            # Update status. CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
+            self.db.execute_query(
+                "UPDATE architecture SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [new_status, params["architecture_id"]],
             )
 
             # Add review comment if provided

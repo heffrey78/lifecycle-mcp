@@ -696,12 +696,10 @@ Guidelines:
             if new_status not in valid_transitions.get(current_status, []):
                 return self._create_error_response(f"Invalid transition from {current_status} to {new_status}")
 
-            # Update status
-            self.db.update_record(
-                "requirements",
-                {"status": new_status, "updated_at": "CURRENT_TIMESTAMP"},
-                "id = ?",
-                [params["requirement_id"]],
+            # Update status. CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
+            self.db.execute_query(
+                "UPDATE requirements SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [new_status, params["requirement_id"]],
             )
 
             # Add review comment if provided

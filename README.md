@@ -140,27 +140,27 @@ claude mcp add lifecycle /path/to/venv/bin/lifecycle-mcp -e LIFECYCLE_DB=./lifec
 
 The server exposes 23 MCP tools (24 with GitHub integration on) across 7 handler modules for comprehensive lifecycle management. Every tool rejects fields it does not declare, and the error names the field. [CHANGELOG.md](CHANGELOG.md) lists tools that were removed or renamed, with their replacements.
 
-Results are text for the model to read. Most tools also return the same facts as data in `structuredContent`: create tools return the new ID and status, edit tools the changed fields and new revision, status tools the old and new status, and query tools the full records. No tool declares an `outputSchema`.
+Results are text for the model to read. Most tools also return the same facts as data in `structuredContent`: create tools return the new ID and status, edit tools the changed fields and new revision, status tools the old and new status (a list of IDs gets a result per ID), and query tools the full records. No tool declares an `outputSchema`.
 
 ### Tool List
 **Requirements**
 - `create_requirement` - Create new requirements
 - `update_requirement` - Edit a requirement's content (a reason is required at Approved or later)
-- `update_requirement_status` - Move requirements through lifecycle states
+- `update_requirement_status` - Move one or many requirements through lifecycle states, stepping through the allowed path
 - `query_requirements` - Search and filter requirements; the matching records also come back as structured data
 - `trace_requirement` - Trace requirement through implementation
 
 **Tasks**
 - `create_task` - Create implementation tasks from requirements
 - `update_task` - Edit a task's content, move it to another parent or change its requirements
-- `update_task_status` - Update task progress
+- `update_task_status` - Update the progress of one or many tasks
 - `query_tasks` - Search and filter tasks; the matching records also come back as structured data
 - `sync_github_tasks` - Sync one task, or every linked task, from GitHub issues (listed only when `LIFECYCLE_GITHUB=on`)
 
 **Architecture decisions**
 - `create_architecture_decision` - Record architecture decisions (ADRs)
 - `update_architecture` - Edit a Proposed architecture decision
-- `update_architecture_status` - Update architecture decision status
+- `update_architecture_status` - Update the status of one or many architecture decisions; Superseded comes from a supersedes link
 - `query_architecture_decisions` - Search and filter architecture decisions; the matching records also come back as structured data
 
 **Any record (requirement, task or architecture decision, by ID)**
@@ -169,7 +169,7 @@ Results are text for the model to read. Most tools also return the same facts as
 - `add_comment` - Comment on a record; comments show in its details and history
 
 **Relationships and history**
-- `create_relationship` - Link two records (dependencies, refinements, blocks and more)
+- `create_relationship` - Link two records: dependencies, refinements, blocks, a task implementing an architecture decision, a newer decision superseding an older one, and more
 - `delete_relationship` - Remove a link between two records
 - `query_relationships` - Query links: one record's links by direction and type, or every link as JSON for a graph
 - `get_entity_history` - Show how a record changed: creation, edits with before and after values, status changes, comments and deletion
@@ -188,7 +188,7 @@ These rules apply to `update_requirement`, `update_task`, `update_architecture` 
 - **Revisions guard against lost updates.** Each record has a revision, shown in its details, that goes up by one with every update that changes something. Pass `if_revision` to have the update refused, with nothing written, when the record has changed since you read it.
 - **Approved requirements need a reason.** Editing a requirement at Approved or later requires `reason`. The requirement then shows as *Changed Since Last Review* in `get_details`, `trace_requirement` and `get_project_status`, listing the edited fields.
 - **The next status change is the acknowledgement.** There is no separate acknowledgement step: the requirement's next status transition clears the flag, and that transition's comment records the review.
-- **Decided architecture is not rewritten.** Architecture decisions can be edited only while Proposed. To change a decided one, record a new decision with `create_architecture_decision` and move the old one to Superseded.
+- **Decided architecture is not rewritten.** Architecture decisions can be edited only while Proposed. To change a decided one, record a new decision with `create_architecture_decision` and link it with `create_relationship` (`supersedes`, newer to older), which moves the old one to Superseded.
 - **Deleting is for mistakes.** Only Draft requirements, Not Started tasks and Proposed architecture decisions can be deleted, and only when nothing depends on them. Refusals name the blocking records. A deleted record's own links go with it, and its history remains.
 
 #### `get_entity_history`
@@ -205,7 +205,7 @@ Full details of a requirement, task or architecture decision. The ID prefix (`RE
 **Parameters:**
 - `entity_id` (required): Requirement, task or architecture decision ID
 
-**Returns:** The record's fields, revision, links (linked tasks, subtasks and parent, linked requirements) and comments. A reviewed requirement edited since its last status change is flagged *Changed Since Last Review*.
+**Returns:** The record's fields, revision, links (linked tasks, subtasks and parent, linked requirements, the tasks implementing a decision, the decisions a task implements, and the decisions a decision supersedes or is superseded by) and comments. A reviewed requirement edited since its last status change is flagged *Changed Since Last Review*.
 
 #### `delete_record`
 Delete a record created by mistake.
@@ -268,12 +268,17 @@ Create a new requirement.
 ```
 
 #### `update_requirement_status`
-Move requirements through their lifecycle with validation.
+Move one or many requirements through their lifecycle with validation.
 
 **Parameters:**
-- `requirement_id` (required): Requirement ID (e.g., "REQ-0001-FUNC-00")
+- `requirement_id`: Requirement ID (e.g., "REQ-0001-FUNC-00")
+- `requirement_ids`: Instead of `requirement_id`, a list of requirement IDs to move to the same status
 - `new_status` (required): Target status - "Draft", "Under Review", "Approved", "Architecture", "Ready", "Implemented", "Validated", "Deprecated"
-- `comment` (optional): Review comment or justification
+- `comment` (optional): Review comment or justification, added once to each requirement moved
+
+Pass `requirement_id` or `requirement_ids`, not both. Each ID in a list moves on its own: the result lists every ID, and `structuredContent` holds `results` (one entry per ID, with `error` when refused), `moved` and `refused`. Some refusals make it a warning while the other IDs still move; it is an error only when none moved.
+
+When `new_status` is more than one step away, the requirement walks the shortest allowed path and each step is logged as its own status change: Draft → Approved goes through Under Review, and Approved → Validated through Ready and Implemented. A move never passes through Approved or Validated; those can only be where it ends. Gates apply before anything changes, so a refused move leaves the requirement where it was. Multi-step results include the `path`.
 
 **Valid State Transitions:**
 - Draft → Under Review, Deprecated
@@ -356,7 +361,8 @@ Create implementation tasks linked to requirements.
 Update task progress and assignment.
 
 **Parameters:**
-- `task_id` (required): Task ID (e.g., "TASK-0001-00-00")
+- `task_id`: Task ID (e.g., "TASK-0001-00-00")
+- `task_ids`: Instead of `task_id`, a list of task IDs to move to the same status, with a result per ID as in `update_requirement_status`
 - `new_status` (required): New status - "Not Started", "In Progress", "Blocked", "Complete", "Abandoned"
 - `comment` (optional): Status update comment
 - `assignee` (optional): New assignee
@@ -426,12 +432,15 @@ Record architecture decisions (ADRs) with full context.
 ```
 
 #### `update_architecture_status`
-Update the status of an architecture decision with validation.
+Update the status of one or many architecture decisions.
 
 **Parameters:**
-- `architecture_id` (required): Architecture ID (e.g., "ADR-0001")
+- `architecture_id`: Architecture ID (e.g., "ADR-0001")
+- `architecture_ids`: Instead of `architecture_id`, a list of decision IDs to move to the same status, with a result per ID as in `update_requirement_status`
 - `new_status` (required): New status - "Proposed", "Accepted", "Rejected", "Deprecated", "Superseded", "Draft", "Under Review", "Approved", "Implemented"
 - `comment` (optional): Status change comment
+
+Superseded comes from a link: `create_relationship` with the newer decision as `source_id`, the older one as `target_id` and `relationship_type` `supersedes` moves the older one to Superseded and sets its `superseded_by`. This tool refuses Superseded without that link, and refuses moving a superseded decision elsewhere until the link is deleted.
 
 #### `query_architecture_decisions`
 Search and filter architecture decisions by various criteria.
@@ -443,7 +452,7 @@ Search and filter architecture decisions by various criteria.
 - `search_text` (optional): Text search in title and context
 
 #### `update_architecture`
-Edit an architecture decision's content while it is Proposed. Decisions in any other status are refused: record a new decision with `create_architecture_decision` and move the old one to Superseded.
+Edit an architecture decision's content while it is Proposed. Decisions in any other status are refused: record a new decision with `create_architecture_decision` and link it to the old one with a `supersedes` relationship, which moves the old one to Superseded.
 
 **Parameters:**
 - `architecture_id` (required): Architecture ID

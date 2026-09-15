@@ -5,7 +5,11 @@ Provides structured access to requirements, tasks, and architecture artifacts
 """
 
 import asyncio
+import json
 import logging
+import os
+import time
+from datetime import datetime, timezone
 from typing import Any
 
 from mcp.server import Server
@@ -25,6 +29,9 @@ from .handlers import (
 from .handlers.base_handler import ErrorResult
 
 logger = logging.getLogger(__name__)
+
+# When set, every tool call is appended to this file as one JSON line (roadmap R15 usage evidence).
+CALL_LOG_ENV = "LIFECYCLE_CALL_LOG"
 
 
 class ToolCallError(Exception):
@@ -156,21 +163,58 @@ class LifecycleMCPServer:
             Note: This method is async and must await handler calls for proper MCP protocol compliance.
             All handler.handle_tool_call() methods must also be async to prevent connection issues.
             """
-            handler = self.handlers.get(name)
-            if not handler:
-                logger.error(f"No handler found for tool: {name}")
-                raise ToolCallError(f"[ERROR] Unknown tool: {name}")
-
-            logger.debug(f"Routing tool '{name}' to {handler.__class__.__name__}")
+            started = time.monotonic()
             try:
-                result = await handler.handle_tool_call(name, arguments)
-            except Exception as e:
-                logger.exception(f"Error handling tool '{name}'")
-                raise ToolCallError(f"[ERROR] Error handling {name}: {e}") from e
-
-            if isinstance(result, ErrorResult):
-                raise ToolCallError("\n".join(block.text for block in result))
+                result = await self._route_tool_call(name, arguments)
+            except ToolCallError as e:
+                self._record_call(name, arguments, started, is_error=True, response_chars=len(str(e)))
+                raise
+            response_chars = sum(len(getattr(block, "text", "")) for block in result)
+            self._record_call(name, arguments, started, is_error=False, response_chars=response_chars)
             return result
+
+    async def _route_tool_call(self, name: str, arguments: dict[str, Any]) -> list[TextContent]:
+        """Run the tool's handler; failures raise ToolCallError"""
+        handler = self.handlers.get(name)
+        if not handler:
+            logger.error(f"No handler found for tool: {name}")
+            raise ToolCallError(f"[ERROR] Unknown tool: {name}")
+
+        logger.debug(f"Routing tool '{name}' to {handler.__class__.__name__}")
+        try:
+            result = await handler.handle_tool_call(name, arguments)
+        except Exception as e:
+            logger.exception(f"Error handling tool '{name}'")
+            raise ToolCallError(f"[ERROR] Error handling {name}: {e}") from e
+
+        if isinstance(result, ErrorResult):
+            raise ToolCallError("\n".join(block.text for block in result))
+        return result
+
+    def _record_call(
+        self, name: str, arguments: dict[str, Any] | None, started: float, *, is_error: bool, response_chars: int
+    ) -> None:
+        """Append the call to the LIFECYCLE_CALL_LOG file when that is set; never fails the call.
+
+        Argument names are recorded, not values. Calls the MCP layer rejects before routing (for example an
+        undeclared field) never reach here and are not logged.
+        """
+        path = os.environ.get(CALL_LOG_ENV)
+        if not path:
+            return
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            "tool": name,
+            "arg_names": sorted(arguments or {}),
+            "ms": round((time.monotonic() - started) * 1000),
+            "isError": is_error,
+            "response_chars": response_chars,
+        }
+        try:
+            with open(path, "a", encoding="utf-8") as log:
+                log.write(json.dumps(record) + "\n")
+        except OSError as e:
+            logger.warning(f"Could not write call log {path}: {e}")
 
     async def run(self):
         """Run the MCP server"""

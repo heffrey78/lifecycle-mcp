@@ -1,0 +1,153 @@
+{"ts": "2026-09-15T00:58:06.201+00:00", "tool": "create_requirement", "arg_names": ["acceptance_criteria", "author", "business_value", "current_state", "desired_state", "functional_requirements", "out_of_scope", "priority", "risk_level", "title", "type"], "ms": 4, "isError": false, "response_chars": 196}
+{"ts": "2026-09-15T00:58:06.216+00:00", "tool": "create_requirement", "arg_names": ["acceptance_criteria", "author", "business_value", "current_state", "desired_state", "functional_requirements", "priority", "risk_level", "title", "type", "validation_metrics"], "ms": 1, "isError": false, "response_chars": 188}
+{"ts": "2026-09-15T00:58:06.227+00:00", "tool": "create_requirement", "arg_names": ["acceptance_criteria", "author", "business_value", "current_state", "desired_state", "functional_requirements", "priority", "risk_level", "title", "type"], "ms": 1, "isError": false, "response_chars": 197}
+{"ts": "2026-09-15T00:58:06.238+00:00", "tool": "create_requirement", "arg_names": ["acceptance_criteria", "author", "business_rules", "business_value", "current_state", "desired_state", "functional_requirements", "priority", "risk_level", "title", "type"], "ms": 1, "isError": false, "response_chars": 195}
+{"ts": "2026-09-15T00:58:06.249+00:00", "tool": "create_requirement", "arg_names": ["acceptance_criteria", "author", "business_rules", "business_value", "current_state", "desired_state", "functional_requirements", "priority", "risk_level", "title", "type"], "ms": 1, "isError": false, "response_chars": 188}
+{"ts": "2026-09-15T00:58:06.260+00:00", "tool": "create_requirement", "arg_names": ["acceptance_criteria", "author", "business_value", "current_state", "desired_state", "functional_requirements", "priority", "risk_level", "title", "type"], "ms": 1, "isError": false, "response_chars": 193}
+{"ts": "2026-09-15T00:58:06.272+00:00", "tool": "create_requirement", "arg_names": ["acceptance_criteria", "author", "business_value", "current_state", "desired_state", "functional_requirements", "out_of_scope", "priority", "risk_level", "technical_constraints", "title", "type", "validation_metrics"], "ms": 1, "isError": false, "response_chars": 208}
+{"ts": "2026-09-15T00:58:06.275+00:00", "tool": "start_requirement_interview", "arg_names": ["project_context", "stakeholder_role"], "ms": 0, "isError": false, "response_chars": 656}
+{"ts": "2026-09-15T00:58:06.280+00:00", "tool": "continue_requirement_interview", "arg_names": ["answers", "session_id"], "ms": 0, "isError": false, "response_chars": 521}
+{"ts": "2026-09-15T00:58:06.283+00:00", "tool": "continue_requirement_interview", "arg_names": ["answers", "session_id"], "ms": 0, "isError": false, "response_chars": 536}
+{"ts": "2026-09-15T00:58:06.286+00:00", "tool": "continue_requirement_interview", "arg_names": ["answers", "session_id"], "ms": 0, "isError": false, "response_chars": 504}
+{"ts": "2026-09-15T00:58:06.290+00:00", "tool": "continue_requirement_interview", "arg_names": ["answers", "session_id"], "ms": 1, "isError": false, "response_chars": 671}
+{"ts": "2026-09-15T00:58:06.295+00:00", "tool": "get_requirement_details", "arg_names": ["requirement_id"], "ms": 1, "isError": false, "response_chars": 620}
+{"ts": "2026-09-15T00:58:06.298+00:00", "tool": "delete_requirement", "arg_names": ["requirement_id"], "ms": 1, "isError": false, "response_chars": 76}
+{"ts": "2026-09-15T00:58:06.309+00:00", "tool": "create_requirement", "arg_names": ["acceptance_criteria", "author", "business_value", "current_state", "desired_state", "functional_requirements", "out_of_scope", "priority", "risk_level", "title", "type"], "ms": 1, "isError": false, "response_chars": 205}
+{"ts": "2026-09-15T00:58:06.314+00:00", "tool": "query_requirements", "arg_names": [], "ms": 0, "isError": false, "response_chars": 552}
+{"ts": "2026-09-15T00:58:06.325+00:00", "tool": "update_requirement", "arg_names": ["functional_requirements", "reason", "requirement_id"], "ms": 1, "isError": false, "response_chars": 94}
+{"ts": "2026-09-15T00:58:06.330+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 69}
+{"ts": "2026-09-15T00:58:06.334+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 69}
+{"ts": "2026-09-15T00:58:06.338+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 69}
+{"ts": "2026-09-15T00:58:06.342+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 69}
+{"ts": "2026-09-15T00:58:06.347+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 69}
+{"ts": "2026-09-15T00:58:06.351+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 69}
+{"ts": "2026-09-15T00:58:06.355+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 0, "isError": false, "response_chars": 70}
+{"ts": "2026-09-15T00:58:06.359+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 69}
+{"ts": "2026-09-15T00:58:06.363+00:00", "tool": "get_requirement_details", "arg_names": ["requirement_id"], "ms": 1, "isError": false, "response_chars": 1385}
+{"ts": "2026-09-15T00:58:06.366+00:00", "tool": "get_requirement_details", "arg_names": ["requirement_id"], "ms": 1, "isError": false, "response_chars": 1377}
+{"ts": "2026-09-15T00:58:06.370+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 0, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:58:06.374+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 0, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:58:06.379+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:58:06.383+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:58:06.387+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 0, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:58:06.391+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:58:06.396+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 73}
+{"ts": "2026-09-15T00:58:06.400+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 0, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:58:06.404+00:00", "tool": "get_project_status", "arg_names": [], "ms": 1, "isError": false, "response_chars": 524}
+{"ts": "2026-09-15T00:58:18.500+00:00", "tool": "create_architecture_decision", "arg_names": ["authors", "consequences", "considered_options", "context", "deciders", "decision", "decision_drivers", "requirement_ids", "risk_assessment", "title"], "ms": 5, "isError": false, "response_chars": 115}
+{"ts": "2026-09-15T00:58:18.516+00:00", "tool": "create_architecture_decision", "arg_names": ["authors", "consequences", "considered_options", "context", "deciders", "decision", "decision_drivers", "requirement_ids", "risk_assessment", "title", "validation_criteria"], "ms": 1, "isError": false, "response_chars": 125}
+{"ts": "2026-09-15T00:58:18.527+00:00", "tool": "create_architecture_decision", "arg_names": ["authors", "consequences", "considered_options", "context", "deciders", "decision", "decision_drivers", "requirement_ids", "title", "validation_criteria"], "ms": 1, "isError": false, "response_chars": 113}
+{"ts": "2026-09-15T00:58:18.538+00:00", "tool": "create_architecture_decision", "arg_names": ["authors", "consequences", "considered_options", "context", "deciders", "decision", "decision_drivers", "implementation_notes", "requirement_ids", "risk_assessment", "title"], "ms": 1, "isError": false, "response_chars": 132}
+{"ts": "2026-09-15T00:58:18.542+00:00", "tool": "add_architecture_review", "arg_names": ["architecture_id", "comment", "reviewer"], "ms": 0, "isError": false, "response_chars": 52}
+{"ts": "2026-09-15T00:58:18.552+00:00", "tool": "update_architecture", "arg_names": ["architecture_id", "decision", "reason"], "ms": 1, "isError": false, "response_chars": 89}
+{"ts": "2026-09-15T00:58:18.556+00:00", "tool": "get_architecture_details", "arg_names": ["architecture_id"], "ms": 1, "isError": false, "response_chars": 2183}
+{"ts": "2026-09-15T00:58:18.560+00:00", "tool": "start_architectural_conversation", "arg_names": ["complexity_level", "diagram_purpose", "project_context"], "ms": 0, "isError": false, "response_chars": 949}
+{"ts": "2026-09-15T00:58:18.564+00:00", "tool": "continue_architectural_conversation", "arg_names": ["responses", "session_id"], "ms": 0, "isError": false, "response_chars": 537}
+{"ts": "2026-09-15T00:58:18.567+00:00", "tool": "continue_architectural_conversation", "arg_names": ["responses", "session_id"], "ms": 0, "isError": false, "response_chars": 472}
+{"ts": "2026-09-15T00:58:18.570+00:00", "tool": "continue_architectural_conversation", "arg_names": ["responses", "session_id"], "ms": 0, "isError": false, "response_chars": 729}
+{"ts": "2026-09-15T00:58:18.575+00:00", "tool": "create_architectural_diagrams", "arg_names": ["diagram_type", "output_format", "output_path"], "ms": 0, "isError": false, "response_chars": 585}
+{"ts": "2026-09-15T00:58:18.579+00:00", "tool": "update_architecture_status", "arg_names": ["architecture_id", "comment", "new_status"], "ms": 1, "isError": false, "response_chars": 61}
+{"ts": "2026-09-15T00:58:18.583+00:00", "tool": "update_architecture_status", "arg_names": ["architecture_id", "comment", "new_status"], "ms": 0, "isError": false, "response_chars": 61}
+{"ts": "2026-09-15T00:58:18.587+00:00", "tool": "update_architecture_status", "arg_names": ["architecture_id", "comment", "new_status"], "ms": 1, "isError": false, "response_chars": 61}
+{"ts": "2026-09-15T00:58:18.591+00:00", "tool": "update_architecture_status", "arg_names": ["architecture_id", "comment", "new_status"], "ms": 0, "isError": false, "response_chars": 61}
+{"ts": "2026-09-15T00:58:18.594+00:00", "tool": "query_architecture_decisions", "arg_names": ["requirement_id"], "ms": 0, "isError": false, "response_chars": 213}
+{"ts": "2026-09-15T00:58:18.598+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:58:18.602+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:58:18.607+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:58:18.611+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:58:18.616+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:58:18.621+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 73}
+{"ts": "2026-09-15T00:58:18.625+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 0, "isError": false, "response_chars": 69}
+{"ts": "2026-09-15T00:58:18.630+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 69}
+{"ts": "2026-09-15T00:58:18.633+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 0, "isError": false, "response_chars": 69}
+{"ts": "2026-09-15T00:58:18.637+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 0, "isError": false, "response_chars": 69}
+{"ts": "2026-09-15T00:58:18.641+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 0, "isError": false, "response_chars": 65}
+{"ts": "2026-09-15T00:58:18.645+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 0, "isError": false, "response_chars": 69}
+{"ts": "2026-09-15T00:58:18.648+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 0, "isError": false, "response_chars": 70}
+{"ts": "2026-09-15T00:58:18.652+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 0, "isError": false, "response_chars": 65}
+{"ts": "2026-09-15T00:58:18.656+00:00", "tool": "trace_requirement", "arg_names": ["requirement_id"], "ms": 1, "isError": false, "response_chars": 669}
+{"ts": "2026-09-15T00:58:30.787+00:00", "tool": "create_task", "arg_names": ["acceptance_criteria", "assignee", "definition_of_done", "effort", "priority", "requirement_ids", "test_plan", "title", "user_story"], "ms": 5, "isError": false, "response_chars": 203}
+{"ts": "2026-09-15T00:58:30.800+00:00", "tool": "create_task", "arg_names": ["acceptance_criteria", "assignee", "effort", "parent_task_id", "priority", "requirement_ids", "title", "user_story"], "ms": 2, "isError": false, "response_chars": 200}
+{"ts": "2026-09-15T00:58:30.810+00:00", "tool": "create_task", "arg_names": ["acceptance_criteria", "assignee", "effort", "parent_task_id", "priority", "requirement_ids", "title", "user_story"], "ms": 1, "isError": false, "response_chars": 198}
+{"ts": "2026-09-15T00:58:30.819+00:00", "tool": "create_task", "arg_names": ["acceptance_criteria", "assignee", "effort", "priority", "requirement_ids", "test_plan", "title", "user_story"], "ms": 1, "isError": false, "response_chars": 201}
+{"ts": "2026-09-15T00:58:30.830+00:00", "tool": "create_task", "arg_names": ["acceptance_criteria", "assignee", "effort", "parent_task_id", "priority", "requirement_ids", "title", "user_story"], "ms": 3, "isError": false, "response_chars": 216}
+{"ts": "2026-09-15T00:58:30.839+00:00", "tool": "create_task", "arg_names": ["acceptance_criteria", "assignee", "effort", "priority", "requirement_ids", "title", "user_story"], "ms": 1, "isError": false, "response_chars": 212}
+{"ts": "2026-09-15T00:58:30.848+00:00", "tool": "create_task", "arg_names": ["acceptance_criteria", "assignee", "effort", "parent_task_id", "priority", "requirement_ids", "title", "user_story"], "ms": 1, "isError": false, "response_chars": 198}
+{"ts": "2026-09-15T00:58:30.856+00:00", "tool": "create_task", "arg_names": ["acceptance_criteria", "assignee", "effort", "priority", "requirement_ids", "title", "user_story"], "ms": 1, "isError": false, "response_chars": 202}
+{"ts": "2026-09-15T00:58:30.865+00:00", "tool": "create_task", "arg_names": ["acceptance_criteria", "assignee", "definition_of_done", "effort", "priority", "requirement_ids", "title", "user_story"], "ms": 1, "isError": false, "response_chars": 183}
+{"ts": "2026-09-15T00:58:30.874+00:00", "tool": "create_task", "arg_names": ["acceptance_criteria", "assignee", "effort", "priority", "requirement_ids", "title", "user_story"], "ms": 1, "isError": false, "response_chars": 202}
+{"ts": "2026-09-15T00:58:30.883+00:00", "tool": "create_task", "arg_names": ["acceptance_criteria", "assignee", "effort", "priority", "requirement_ids", "title", "user_story"], "ms": 2, "isError": false, "response_chars": 222}
+{"ts": "2026-09-15T00:58:30.893+00:00", "tool": "create_task", "arg_names": ["acceptance_criteria", "assignee", "effort", "parent_task_id", "priority", "requirement_ids", "title", "user_story"], "ms": 1, "isError": false, "response_chars": 189}
+{"ts": "2026-09-15T00:58:30.903+00:00", "tool": "create_task", "arg_names": ["acceptance_criteria", "assignee", "effort", "priority", "requirement_ids", "title", "user_story"], "ms": 1, "isError": false, "response_chars": 184}
+{"ts": "2026-09-15T00:58:30.907+00:00", "tool": "create_relationship", "arg_names": ["relationship_type", "source_id", "target_id"], "ms": 1, "isError": false, "response_chars": 80}
+{"ts": "2026-09-15T00:58:30.911+00:00", "tool": "create_relationship", "arg_names": ["relationship_type", "source_id", "target_id"], "ms": 1, "isError": false, "response_chars": 80}
+{"ts": "2026-09-15T00:58:30.915+00:00", "tool": "create_relationship", "arg_names": ["relationship_type", "source_id", "target_id"], "ms": 1, "isError": false, "response_chars": 80}
+{"ts": "2026-09-15T00:58:30.920+00:00", "tool": "create_relationship", "arg_names": ["relationship_type", "source_id", "target_id"], "ms": 1, "isError": false, "response_chars": 80}
+{"ts": "2026-09-15T00:58:30.924+00:00", "tool": "create_relationship", "arg_names": ["relationship_type", "source_id", "target_id"], "ms": 1, "isError": false, "response_chars": 80}
+{"ts": "2026-09-15T00:58:30.928+00:00", "tool": "create_relationship", "arg_names": ["relationship_type", "source_id", "target_id"], "ms": 0, "isError": false, "response_chars": 80}
+{"ts": "2026-09-15T00:58:30.932+00:00", "tool": "create_relationship", "arg_names": ["relationship_type", "source_id", "target_id"], "ms": 1, "isError": false, "response_chars": 80}
+{"ts": "2026-09-15T00:58:30.936+00:00", "tool": "create_relationship", "arg_names": ["relationship_type", "source_id", "target_id"], "ms": 1, "isError": false, "response_chars": 80}
+{"ts": "2026-09-15T00:58:30.940+00:00", "tool": "create_relationship", "arg_names": ["relationship_type", "source_id", "target_id"], "ms": 0, "isError": false, "response_chars": 80}
+{"ts": "2026-09-15T00:58:30.949+00:00", "tool": "update_task", "arg_names": ["effort", "reason", "task_id"], "ms": 1, "isError": false, "response_chars": 69}
+{"ts": "2026-09-15T00:58:30.953+00:00", "tool": "get_task_details", "arg_names": ["task_id"], "ms": 1, "isError": false, "response_chars": 1197}
+{"ts": "2026-09-15T00:58:30.959+00:00", "tool": "get_entity_relationships", "arg_names": ["entity_id"], "ms": 3, "isError": false, "response_chars": 580}
+{"ts": "2026-09-15T00:58:30.963+00:00", "tool": "get_project_status", "arg_names": [], "ms": 1, "isError": false, "response_chars": 1289}
+{"ts": "2026-09-15T00:58:46.867+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 4, "isError": false, "response_chars": 66}
+{"ts": "2026-09-15T00:58:46.878+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 63}
+{"ts": "2026-09-15T00:58:46.883+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 66}
+{"ts": "2026-09-15T00:58:46.888+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 63}
+{"ts": "2026-09-15T00:58:46.894+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 66}
+{"ts": "2026-09-15T00:58:46.899+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 63}
+{"ts": "2026-09-15T00:58:46.904+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 66}
+{"ts": "2026-09-15T00:58:46.909+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 63}
+{"ts": "2026-09-15T00:58:46.914+00:00", "tool": "get_project_status", "arg_names": [], "ms": 1, "isError": false, "response_chars": 1032}
+{"ts": "2026-09-15T00:58:46.919+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 66}
+{"ts": "2026-09-15T00:58:46.923+00:00", "tool": "get_requirement_details", "arg_names": ["requirement_id"], "ms": 1, "isError": false, "response_chars": 1615}
+{"ts": "2026-09-15T00:58:46.935+00:00", "tool": "update_requirement", "arg_names": ["acceptance_criteria", "reason", "requirement_id"], "ms": 1, "isError": false, "response_chars": 158}
+{"ts": "2026-09-15T00:58:46.939+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 63}
+{"ts": "2026-09-15T00:58:46.944+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 66}
+{"ts": "2026-09-15T00:58:46.948+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 63}
+{"ts": "2026-09-15T00:58:46.953+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 66}
+{"ts": "2026-09-15T00:58:46.958+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 63}
+{"ts": "2026-09-15T00:58:46.963+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 0, "isError": false, "response_chars": 66}
+{"ts": "2026-09-15T00:58:46.967+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 63}
+{"ts": "2026-09-15T00:58:46.972+00:00", "tool": "get_project_status", "arg_names": [], "ms": 1, "isError": false, "response_chars": 880}
+{"ts": "2026-09-15T00:58:46.977+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 66}
+{"ts": "2026-09-15T00:58:46.982+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 63}
+{"ts": "2026-09-15T00:58:46.986+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 66}
+{"ts": "2026-09-15T00:58:46.991+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 63}
+{"ts": "2026-09-15T00:58:46.996+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 66}
+{"ts": "2026-09-15T00:58:47.007+00:00", "tool": "create_architecture_decision", "arg_names": ["considered_options", "context", "deciders", "decision", "decision_drivers", "requirement_ids", "title", "validation_criteria"], "ms": 1, "isError": false, "response_chars": 103}
+{"ts": "2026-09-15T00:58:47.012+00:00", "tool": "update_architecture_status", "arg_names": ["architecture_id", "comment", "new_status"], "ms": 0, "isError": false, "response_chars": 61}
+{"ts": "2026-09-15T00:58:47.016+00:00", "tool": "update_architecture_status", "arg_names": ["architecture_id", "comment", "new_status"], "ms": 0, "isError": false, "response_chars": 63}
+{"ts": "2026-09-15T00:58:47.025+00:00", "tool": "update_task", "arg_names": ["reason", "task_id", "title"], "ms": 0, "isError": false, "response_chars": 68}
+{"ts": "2026-09-15T00:58:47.030+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 63}
+{"ts": "2026-09-15T00:58:47.034+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 66}
+{"ts": "2026-09-15T00:58:47.038+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 63}
+{"ts": "2026-09-15T00:58:47.042+00:00", "tool": "get_project_status", "arg_names": [], "ms": 1, "isError": false, "response_chars": 725}
+{"ts": "2026-09-15T00:58:47.046+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 0, "isError": false, "response_chars": 66}
+{"ts": "2026-09-15T00:58:47.051+00:00", "tool": "update_task_status", "arg_names": ["comment", "new_status", "task_id"], "ms": 1, "isError": false, "response_chars": 63}
+{"ts": "2026-09-15T00:58:47.054+00:00", "tool": "get_requirement_details", "arg_names": ["requirement_id"], "ms": 1, "isError": false, "response_chars": 1838}
+{"ts": "2026-09-15T00:58:47.058+00:00", "tool": "get_task_details", "arg_names": ["task_id"], "ms": 1, "isError": false, "response_chars": 981}
+{"ts": "2026-09-15T00:59:00.946+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 4, "isError": false, "response_chars": 68}
+{"ts": "2026-09-15T00:59:00.954+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:59:00.959+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 68}
+{"ts": "2026-09-15T00:59:00.964+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:59:00.969+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 68}
+{"ts": "2026-09-15T00:59:00.977+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:59:00.982+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 68}
+{"ts": "2026-09-15T00:59:00.988+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:59:00.993+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 68}
+{"ts": "2026-09-15T00:59:00.998+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:59:01.003+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 68}
+{"ts": "2026-09-15T00:59:01.008+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:59:01.012+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 69}
+{"ts": "2026-09-15T00:59:01.017+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 73}
+{"ts": "2026-09-15T00:59:01.021+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 0, "isError": false, "response_chars": 68}
+{"ts": "2026-09-15T00:59:01.026+00:00", "tool": "update_requirement_status", "arg_names": ["comment", "new_status", "requirement_id"], "ms": 1, "isError": false, "response_chars": 72}
+{"ts": "2026-09-15T00:59:01.030+00:00", "tool": "get_entity_history", "arg_names": ["entity_id"], "ms": 1, "isError": false, "response_chars": 1974}
+{"ts": "2026-09-15T00:59:01.035+00:00", "tool": "trace_requirement", "arg_names": ["requirement_id"], "ms": 1, "isError": false, "response_chars": 1459}
+{"ts": "2026-09-15T00:59:01.043+00:00", "tool": "export_project_documentation", "arg_names": ["output_directory", "project_name"], "ms": 3, "isError": false, "response_chars": 168}
+{"ts": "2026-09-15T00:59:01.049+00:00", "tool": "create_architectural_diagrams", "arg_names": ["diagram_type", "output_format", "output_path"], "ms": 1, "isError": false, "response_chars": 3357}
+{"ts": "2026-09-15T00:59:01.052+00:00", "tool": "get_project_metrics", "arg_names": [], "ms": 1, "isError": false, "response_chars": 485}
+{"ts": "2026-09-15T00:59:01.057+00:00", "tool": "get_project_status", "arg_names": [], "ms": 1, "isError": false, "response_chars": 569}

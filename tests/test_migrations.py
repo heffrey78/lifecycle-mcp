@@ -344,6 +344,36 @@ def test_dead_columns_are_dropped_and_live_data_and_constraints_survive(tmp_path
             conn.execute("UPDATE requirements SET priority = 'P9' WHERE id = 'REQ-0001-FUNC-00'")
 
 
+# --- repair of updated_at stored as literal text (F-42) ----------------------------------------------
+
+
+def test_architecture_updated_at_stored_as_literal_text_is_repaired(tmp_path):
+    db = database_at(tmp_path / "timestamps.db", version=12)
+    with sqlite3.connect(db) as conn:
+        conn.executescript(
+            """
+            INSERT INTO architecture (id, type, title, status, created_at, updated_at) VALUES
+                ('ADR-0001', 'ADR', 'Has events', 'Accepted', '2026-09-14 10:00:00', 'CURRENT_TIMESTAMP'),
+                ('ADR-0002', 'ADR', 'No events', 'Accepted', '2026-09-14 11:00:00', 'CURRENT_TIMESTAMP'),
+                ('ADR-0003', 'ADR', 'Already a timestamp', 'Proposed', '2026-09-14 12:00:00', '2026-09-14 12:30:00');
+            INSERT INTO lifecycle_events (entity_type, entity_id, event_type, from_value, to_value, occurred_at) VALUES
+                ('architecture', 'ADR-0001', 'created', NULL, NULL, '2026-09-14 10:00:00'),
+                ('architecture', 'ADR-0001', 'status_change', 'Proposed', 'Accepted', '2026-09-14 10:05:00');
+            """
+        )
+
+    assert apply_all_migrations(db) == LATEST
+
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT id, updated_at FROM architecture ORDER BY id").fetchall() == [
+            ("ADR-0001", "2026-09-14 10:05:00"),
+            ("ADR-0002", "2026-09-14 11:00:00"),
+            ("ADR-0003", "2026-09-14 12:30:00"),
+        ]
+        # The repair is not a status change, so nothing new is logged.
+        assert conn.execute("SELECT COUNT(*) FROM lifecycle_events").fetchone() == (2,)
+
+
 # --- through the MCP layer: links survive a restart ------------------------------------------------
 
 

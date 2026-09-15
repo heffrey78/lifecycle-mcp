@@ -475,14 +475,12 @@ class TaskHandler(BaseHandler):
             current_status = current_task["status"]
             new_status = params["new_status"]
 
-            # Prepare update data
-            update_data = {"status": new_status, "updated_at": "CURRENT_TIMESTAMP"}
-
+            # Update status and assignee. CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
+            assignments, values = "status = ?, updated_at = CURRENT_TIMESTAMP", [new_status]
             if params.get("assignee"):
-                update_data["assignee"] = params["assignee"]
-
-            # Update task
-            self.db.update_record("tasks", update_data, "id = ?", [params["task_id"]])
+                assignments += ", assignee = ?"
+                values.append(params["assignee"])
+            self.db.execute_query(f"UPDATE tasks SET {assignments} WHERE id = ?", [*values, params["task_id"]])
 
             # Add comment if provided
             if params.get("comment"):

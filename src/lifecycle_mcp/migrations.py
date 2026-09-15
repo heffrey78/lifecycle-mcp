@@ -602,6 +602,27 @@ def log_architecture_status_changes(conn: sqlite3.Connection) -> None:
     )
 
 
+def repair_literal_updated_at(conn: sqlite3.Connection) -> None:
+    """Replace architecture updated_at values stored as the text 'CURRENT_TIMESTAMP' (F-42).
+
+    The status tools bound the string instead of using the SQL keyword. Requirements and tasks never kept it: their
+    timestamp triggers overwrite updated_at after every update (and would do the same to a repair), while architecture
+    has no such trigger. Each affected decision gets its latest lifecycle event time, else its created_at.
+    """
+    conn.execute(
+        """
+        UPDATE architecture
+        SET updated_at = COALESCE(
+            (SELECT MAX(e.occurred_at) FROM lifecycle_events e
+             WHERE e.entity_type = 'architecture' AND e.entity_id = architecture.id),
+            created_at,
+            CURRENT_TIMESTAMP
+        )
+        WHERE updated_at = 'CURRENT_TIMESTAMP'
+        """
+    )
+
+
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "GitHub integration fields", add_github_integration_columns),
     (2, "GitHub sync metadata fields", add_github_sync_metadata_columns),
@@ -615,6 +636,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (10, "Stop using requirement decomposition columns", stop_using_decomposition_columns),
     (11, "Drop dead columns", drop_dead_columns),
     (12, "Log architecture status changes", log_architecture_status_changes),
+    (13, "Repair architecture updated_at stored as the text CURRENT_TIMESTAMP", repair_literal_updated_at),
 ]
 
 

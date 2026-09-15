@@ -943,6 +943,20 @@ class TaskHandler(BaseHandler):
                     task_info += "\n## Parent Task\n"
                     task_info += f"- {parent['id']}: {parent['title']} [{parent['status']}]\n"
 
+            # Tasks this task waits on, and tasks waiting on it (roadmap R7)
+            task_info += self._format_linked(
+                "Depends On",
+                f"SELECT t.id, t.title, t.status FROM tasks t JOIN ({TASK_DEPENDENCIES_SQL}) dep "
+                "ON dep.dependency_id = t.id WHERE dep.task_id = ? ORDER BY t.id",
+                task["id"],
+            )
+            task_info += self._format_linked(
+                "Blocks",
+                f"SELECT t.id, t.title, t.status FROM tasks t JOIN ({TASK_DEPENDENCIES_SQL}) dep "
+                "ON dep.task_id = t.id WHERE dep.dependency_id = ? ORDER BY t.id",
+                task["id"],
+            )
+
             # Architecture decisions this task implements (roadmap R9)
             task_info += self._format_linked(
                 "Implements Decisions",

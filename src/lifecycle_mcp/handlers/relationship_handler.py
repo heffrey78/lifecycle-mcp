@@ -59,10 +59,7 @@ class RelationshipHandler(BaseHandler):
             },
             {
                 "name": "query_relationships",
-                "description": (
-                    "Query links. With entity_id: that record's links, optionally by direction and type. "
-                    "Without: every link as JSON, optionally only between the given entity types."
-                ),
+                "description": "One record's links by direction and type, or without entity_id every link as JSON",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -78,10 +75,7 @@ class RelationshipHandler(BaseHandler):
             },
             {
                 "name": "get_entity_history",
-                "description": (
-                    "Show how a requirement, task or architecture decision changed over time: creation, field "
-                    "edits with before and after values and reasons, status changes, comments and deletion"
-                ),
+                "description": "A record's history: creation, edits (before, after, reason), status changes, comments",
                 "inputSchema": {
                     "type": "object",
                     "properties": {"entity_id": {"type": "string"}},

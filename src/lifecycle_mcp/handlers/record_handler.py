@@ -37,7 +37,7 @@ class RecordHandler(BaseHandler):
         return [
             {
                 "name": "get_details",
-                "description": "Full details of a requirement, task or architecture decision, with links and comments",
+                "description": "Details of a requirement, task or ADR, with links and comments",
                 "inputSchema": {
                     "type": "object",
                     "properties": {"entity_id": {"type": "string"}},
@@ -47,9 +47,8 @@ class RecordHandler(BaseHandler):
             {
                 "name": "delete_record",
                 "description": (
-                    "Delete a record created by mistake: a Draft requirement, Not Started task or Proposed "
-                    "architecture decision that nothing depends on. Refusals name what blocks it; otherwise change "
-                    "its status instead."
+                    "Delete a Draft requirement, Not Started task or Proposed ADR that nothing depends on. "
+                    "Refusals say what blocks it."
                 ),
                 "inputSchema": {
                     "type": "object",
@@ -59,7 +58,7 @@ class RecordHandler(BaseHandler):
             },
             {
                 "name": "add_comment",
-                "description": "Comment on a requirement, task or architecture decision; shown in details and history",
+                "description": "Comment on a requirement, task or ADR; shown in details and history",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

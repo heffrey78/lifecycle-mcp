@@ -171,7 +171,7 @@ class RequirementHandler(BaseHandler):
             },
             {
                 "name": "query_requirements_json",
-                "description": "Query requirements and return structured JSON data for UI",
+                "description": "Search and filter requirements, as JSON",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -194,9 +194,8 @@ class RequirementHandler(BaseHandler):
             {
                 "name": "update_requirement",
                 "description": (
-                    "Edit a requirement's content in place. At Approved or later a reason is required, and the "
-                    "requirement shows as changed since last review until its next status change. Status moves go "
-                    "through update_requirement_status; the type and ID never change."
+                    "Edit content in place. At Approved or later a reason is required, and the requirement is "
+                    "flagged changed since last review until its next status change."
                 ),
                 "inputSchema": {
                     "type": "object",
@@ -216,10 +215,7 @@ class RequirementHandler(BaseHandler):
                         "validation_metrics": {"type": "array", "items": {"type": "string"}},
                         "out_of_scope": {"type": "array", "items": {"type": "string"}},
                         **EDIT_OPTION_PROPERTIES,
-                        "reason": {
-                            "type": "string",
-                            "description": "Why the change is made; required at Approved or later",
-                        },
+                        "reason": {"type": "string", "description": "Required at Approved or later"},
                     },
                     "required": ["requirement_id"],
                 },

@@ -136,7 +136,7 @@ class TaskHandler(BaseHandler):
             },
             {
                 "name": "query_tasks_json",
-                "description": "Query tasks and return structured JSON data for UI",
+                "description": "Search and filter tasks, as JSON",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -149,10 +149,7 @@ class TaskHandler(BaseHandler):
             },
             {
                 "name": "update_task",
-                "description": (
-                    "Edit a task's content, move it under another parent or change the requirements it implements. "
-                    "The task ID never changes; status moves go through update_task_status."
-                ),
+                "description": "Edit content, move under another parent or change requirements. The ID never changes.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -166,15 +163,12 @@ class TaskHandler(BaseHandler):
                         "implementation_plan": {"type": "array", "items": {"type": "string"}},
                         "test_plan": {"type": "array", "items": {"type": "string"}},
                         "definition_of_done": {"type": "array", "items": {"type": "string"}},
-                        "parent_task_id": {
-                            "type": "string",
-                            "description": "New parent task; an empty string makes it a top-level task",
-                        },
+                        "parent_task_id": {"type": "string", "description": "Empty string makes it top-level"},
                         "requirement_ids": {
                             "type": "array",
                             "items": {"type": "string"},
                             "minItems": 1,
-                            "description": "Replaces the requirements it implements; added ones must be approved",
+                            "description": "Replaces its requirements; added ones must be approved",
                         },
                         **EDIT_OPTION_PROPERTIES,
                     },

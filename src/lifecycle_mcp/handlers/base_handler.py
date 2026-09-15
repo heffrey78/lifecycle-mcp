@@ -41,9 +41,9 @@ class EditRefused(Exception):
 
 # Inputs every update tool accepts next to the fields it edits.
 EDIT_OPTION_PROPERTIES = {
-    "reason": {"type": "string", "description": "Why the change is made; shown in get_entity_history"},
-    "actor": {"type": "string", "description": "Who makes the change (default: MCP User)"},
-    "if_revision": {"type": "integer", "description": "Apply the edit only if the record is still at this revision"},
+    "reason": {"type": "string", "description": "Why the change is made"},
+    "actor": {"type": "string", "description": "Default: MCP User"},
+    "if_revision": {"type": "integer", "description": "Refuse unless the record is at this revision"},
 }
 
 # Record type -> table, for tools that take any record's ID.

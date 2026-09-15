@@ -58,7 +58,7 @@ ARCHITECTURE_CURATED_PROPERTIES = {
     "risk_assessment": {
         "type": "array",
         "items": {"type": "string"},
-        "description": "One entry per risk: the risk, likelihood, impact and mitigation",
+        "description": "Each: risk, likelihood, impact, mitigation",
     },
 }
 
@@ -134,7 +134,7 @@ class ArchitectureHandler(BaseHandler):
             },
             {
                 "name": "query_architecture_decisions_json",
-                "description": "Query architecture decisions and return structured JSON data for UI",
+                "description": "Search and filter architecture decisions, as JSON",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -147,10 +147,7 @@ class ArchitectureHandler(BaseHandler):
             },
             {
                 "name": "update_architecture",
-                "description": (
-                    "Edit a Proposed architecture decision in place. Decisions in any other status are refused: "
-                    "record a new decision that supersedes them instead."
-                ),
+                "description": "Edit while Proposed. Otherwise record a new decision that supersedes it.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

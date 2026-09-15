@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### What to work on next (roadmap R7)
+
+The server still lists 23 tools; definitions grow from 12,341 to 12,512 characters.
+
+#### Added
+- `query_tasks` takes `ready: true` for Not Started tasks whose dependencies are all Complete, highest priority
+  first. A task waits on the tasks it depends on or requires, and on the tasks that block it.
+- `get_details` on a task lists Depends On and Blocks.
+- The comment given with a move to Blocked is kept as the task's blocked reason until it leaves Blocked, and
+  `get_details` shows it. Migration 15 adds `tasks.blocked_reason`.
+
+#### Changed
+- `get_project_status` lists every Blocked task with its reason, and every task or requirement still waiting on a
+  dependency with what it waits on. Blocked tasks without dependency links used to be missing, and the list was cut
+  at 10. `structuredContent` carries the list under `blocked`.
+- `query_tasks` filters combine: `requirement_id` no longer ignores `status`, `priority` and `assignee`.
+
 ### Bulk status moves and design links (roadmap R9, ADR-0003)
 
 Status changes were about half of all tool calls, one record and one step at a time. They now take one call. The

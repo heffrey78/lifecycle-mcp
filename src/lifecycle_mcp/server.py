@@ -93,7 +93,6 @@ class LifecycleMCPServer:
             "create_architectural_diagrams": self.export_handler,
             # Status tools
             "get_project_status": self.status_handler,
-            "get_project_metrics": self.status_handler,
         }
 
         # Create MCP server instance

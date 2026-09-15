@@ -138,7 +138,7 @@ claude mcp add lifecycle /path/to/venv/bin/lifecycle-mcp -e LIFECYCLE_DB=./lifec
 
 ## MCP Tools Reference
 
-The server exposes 24 MCP tools (25 with GitHub integration on) across 7 handler modules for comprehensive lifecycle management. Every tool rejects fields it does not declare, and the error names the field. [CHANGELOG.md](CHANGELOG.md) lists tools that were removed or renamed, with their replacements.
+The server exposes 23 MCP tools (24 with GitHub integration on) across 7 handler modules for comprehensive lifecycle management. Every tool rejects fields it does not declare, and the error names the field. [CHANGELOG.md](CHANGELOG.md) lists tools that were removed or renamed, with their replacements.
 
 ### Tool List
 **Requirements**
@@ -173,8 +173,7 @@ The server exposes 24 MCP tools (25 with GitHub integration on) across 7 handler
 - `get_entity_history` - Show how a record changed: creation, edits with before and after values, status changes, comments and deletion
 
 **Status and export**
-- `get_project_status` - Get project health metrics and dashboards
-- `get_project_metrics` - Get structured project metrics for programmatic use
+- `get_project_status` - Project health dashboard; the metrics also come back as structured data
 - `export_project_documentation` - Export comprehensive markdown documentation
 - `create_architectural_diagrams` - Generate Mermaid diagrams for project visualization
 

@@ -4,7 +4,6 @@ Status Handler for MCP Lifecycle Management Server
 Handles project status and metrics operations
 """
 
-import json
 import os
 import sqlite3
 from typing import Any
@@ -26,11 +25,6 @@ class StatusHandler(BaseHandler):
                 "description": "Get overall project health metrics",
                 "inputSchema": {"type": "object", "properties": {"include_blocked": {"type": "boolean"}}},
             },
-            {
-                "name": "get_project_metrics",
-                "description": "Project metrics as JSON",
-                "inputSchema": {"type": "object", "properties": {}},
-            },
         ]
 
     async def handle_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
@@ -38,8 +32,6 @@ class StatusHandler(BaseHandler):
         try:
             if tool_name == "get_project_status":
                 return self._get_project_status(**arguments)
-            elif tool_name == "get_project_metrics":
-                return self._get_project_metrics(**arguments)
             else:
                 return self._create_error_response(f"Unknown tool: {tool_name}")
         except Exception as e:
@@ -142,13 +134,14 @@ class StatusHandler(BaseHandler):
             if changed:
                 action_info += f" | ⚠️ {len(changed)} changed since review"
 
-            return self._create_above_fold_response("INFO", key_info, action_info, report)
+            # The metrics get_project_metrics used to return come back as structured data (roadmap R10)
+            return self._create_structured_response("INFO", key_info, self._project_metrics(), action_info, report)
 
         except Exception as e:
             return self._create_error_response("Failed to get project status", e)
 
-    def _get_project_metrics(self, **params) -> list[TextContent]:
-        """Get structured project metrics for programmatic use"""
+    def _project_metrics(self) -> dict[str, Any]:
+        """Counts by status, priority and assignee, totals and completion percentages, for structured results"""
         try:
             # Get simplified metrics with by_status structure expected by UI
             req_stats = self.db.execute_query(
@@ -277,11 +270,11 @@ class StatusHandler(BaseHandler):
                 },
             }
 
-            # Return as JSON string in text content
-            return [TextContent(type="text", text=json.dumps(metrics))]
+            return metrics
 
-        except Exception as e:
-            return self._create_error_response("Failed to get project metrics", e)
+        except Exception:
+            self.logger.exception("Failed to compute project metrics")
+            raise
 
     def _add_summary_metrics(self, req_stats, task_stats) -> str:
         """Add summary metrics to the status report"""

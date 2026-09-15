@@ -82,7 +82,7 @@ class TestMCPServerIntegration:
 
         # Verify all tools are registered
         # Total number of MCP tools including relationship handler, JSON query, delete, update and history tools
-        expected_tool_count = 25
+        expected_tool_count = 24
         assert len(server_instance.handlers) == expected_tool_count
 
     @pytest.mark.asyncio

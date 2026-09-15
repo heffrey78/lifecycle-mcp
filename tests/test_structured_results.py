@@ -65,6 +65,22 @@ async def test_an_empty_query_returns_an_empty_structured_list(mcp_server):  # n
     assert result.structuredContent == {"tasks": [], "count": 0}
 
 
+async def test_project_status_returns_the_metrics_as_structured_data(mcp_server):  # noqa: F811
+    await populate(mcp_server)
+
+    result = await call(mcp_server, "get_project_status", {})
+
+    assert "# Project Status Dashboard" in text_of(result)
+    metrics = result.structuredContent
+    assert metrics["requirements"]["by_status"] == {"Approved": 1} and metrics["requirements"]["total"] == 1
+    assert metrics["tasks"]["by_status"] == {"Not Started": 1} and metrics["tasks"]["total"] == 1
+    assert metrics["architecture"] == {"by_status": {"Proposed": 1}, "total": 1}
+    assert metrics["summary"]["completed_tasks"] == 0
+
+    removed = await call(mcp_server, "get_project_metrics", {})
+    assert removed.isError and "Unknown tool" in text_of(removed)
+
+
 async def test_the_json_twins_are_gone(mcp_server):  # noqa: F811
     for name in ("query_requirements_json", "query_tasks_json", "query_architecture_decisions_json"):
         result = await call(mcp_server, name, {})

@@ -52,7 +52,7 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
 ### Core Components
 
 1. **LifecycleMCPServer** (`src/lifecycle_mcp/server.py`): Refactored main server using modular handler architecture
-   - Exposes 24 tools (25 with `LIFECYCLE_GITHUB=on`) across 7 handler modules
+   - Exposes 23 tools (24 with `LIFECYCLE_GITHUB=on`) across 7 handler modules
    - Uses async architecture for proper MCP protocol compliance
    - Implements clean separation of concerns with handler registry for tool routing
    - Validates state transitions and business rules through domain-specific handlers
@@ -66,7 +66,7 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
    - `RecordHandler`: Operations that take any record's ID (3 tools) - details, delete, comment; dispatches to the per-type handlers by ID prefix
    - `RelationshipHandler`: Links and history (4 tools) - create, delete, query links, entity history
    - `ExportHandler`: Documentation generation (2 tools) - export docs, create diagrams
-   - `StatusHandler`: Project health monitoring (2 tools) - project status and metrics
+   - `StatusHandler`: Project health monitoring (1 tool) - project status, with metrics as structured data
 
 3. **DatabaseManager** (`src/lifecycle_mcp/database_manager.py`): Centralized database operations
    - Manages SQLite database connections and schema initialization
@@ -114,7 +114,7 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
 
 ### MCP Tools Available
 
-The server exposes 24 tools (25 with `LIFECYCLE_GITHUB=on`) across 7 handler modules:
+The server exposes 23 tools (24 with `LIFECYCLE_GITHUB=on`) across 7 handler modules:
 
 **Requirement Management (5 tools):**
 - `create_requirement` - Create new requirements with validation
@@ -150,9 +150,8 @@ The server exposes 24 tools (25 with `LIFECYCLE_GITHUB=on`) across 7 handler mod
 - `export_project_documentation` - Generate project docs
 - `create_architectural_diagrams` - Generate architecture diagrams
 
-**Status Monitoring (2 tools):**
-- `get_project_status` - Project health dashboard
-- `get_project_metrics` - Structured metrics
+**Status Monitoring (1 tool):**
+- `get_project_status` - Project health dashboard, with metrics as structured data
 
 ### Database Environment
 

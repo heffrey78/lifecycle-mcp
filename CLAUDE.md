@@ -178,6 +178,7 @@ The server uses the `LIFECYCLE_DB` environment variable to specify the SQLite da
   - ADRs are editable only while Proposed
   - deletes (`BaseHandler._delete_entity`) only remove early-stage records nothing depends on
 - **Changed since last review is derived, not stored**: `changes_since_review()` in `requirement_handler.py` finds field edits after a reviewed requirement's latest status change. The next transition clears it and its comment is the acknowledgement. Don't add a marker column or an acknowledgement tool (owner decision, TASK-0019)
+- **Schema coverage**: `tests/test_schema_coverage.py` fails when a requirements, tasks or architecture column can't be set by that table's create or update tool, or when a tool property has no column. When adding a column, expose it (tool schema, handler, details, export) or put it on the test's explicit system or pending list with the reason
 - The server implements strict state transition validation for requirements
 - All entities use structured ID formats (REQ-XXXX-TYPE-VV, TASK-XXXX-YY-ZZ, ADR-XXXX)
 - JSON fields are used extensively for structured data (arrays, objects)

@@ -104,7 +104,7 @@ class ArchitectureHandler(BaseHandler):
             },
             {
                 "name": "update_architecture_status",
-                "description": "Update architecture decision status",
+                "description": "Update architecture decision status; Superseded comes from a supersedes link",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -216,8 +216,8 @@ class ArchitectureHandler(BaseHandler):
             if before["status"] != "Proposed":
                 raise EditRefused(
                     f"Architecture decision {architecture_id} is {before['status']}; only Proposed decisions can be "
-                    "edited. Record the change as a new decision with create_architecture_decision and move this "
-                    "one to Superseded."
+                    "edited. Record the change as a new decision with create_architecture_decision, then link it "
+                    "with create_relationship (relationship_type supersedes), which moves this one to Superseded."
                 )
 
         try:
@@ -326,13 +326,24 @@ class ArchitectureHandler(BaseHandler):
         )
 
     async def _change_architecture_status(self, architecture_id: str, params: dict[str, Any]) -> StatusChange:
-        """Move one architecture decision to new_status; raises StatusRefused when it doesn't exist"""
-        current_arch = self.db.get_records("architecture", "status", "id = ?", [architecture_id])
+        """Move one architecture decision to new_status; Superseded follows its supersedes link (ADR-0003)"""
+        current_arch = self.db.get_records("architecture", "status, superseded_by", "id = ?", [architecture_id])
         if not current_arch:
             raise StatusRefused("Architecture decision not found")
 
         current_status = current_arch[0]["status"]
+        superseded_by = current_arch[0]["superseded_by"]
         new_status = params["new_status"]
+        if new_status == "Superseded" and not superseded_by:
+            raise StatusRefused(
+                f"Record what supersedes {architecture_id} instead: create_relationship with the newer decision as "
+                f"source_id, {architecture_id} as target_id and relationship_type supersedes moves it to Superseded"
+            )
+        if superseded_by and new_status != "Superseded":
+            raise StatusRefused(
+                f"{architecture_id} is superseded by {superseded_by}; delete that supersedes link before moving it "
+                f"to {new_status}"
+            )
 
         # Update status. CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
         self.db.execute_query(

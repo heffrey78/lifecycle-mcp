@@ -5,13 +5,28 @@ Handles project status and metrics operations
 """
 
 import os
-import sqlite3
 from typing import Any
 
 from mcp.types import TextContent
 
 from .base_handler import BaseHandler
 from .requirement_handler import changes_since_review
+from .task_handler import TASK_DEPENDENCIES_SQL
+
+# Every Blocked task with its reason, and every Not Started task still waiting on a dependency, each with the
+# dependencies that are not Complete (roadmap R7).
+BLOCKED_TASKS_SQL = f"""
+    SELECT * FROM (
+        SELECT t.id, t.title, t.status, t.priority, t.blocked_reason,
+               (SELECT GROUP_CONCAT(d.id, ', ') FROM ({TASK_DEPENDENCIES_SQL}) dep
+                JOIN tasks d ON d.id = dep.dependency_id
+                WHERE dep.task_id = t.id AND d.status != 'Complete') AS waiting_on
+        FROM tasks t
+        WHERE t.status IN ('Blocked', 'Not Started')
+    )
+    WHERE status = 'Blocked' OR waiting_on IS NOT NULL
+    ORDER BY priority, id
+"""
 
 
 class StatusHandler(BaseHandler):
@@ -70,14 +85,8 @@ class StatusHandler(BaseHandler):
                 row_factory=True,
             )
 
-            # Get blocked items
-            blocked = []
-            if params.get("include_blocked", True):
-                try:
-                    blocked = self.db.execute_query("SELECT * FROM blocked_items", fetch_all=True, row_factory=True)
-                except sqlite3.OperationalError:
-                    # View might not work if no dependencies exist yet
-                    blocked = []
+            include_blocked = params.get("include_blocked", True)
+            blocked = self._blocked_items() if include_blocked else []
 
             # Get project name from current working directory
             project_name = os.path.basename(os.getcwd())
@@ -109,9 +118,12 @@ class StatusHandler(BaseHandler):
 
             if blocked:
                 report += f"\n## ⚠️ Blocked Items ({len(blocked)})\n"
-                for item in blocked[:10]:  # Show first 10
-                    report += f"- {item['item_type'].upper()} {item['id']}: {item['title']}\n"
-                    report += f"  Blocked by: {item['blocking_items']}\n"
+                for item in blocked:
+                    report += f"- {item['type'].upper()} {item['id']}: {item['title']} [{item['status']}]\n"
+                    if item["status"] == "Blocked":
+                        report += f"  Reason: {item['reason'] or 'Not given'}\n"
+                    if item["blocked_by"]:
+                        report += f"  Waiting on: {', '.join(item['blocked_by'])}\n"
 
             changed = changes_since_review(self.db)
             if changed:
@@ -134,11 +146,51 @@ class StatusHandler(BaseHandler):
             if changed:
                 action_info += f" | ⚠️ {len(changed)} changed since review"
 
-            # The metrics get_project_metrics used to return come back as structured data (roadmap R10)
-            return self._create_structured_response("INFO", key_info, self._project_metrics(), action_info, report)
+            # The metrics get_project_metrics used to return come back as structured data (roadmap R10), with the
+            # blocked items when they were asked for (roadmap R7)
+            metrics = self._project_metrics()
+            if include_blocked:
+                metrics["blocked"] = blocked
+            return self._create_structured_response("INFO", key_info, metrics, action_info, report)
 
         except Exception as e:
             return self._create_error_response("Failed to get project status", e)
+
+    def _blocked_items(self) -> list[dict[str, Any]]:
+        """Blocked tasks with their reasons, tasks waiting on dependencies and requirements waiting on requirements"""
+        tasks = self.db.execute_query(BLOCKED_TASKS_SQL, fetch_all=True, row_factory=True) or []
+        requirements = (
+            self.db.execute_query(
+                "SELECT id, title, status, blocking_items FROM blocked_items "
+                "WHERE item_type = 'requirement' ORDER BY id",
+                fetch_all=True,
+                row_factory=True,
+            )
+            or []
+        )
+        items = [
+            {
+                "type": "task",
+                "id": row["id"],
+                "title": row["title"],
+                "status": row["status"],
+                "reason": row["blocked_reason"],
+                "blocked_by": row["waiting_on"].split(", ") if row["waiting_on"] else [],
+            }
+            for row in tasks
+        ]
+        items += [
+            {
+                "type": "requirement",
+                "id": row["id"],
+                "title": row["title"],
+                "status": row["status"],
+                "reason": None,
+                "blocked_by": [item.strip() for item in row["blocking_items"].split(",")],
+            }
+            for row in requirements
+        ]
+        return items
 
     def _project_metrics(self) -> dict[str, Any]:
         """Counts by status, priority and assignee, totals and completion percentages, for structured results"""

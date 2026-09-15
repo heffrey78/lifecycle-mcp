@@ -5,12 +5,23 @@ Handles all requirement-related operations
 """
 
 import json
+from collections import deque
+from collections.abc import Iterable
 from typing import Any
 
 from mcp.types import TextContent
 
 from ..database_manager import DatabaseManager
-from .base_handler import EDIT_OPTION_PROPERTIES, BaseHandler, DeleteRefused, EditRefused, RevisionConflict
+from .base_handler import (
+    EDIT_OPTION_PROPERTIES,
+    STATUS_ID_LIST_PROPERTY,
+    BaseHandler,
+    DeleteRefused,
+    EditRefused,
+    RevisionConflict,
+    StatusChange,
+    StatusRefused,
+)
 
 # Records that depend on a requirement and therefore block deleting it.
 REQUIREMENT_DELETE_BLOCKERS = [
@@ -64,6 +75,51 @@ REQUIREMENT_JSON_FIELDS = (
 
 # A requirement in one of these statuses has been approved: edits need a reason and flag it as changed since review.
 REVIEWED_STATUSES = ("Approved", "Architecture", "Ready", "Implemented", "Validated", "Deprecated")
+
+# Status -> the statuses update_requirement_status may move a requirement to next.
+REQUIREMENT_TRANSITIONS = {
+    "Draft": ["Under Review", "Deprecated"],
+    "Under Review": ["Draft", "Approved", "Deprecated"],
+    "Approved": ["Architecture", "Ready", "Deprecated"],
+    "Architecture": ["Ready", "Approved"],
+    "Ready": ["Implemented", "Deprecated"],
+    "Implemented": ["Validated", "Ready"],
+    "Validated": ["Deprecated"],
+    "Deprecated": [],
+}
+# A multi-step move may end at these statuses but never pass through them: tasks and ADRs are planned against an
+# approved requirement, and validation is a deliberate step (ADR-0003).
+REQUIREMENT_STOP_STATUSES = ("Approved", "Validated")
+
+
+def requirement_path(current: str, target: str, stops: Iterable[str] = REQUIREMENT_STOP_STATUSES) -> list[str] | None:
+    """The shortest allowed sequence of statuses from current to target that passes through none of stops"""
+    if target == current:
+        return None
+    paths, seen = deque([[current]]), {current}
+    while paths:
+        path = paths.popleft()
+        for status in REQUIREMENT_TRANSITIONS.get(path[-1], []):
+            if status == target:
+                return [*path, status]
+            if status not in seen and status not in stops:
+                seen.add(status)
+                paths.append([*path, status])
+    return None
+
+
+def refused_move_reason(current: str, target: str) -> str:
+    """Why update_requirement_status can't move a requirement from current to target, and what it can do instead"""
+    detour = requirement_path(current, target, stops=())
+    if detour:
+        stop = next(status for status in detour[1:-1] if status in REQUIREMENT_STOP_STATUSES)
+        return (
+            f"Invalid transition from {current} to {target} in one call: it would pass through {stop}. "
+            f"Move it to {stop} first"
+        )
+    allowed = ", ".join(REQUIREMENT_TRANSITIONS.get(current, [])) or "nothing"
+    return f"Invalid transition from {current} to {target}. From {current} it can move to: {allowed}"
+
 
 # Content edits to reviewed requirements made after their latest status change. The marker is derived rather than
 # stored: the next status transition clears it, and that transition's comment serves as the acknowledgement.
@@ -133,11 +189,15 @@ class RequirementHandler(BaseHandler):
             },
             {
                 "name": "update_requirement_status",
-                "description": "Move requirement through lifecycle states",
+                "description": (
+                    "Move requirements through lifecycle states; walks the allowed path, "
+                    "never through Approved or Validated"
+                ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "requirement_id": {"type": "string"},
+                        "requirement_ids": STATUS_ID_LIST_PROPERTY,
                         "new_status": {
                             "type": "string",
                             "enum": [
@@ -153,7 +213,7 @@ class RequirementHandler(BaseHandler):
                         },
                         "comment": {"type": "string"},
                     },
-                    "required": ["requirement_id", "new_status"],
+                    "required": ["new_status"],
                 },
             },
             {
@@ -636,82 +696,71 @@ Guidelines:
             self.logger.error(f"Failed to create requirement dependency: {e}")
 
     async def _update_requirement_status(self, **params) -> list[TextContent]:
-        """Update requirement status with validation"""
-        # Validate required parameters
-        error = self._validate_required_params(params, ["requirement_id", "new_status"])
+        """Move one requirement, or each of requirement_ids, to new_status (roadmap R9)"""
+        error = self._validate_required_params(params, ["new_status"])
         if error:
             return self._create_error_response(error)
+        return await self._change_statuses(
+            params,
+            "requirement_id",
+            "Requirement",
+            "requirements",
+            lambda requirement_id: self._change_requirement_status(requirement_id, params),
+            "Failed to update requirement status",
+        )
 
-        try:
-            # Get current status
-            current_req = self.db.get_records("requirements", "status", "id = ?", [params["requirement_id"]])
+    async def _change_requirement_status(self, requirement_id: str, params: dict[str, Any]) -> StatusChange:
+        """Move one requirement to new_status; raises StatusRefused when it is missing or the move isn't allowed"""
+        current_req = self.db.get_records("requirements", "status", "id = ?", [requirement_id])
+        if not current_req:
+            raise StatusRefused("Requirement not found")
 
-            if not current_req:
-                return self._create_error_response("Requirement not found")
+        current_status = current_req[0]["status"]
+        new_status = params["new_status"]
+        path = requirement_path(current_status, new_status)
+        if path is None:
+            raise StatusRefused(refused_move_reason(current_status, new_status))
 
-            current_status = current_req[0]["status"]
-            new_status = params["new_status"]
-
-            # Validate task completion before allowing Validated status
-            if new_status == "Validated":
-                incomplete_tasks = self.db.execute_query(
-                    """
-                    SELECT t.id, t.title, t.status FROM tasks t
-                    JOIN relationships rel ON rel.target_id = t.id
-                    WHERE rel.source_type = 'requirement' AND rel.source_id = ?
-                      AND rel.target_type = 'task' AND rel.relationship_type = 'implements'
-                      AND t.status != 'Complete'
-                """,
-                    [params["requirement_id"]],
-                    fetch_all=True,
-                    row_factory=True,
-                )
-
-                if incomplete_tasks:
-                    task_list = "\n".join(
-                        f"- {task['id']}: {task['title']} (status: {task['status']})" for task in incomplete_tasks
-                    )
-                    error_msg = (
-                        f"Cannot validate requirement with incomplete tasks. "
-                        f"The following tasks must be completed first:\n{task_list}\n\n"
-                        f"All tasks must have 'Complete' status before requirement validation."
-                    )
-                    return self._create_error_response(error_msg)
-
-            # Validate state transition
-            valid_transitions = {
-                "Draft": ["Under Review", "Deprecated"],
-                "Under Review": ["Draft", "Approved", "Deprecated"],
-                "Approved": ["Architecture", "Ready", "Deprecated"],
-                "Architecture": ["Ready", "Approved"],
-                "Ready": ["Implemented", "Deprecated"],
-                "Implemented": ["Validated", "Ready"],
-                "Validated": ["Deprecated"],
-                "Deprecated": [],
-            }
-
-            if new_status not in valid_transitions.get(current_status, []):
-                return self._create_error_response(f"Invalid transition from {current_status} to {new_status}")
-
-            # Update status. CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
-            self.db.execute_query(
-                "UPDATE requirements SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                [new_status, params["requirement_id"]],
+        # Validate task completion before allowing Validated status
+        if new_status == "Validated":
+            incomplete_tasks = self.db.execute_query(
+                """
+                SELECT t.id, t.title, t.status FROM tasks t
+                JOIN relationships rel ON rel.target_id = t.id
+                WHERE rel.source_type = 'requirement' AND rel.source_id = ?
+                  AND rel.target_type = 'task' AND rel.relationship_type = 'implements'
+                  AND t.status != 'Complete'
+            """,
+                [requirement_id],
+                fetch_all=True,
+                row_factory=True,
             )
 
-            # Add review comment if provided
+            if incomplete_tasks:
+                task_list = "\n".join(
+                    f"- {task['id']}: {task['title']} (status: {task['status']})" for task in incomplete_tasks
+                )
+                raise StatusRefused(
+                    f"Cannot validate requirement with incomplete tasks. "
+                    f"The following tasks must be completed first:\n{task_list}\n\n"
+                    f"All tasks must have 'Complete' status before requirement validation."
+                )
+
+        # One UPDATE per step, so the status trigger logs each step; all of them or none (ADR-0003).
+        # CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
+        with self.db.transaction() as cur:
+            for status in path[1:]:
+                cur.execute(
+                    "UPDATE requirements SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    [status, requirement_id],
+                )
             if params.get("comment"):
-                self._add_review_comment("requirement", params["requirement_id"], params["comment"])
+                cur.execute(
+                    "INSERT INTO reviews (entity_type, entity_id, reviewer, comment) VALUES ('requirement', ?, ?, ?)",
+                    [requirement_id, "MCP User", params["comment"]],
+                )
 
-            # Create above-the-fold response
-            key_info = f"Requirement {params['requirement_id']} updated"
-            action_info = f"📈 {current_status} → {new_status}"
-            structured = {"id": params["requirement_id"], "from_status": current_status, "to_status": new_status}
-
-            return self._create_structured_response("SUCCESS", key_info, structured, action_info)
-
-        except Exception as e:
-            return self._create_error_response("Failed to update requirement status", e)
+        return StatusChange(requirement_id, current_status, new_status, path if len(path) > 2 else None)
 
     def _query_requirements(self, **params) -> list[TextContent]:
         """Query requirements with filters"""

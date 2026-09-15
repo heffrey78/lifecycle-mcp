@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Bulk status moves and design links (roadmap R9, ADR-0003)
+
+Status changes were about half of all tool calls, one record and one step at a time. They now take one call. The
+server still lists 23 tools; definitions grow from 11,815 to 12,341 characters.
+
+#### Added
+- `update_requirement_status`, `update_task_status` and `update_architecture_status` accept `requirement_ids`,
+  `task_ids` or `architecture_ids` instead of the single ID. Each ID moves on its own, and `structuredContent` holds
+  `results` (one entry per ID, with `error` when refused), `moved` and `refused`. Some refusals make it a warning
+  while the other IDs still move; it is an error only when none moved.
+- `update_requirement_status` walks the allowed path when `new_status` is more than one step away, logging each step:
+  Draft to Approved goes through Under Review. A move never passes through Approved or Validated, and a gate on the
+  way refuses the whole move. Multi-step results include `path`.
+- `create_relationship` accepts `implements` between a task and an architecture decision, in either order, and
+  `supersedes` from a newer decision to an older one. Superseding moves the older decision to Superseded and sets its
+  `superseded_by`.
+- `get_details` shows the tasks implementing a decision, the decisions a task implements, and what a decision
+  supersedes or is superseded by.
+
+#### Changed
+- `update_architecture_status` refuses Superseded unless a `supersedes` link names the replacement, and refuses
+  moving a superseded decision elsewhere until that link is deleted.
+- The status tools' schemas require only `new_status`; pass the single ID or the list, not both.
+- Migration 14 rebuilds the `relationships` table so it can store `supersedes` links.
+
 ### Structured results (roadmap R10)
 
 The server now lists **23 tools** by default and **24** with `LIFECYCLE_GITHUB=on`, which is the target in ADR-0002. Tool

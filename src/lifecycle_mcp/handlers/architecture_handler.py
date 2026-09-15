@@ -9,7 +9,16 @@ from typing import Any
 
 from mcp.types import TextContent
 
-from .base_handler import EDIT_OPTION_PROPERTIES, BaseHandler, DeleteRefused, EditRefused, RevisionConflict
+from .base_handler import (
+    EDIT_OPTION_PROPERTIES,
+    STATUS_ID_LIST_PROPERTY,
+    BaseHandler,
+    DeleteRefused,
+    EditRefused,
+    RevisionConflict,
+    StatusChange,
+    StatusRefused,
+)
 
 # Records that depend on an architecture decision and therefore block deleting it. The requirement links it
 # addresses belong to the decision itself and are removed with it.
@@ -95,11 +104,12 @@ class ArchitectureHandler(BaseHandler):
             },
             {
                 "name": "update_architecture_status",
-                "description": "Update architecture decision status",
+                "description": "Update architecture decision status; Superseded comes from a supersedes link",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "architecture_id": {"type": "string"},
+                        "architecture_ids": STATUS_ID_LIST_PROPERTY,
                         "new_status": {
                             "type": "string",
                             "enum": [
@@ -116,7 +126,7 @@ class ArchitectureHandler(BaseHandler):
                         },
                         "comment": {"type": "string"},
                     },
-                    "required": ["architecture_id", "new_status"],
+                    "required": ["new_status"],
                 },
             },
             {
@@ -160,7 +170,7 @@ class ArchitectureHandler(BaseHandler):
             if tool_name == "create_architecture_decision":
                 return await self._create_architecture_decision(**arguments)
             elif tool_name == "update_architecture_status":
-                return self._update_architecture_status(**arguments)
+                return await self._update_architecture_status(**arguments)
             elif tool_name == "query_architecture_decisions":
                 return self._query_architecture_decisions(**arguments)
             elif tool_name == "update_architecture":
@@ -206,8 +216,8 @@ class ArchitectureHandler(BaseHandler):
             if before["status"] != "Proposed":
                 raise EditRefused(
                     f"Architecture decision {architecture_id} is {before['status']}; only Proposed decisions can be "
-                    "edited. Record the change as a new decision with create_architecture_decision and move this "
-                    "one to Superseded."
+                    "edited. Record the change as a new decision with create_architecture_decision, then link it "
+                    "with create_relationship (relationship_type supersedes), which moves this one to Superseded."
                 )
 
         try:
@@ -301,41 +311,51 @@ class ArchitectureHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to create architecture decision", e)
 
-    def _update_architecture_status(self, **params) -> list[TextContent]:
-        """Update architecture decision status"""
-        # Validate required parameters
-        error = self._validate_required_params(params, ["architecture_id", "new_status"])
+    async def _update_architecture_status(self, **params) -> list[TextContent]:
+        """Move one architecture decision, or each of architecture_ids, to new_status (roadmap R9)"""
+        error = self._validate_required_params(params, ["new_status"])
         if error:
             return self._create_error_response(error)
+        return await self._change_statuses(
+            params,
+            "architecture_id",
+            "Architecture",
+            "architecture decisions",
+            lambda architecture_id: self._change_architecture_status(architecture_id, params),
+            "Failed to update architecture status",
+        )
 
-        try:
-            # Get current status
-            current_arch = self.db.get_records("architecture", "status", "id = ?", [params["architecture_id"]])
+    async def _change_architecture_status(self, architecture_id: str, params: dict[str, Any]) -> StatusChange:
+        """Move one architecture decision to new_status; Superseded follows its supersedes link (ADR-0003)"""
+        current_arch = self.db.get_records("architecture", "status, superseded_by", "id = ?", [architecture_id])
+        if not current_arch:
+            raise StatusRefused("Architecture decision not found")
 
-            if not current_arch:
-                return self._create_error_response("Architecture decision not found")
-
-            current_status = current_arch[0]["status"]
-            new_status = params["new_status"]
-
-            # Update status. CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
-            self.db.execute_query(
-                "UPDATE architecture SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                [new_status, params["architecture_id"]],
+        current_status = current_arch[0]["status"]
+        superseded_by = current_arch[0]["superseded_by"]
+        new_status = params["new_status"]
+        if new_status == "Superseded" and not superseded_by:
+            raise StatusRefused(
+                f"Record what supersedes {architecture_id} instead: create_relationship with the newer decision as "
+                f"source_id, {architecture_id} as target_id and relationship_type supersedes moves it to Superseded"
+            )
+        if superseded_by and new_status != "Superseded":
+            raise StatusRefused(
+                f"{architecture_id} is superseded by {superseded_by}; delete that supersedes link before moving it "
+                f"to {new_status}"
             )
 
-            # Add review comment if provided
-            if params.get("comment"):
-                self._add_review_comment("architecture", params["architecture_id"], params["comment"])
+        # Update status. CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
+        self.db.execute_query(
+            "UPDATE architecture SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            [new_status, architecture_id],
+        )
 
-            # Create above-the-fold response
-            key_info = f"Architecture {params['architecture_id']} updated"
-            action_info = f"📈 {current_status} → {new_status}"
-            structured = {"id": params["architecture_id"], "from_status": current_status, "to_status": new_status}
-            return self._create_structured_response("SUCCESS", key_info, structured, action_info)
+        # Add review comment if provided
+        if params.get("comment"):
+            self._add_review_comment("architecture", architecture_id, params["comment"])
 
-        except Exception as e:
-            return self._create_error_response("Failed to update architecture status", e)
+        return StatusChange(architecture_id, current_status, new_status)
 
     def _query_architecture_decisions(self, **params) -> list[TextContent]:
         """Query architecture decisions with filters"""
@@ -437,6 +457,7 @@ class ArchitectureHandler(BaseHandler):
 
             arch = arch_decisions[0]
             deciders = ", ".join(self._safe_json_loads(arch["deciders"])) or "Not specified"
+            superseded = f"\n- **Superseded By**: {arch['superseded_by']}" if arch["superseded_by"] else ""
 
             # Build detailed report
             report = f"""# Architecture Decision: {arch["id"]}
@@ -449,7 +470,7 @@ class ArchitectureHandler(BaseHandler):
 - **Updated**: {arch["updated_at"]}
 - **Revision**: {arch["revision"]}
 - **Authors**: {arch["authors"] or "Not specified"}
-- **Deciders**: {deciders}
+- **Deciders**: {deciders}{superseded}
 
 ## Context
 {arch["context"]}
@@ -503,6 +524,22 @@ class ArchitectureHandler(BaseHandler):
                 report += f"\n## Linked Requirements ({len(requirements)})\n"
                 for req in requirements:
                     report += f"- {req['id']}: {req['title']}\n"
+
+            # Design links (roadmap R9): tasks implementing this decision and the decisions it supersedes.
+            report += self._format_linked(
+                "Implemented By",
+                "SELECT t.id, t.title, t.status FROM tasks t JOIN relationships rel ON rel.source_id = t.id "
+                "WHERE rel.source_type = 'task' AND rel.target_type = 'architecture' AND rel.target_id = ? "
+                "AND rel.relationship_type = 'implements' ORDER BY t.id",
+                arch["id"],
+            )
+            report += self._format_linked(
+                "Supersedes",
+                "SELECT a.id, a.title, a.status FROM architecture a JOIN relationships rel ON rel.target_id = a.id "
+                "WHERE rel.source_type = 'architecture' AND rel.source_id = ? AND rel.target_type = 'architecture' "
+                "AND rel.relationship_type = 'supersedes' ORDER BY a.id",
+                arch["id"],
+            )
 
             report += self._format_comments("architecture", arch["id"])
 

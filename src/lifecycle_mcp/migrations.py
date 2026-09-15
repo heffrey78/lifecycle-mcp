@@ -623,6 +623,75 @@ def repair_literal_updated_at(conn: sqlite3.Connection) -> None:
     )
 
 
+# --- migration 14 ------------------------------------------------------------------------------
+
+RELATIONSHIP_COLUMNS = "id, source_type, source_id, target_type, target_id, relationship_type, created_at"
+
+RELATIONSHIPS_WITH_SUPERSEDES_SQL = """CREATE TABLE relationships_new (
+    id TEXT PRIMARY KEY,
+    source_type TEXT NOT NULL CHECK (source_type IN ('requirement', 'task', 'architecture')),
+    source_id TEXT NOT NULL,
+    target_type TEXT NOT NULL CHECK (target_type IN ('requirement', 'task', 'architecture')),
+    target_id TEXT NOT NULL,
+    relationship_type TEXT NOT NULL CHECK (relationship_type IN (
+        'implements', 'addresses', 'depends', 'blocks', 'informs',
+        'requires', 'parent', 'refines', 'conflicts', 'relates', 'supersedes'
+    )),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(source_type, source_id, target_type, target_id, relationship_type)
+)"""
+
+# architecture.superseded_by mirrors the incoming supersedes link (newer -> older); relationships stays the only
+# place the link is written (ADR-0001).
+SUPERSEDED_BY_TRIGGER_SQL = [
+    """CREATE TRIGGER set_superseded_by
+    AFTER INSERT ON relationships
+    WHEN NEW.relationship_type = 'supersedes'
+    BEGIN
+        UPDATE architecture SET superseded_by = NEW.source_id WHERE id = NEW.target_id;
+    END""",
+    """CREATE TRIGGER clear_superseded_by
+    AFTER DELETE ON relationships
+    WHEN OLD.relationship_type = 'supersedes'
+    BEGIN
+        UPDATE architecture SET superseded_by = NULL WHERE id = OLD.target_id AND superseded_by = OLD.source_id;
+    END""",
+]
+
+
+def allow_supersedes_links(conn: sqlite3.Connection) -> None:
+    """Add the supersedes link type and keep architecture.superseded_by in step with it (roadmap R9, ADR-0003).
+
+    SQLite can't change a CHECK constraint in place, so relationships is rebuilt. Views and triggers that read it are
+    dropped first and recreated from their stored SQL afterwards, together with its indexes and its own triggers,
+    which go with the old table. Decisions whose superseded_by is already set get the matching link.
+    """
+    dependents = conn.execute(
+        "SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name != 'relationships' "
+        "AND (tbl_name = 'relationships' OR (type IN ('view', 'trigger') AND sql LIKE '%relationships%')) "
+        "ORDER BY CASE type WHEN 'index' THEN 0 WHEN 'view' THEN 1 ELSE 2 END, name"
+    ).fetchall()
+    for kind, name, _ in dependents:
+        if kind in ("view", "trigger"):
+            conn.execute(f'DROP {kind.upper()} IF EXISTS "{name}"')
+
+    conn.execute(RELATIONSHIPS_WITH_SUPERSEDES_SQL)
+    conn.execute(
+        f"INSERT INTO relationships_new ({RELATIONSHIP_COLUMNS}) SELECT {RELATIONSHIP_COLUMNS} FROM relationships"
+    )
+    conn.execute("DROP TABLE relationships")
+    conn.execute("ALTER TABLE relationships_new RENAME TO relationships")
+    for _, _, sql in dependents:
+        conn.execute(sql)
+
+    conn.execute(f"""{_INSERT_LINK})
+        SELECT 'rel-' || superseded_by || '-' || id || '-supersedes',
+               'architecture', superseded_by, 'architecture', id, 'supersedes'
+        FROM architecture WHERE superseded_by IS NOT NULL AND superseded_by != ''""")
+    for statement in SUPERSEDED_BY_TRIGGER_SQL:
+        conn.execute(statement)
+
+
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "GitHub integration fields", add_github_integration_columns),
     (2, "GitHub sync metadata fields", add_github_sync_metadata_columns),
@@ -637,6 +706,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (11, "Drop dead columns", drop_dead_columns),
     (12, "Log architecture status changes", log_architecture_status_changes),
     (13, "Repair architecture updated_at stored as the text CURRENT_TIMESTAMP", repair_literal_updated_at),
+    (14, "Allow supersedes links and keep superseded_by in step", allow_supersedes_links),
 ]
 
 

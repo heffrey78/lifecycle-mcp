@@ -21,7 +21,8 @@ TABLES = {
 }
 
 # Columns the server maintains itself: IDs and numbering come from ID generation, status moves go through the
-# update_*_status tools, counters and completed_at are kept by triggers, and GitHub fields by GitHub sync.
+# update_*_status tools, counters, completed_at and superseded_by (from supersedes links) are kept by triggers, and
+# GitHub fields by GitHub sync.
 SYSTEM_COLUMNS = {
     "requirements": {
         "id",
@@ -49,14 +50,14 @@ SYSTEM_COLUMNS = {
         "github_etag",
         "github_last_sync",
     },
-    "architecture": {"id", "type", "status", "revision", "created_at", "updated_at"},
+    "architecture": {"id", "type", "status", "revision", "created_at", "updated_at", "superseded_by"},
 }
 
 # Columns no tool can set yet, with the roadmap item that will expose each one.
 PENDING_COLUMNS = {
     "requirements": {},
     "tasks": {},
-    "architecture": {"superseded_by": "R9: an architecture decision supersedes another (REQ-0005-FUNC-00)"},
+    "architecture": {},
 }
 
 # Tool properties that are not columns: record IDs, links stored in relationships, and edit options.

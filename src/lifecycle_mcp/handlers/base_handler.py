@@ -8,7 +8,7 @@ import json
 import logging
 import sqlite3
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -47,6 +47,10 @@ class EditRefused(Exception):
     """An edit was refused by a lifecycle rule (a missing reason, a decided ADR, a cycle); nothing was written."""
 
 
+class StatusRefused(Exception):
+    """A status change was refused (record missing, transition not allowed, a gate); nothing was written."""
+
+
 # Inputs every update tool accepts next to the fields it edits.
 EDIT_OPTION_PROPERTIES = {
     "reason": {"type": "string", "description": "Why the change is made"},
@@ -57,6 +61,13 @@ EDIT_OPTION_PROPERTIES = {
 # Record type -> table, for tools that take any record's ID.
 ENTITY_TABLES = {"requirement": "requirements", "task": "tasks", "architecture": "architecture"}
 
+# The list form of a status tool's ID parameter (roadmap R9, ADR-0003).
+STATUS_ID_LIST_PROPERTY = {
+    "type": "array",
+    "items": {"type": "string"},
+    "description": "Instead of the single ID: move each, with a result per ID",
+}
+
 
 @dataclass
 class EditResult:
@@ -65,6 +76,26 @@ class EditResult:
     changed: list[str]  # fields whose stored value changed, in the order given
     revision: int  # the record's revision after the edit
     before: dict[str, Any]  # the record as it was before the edit
+
+
+@dataclass
+class StatusChange:
+    """One record's completed status change, as reported by the status tools."""
+
+    id: str
+    from_status: str
+    to_status: str
+    path: list[str] | None = None  # every status passed through, when a move takes more than one step
+    note: str = ""  # further detail for the response, such as a GitHub sync
+
+    def data(self) -> dict[str, Any]:
+        data = {"id": self.id, "from_status": self.from_status, "to_status": self.to_status}
+        if self.path is not None:
+            data["path"] = self.path
+        return data
+
+    def arrow(self) -> str:
+        return " → ".join(self.path or [self.from_status, self.to_status])
 
 
 class BaseHandler(ABC):
@@ -321,6 +352,65 @@ class BaseHandler(ABC):
             return f"No changes: every value already matched (revision {result.revision})"
         return f"✏️ Changed {', '.join(result.changed)} | revision {result.revision}"
 
+    async def _change_statuses(
+        self,
+        params: dict[str, Any],
+        id_param: str,
+        noun: str,
+        plural: str,
+        change: Callable[[str], Awaitable[StatusChange]],
+        failure: str,
+    ) -> list[TextContent]:
+        """Run a status tool for its single ID or for each ID in its list form (roadmap R9, ADR-0003).
+
+        change moves one record and raises StatusRefused with the reason when it can't. A single-ID call answers as
+        the status tools always have. A list call moves each ID independently and reports every one: it succeeds when
+        all moved, warns when some were refused and is an error only when none moved.
+        """
+        list_param = f"{id_param}s"
+        single, many = params.get(id_param), params.get(list_param)
+        if single is not None and many is not None:
+            return self._create_error_response(f"Pass {id_param} or {list_param}, not both")
+        if single is None and not many:
+            return self._create_error_response(f"Missing required parameters: {id_param} or {list_param}")
+
+        if single is not None:
+            try:
+                moved = await change(single)
+            except StatusRefused as e:
+                return self._create_error_response(str(e))
+            except Exception as e:
+                return self._create_error_response(failure, e)
+            return self._create_structured_response(
+                "SUCCESS", f"{noun} {moved.id} updated", moved.data(), f"📈 {moved.arrow()}", moved.note
+            )
+
+        results: list[dict[str, Any]] = []
+        lines: list[str] = []
+        for entity_id in dict.fromkeys(many):  # each ID once, in the order given
+            try:
+                moved = await change(entity_id)
+            except StatusRefused as e:
+                reason = str(e)
+            except Exception as e:
+                reason = f"{failure}: {e}"
+                self.logger.error(f"{reason} ({entity_id})")
+            else:
+                results.append(moved.data())
+                lines.append(f"- {entity_id}: {moved.arrow()}" + (f" | {moved.note}" if moved.note else ""))
+                continue
+            results.append({"id": entity_id, "error": reason})
+            lines.append(f"- {entity_id}: refused: {reason}")
+
+        moved_count = sum("error" not in result for result in results)
+        key_info = f"Moved {moved_count} of {len(results)} {plural} to {params.get('new_status')}"
+        details = "\n".join(lines)
+        if moved_count == 0:
+            return ErrorResult(self._create_above_fold_response("ERROR", key_info, "", details))
+        structured = {"results": results, "moved": moved_count, "refused": len(results) - moved_count}
+        status = "SUCCESS" if moved_count == len(results) else "WARNING"
+        return self._create_structured_response(status, key_info, structured, "", details)
+
     def _delete_entity(
         self,
         table: str,
@@ -415,6 +505,14 @@ class BaseHandler(ABC):
             return ""
         lines = "".join(f"- **{row['reviewer']}** ({row['created_at']}): {row['comment']}\n" for row in rows)
         return f"\n## Comments ({len(rows)})\n{lines}"
+
+    def _format_linked(self, title: str, sql: str, entity_id: str) -> str:
+        """Details section listing the records sql returns (id, title, status) for entity_id; "" when there are none"""
+        rows = self.db.execute_query(sql, [entity_id], fetch_all=True, row_factory=True) or []
+        if not rows:
+            return ""
+        lines = "".join(f"- {row['id']}: {row['title']} [{row['status']}]\n" for row in rows)
+        return f"\n## {title} ({len(rows)})\n{lines}"
 
     @abstractmethod
     def get_tool_definitions(self) -> list[dict[str, Any]]:

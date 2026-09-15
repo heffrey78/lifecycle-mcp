@@ -19,7 +19,9 @@ class RelationshipHandler(BaseHandler):
         return [
             {
                 "name": "create_relationship",
-                "description": "Create relationship between entities",
+                "description": (
+                    "Link two records; reads source_id relationship_type target_id (ADR-0005 supersedes ADR-0004)"
+                ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -28,7 +30,7 @@ class RelationshipHandler(BaseHandler):
                         "relationship_type": {
                             "type": "string",
                             "enum": [
-                                "implements",  # task implements requirement
+                                "implements",  # task implements requirement or architecture decision
                                 "addresses",  # architecture addresses requirement
                                 "depends",  # entity depends on another
                                 "blocks",  # entity blocks another
@@ -38,6 +40,7 @@ class RelationshipHandler(BaseHandler):
                                 "refines",  # refines another entity
                                 "conflicts",  # conflicts with another entity
                                 "relates",  # generic relationship
+                                "supersedes",  # newer architecture decision replaces an older one
                             ],
                         },
                     },
@@ -187,6 +190,9 @@ class RelationshipHandler(BaseHandler):
         if self._relationship_exists(source_id, target_id, rel_type):
             return self._create_error_response(f"Relationship already exists: {source_id} -> {target_id} ({rel_type})")
 
+        if rel_type == "supersedes":
+            return self._supersede(source_id, target_id)
+
         # Create the relationship in appropriate table
         success = self._insert_relationship(source_id, target_id, source_type, target_type, rel_type)
 
@@ -281,10 +287,55 @@ class RelationshipHandler(BaseHandler):
 
     @staticmethod
     def _normalize_direction(source_id: str, target_id: str, source_type: str, target_type: str):
-        """Requirement links are stored requirement -> task/architecture; accept either direction from callers."""
+        """Requirement links are stored requirement -> task/architecture and design links task -> architecture;
+        accept either direction from callers."""
         if target_type == "requirement" and source_type in ("task", "architecture"):
             return target_id, source_id, target_type, source_type
+        if source_type == "architecture" and target_type == "task":
+            return target_id, source_id, target_type, source_type
         return source_id, target_id, source_type, target_type
+
+    def _supersede(self, newer_id: str, older_id: str) -> list[TextContent]:
+        """Link newer_id supersedes older_id and move older_id to Superseded, together (ADR-0003).
+
+        The link's trigger sets older_id's superseded_by. Refused for a decision superseding itself, an older decision
+        that is already superseded, and a newer decision that is itself Superseded, which also rules out cycles.
+        """
+        if newer_id == older_id:
+            return self._create_error_response(f"{newer_id} can't supersede itself")
+        rows = self.db.execute_query(
+            "SELECT id, status, superseded_by FROM architecture WHERE id IN (?, ?)",
+            [newer_id, older_id],
+            fetch_all=True,
+            row_factory=True,
+        )
+        decisions = {row["id"]: row for row in rows or []}
+        for decision_id in (newer_id, older_id):
+            if decision_id not in decisions:
+                return self._create_error_response(f"Architecture decision {decision_id} not found")
+        if decisions[older_id]["superseded_by"]:
+            return self._create_error_response(
+                f"{older_id} is already superseded by {decisions[older_id]['superseded_by']}"
+            )
+        if decisions[newer_id]["status"] == "Superseded":
+            return self._create_error_response(
+                f"{newer_id} is itself Superseded; link from the decision that replaced it"
+            )
+
+        with self.db.transaction() as cur:
+            self._link("architecture", newer_id, "architecture", older_id, "supersedes", cursor=cur)
+            # CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
+            cur.execute(
+                "UPDATE architecture SET status = 'Superseded', updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND status != 'Superseded'",
+                [older_id],
+            )
+        self._log_operation("relationship", f"{newer_id}-{older_id}", "created")
+        return self._create_above_fold_response(
+            "SUCCESS",
+            f"Relationship created: {newer_id} -> {older_id}",
+            f"Type: supersedes | {older_id} is now Superseded",
+        )
 
     def _validate_relationship(self, source_type: str, target_type: str, rel_type: str) -> bool:
         """Validate that relationship type is valid for entity types"""
@@ -293,6 +344,9 @@ class RelationshipHandler(BaseHandler):
             ("task", "requirement", "implements"): True,  # Reverse is also valid
             ("requirement", "architecture", "addresses"): True,
             ("architecture", "requirement", "addresses"): True,
+            ("task", "architecture", "implements"): True,
+            ("architecture", "task", "implements"): True,  # Reverse is also valid
+            ("architecture", "architecture", "supersedes"): True,  # newer -> older
             ("task", "task", "depends"): True,
             ("task", "task", "blocks"): True,
             ("task", "task", "informs"): True,

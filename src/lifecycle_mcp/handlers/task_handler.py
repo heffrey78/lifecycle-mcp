@@ -11,7 +11,16 @@ from typing import Any
 from mcp.types import TextContent
 
 from ..github_utils import GitHubUtils
-from .base_handler import EDIT_OPTION_PROPERTIES, BaseHandler, DeleteRefused, EditRefused, RevisionConflict
+from .base_handler import (
+    EDIT_OPTION_PROPERTIES,
+    STATUS_ID_LIST_PROPERTY,
+    BaseHandler,
+    DeleteRefused,
+    EditRefused,
+    RevisionConflict,
+    StatusChange,
+    StatusRefused,
+)
 
 # Fields update_task changes directly; parent_task_id and requirement_ids are links and handled separately.
 TASK_EDITABLE = (
@@ -111,6 +120,7 @@ class TaskHandler(BaseHandler):
                     "type": "object",
                     "properties": {
                         "task_id": {"type": "string"},
+                        "task_ids": STATUS_ID_LIST_PROPERTY,
                         "new_status": {
                             "type": "string",
                             "enum": ["Not Started", "In Progress", "Blocked", "Complete", "Abandoned"],
@@ -118,7 +128,7 @@ class TaskHandler(BaseHandler):
                         "comment": {"type": "string"},
                         "assignee": {"type": "string"},
                     },
-                    "required": ["task_id", "new_status"],
+                    "required": ["new_status"],
                 },
             },
             {
@@ -453,102 +463,102 @@ class TaskHandler(BaseHandler):
             return self._create_error_response("Failed to create task", e)
 
     async def _update_task_status(self, **params) -> list[TextContent]:
-        """Update task status"""
-        # Validate required parameters
-        error = self._validate_required_params(params, ["task_id", "new_status"])
+        """Move one task, or each of task_ids, to new_status (roadmap R9)"""
+        error = self._validate_required_params(params, ["new_status"])
         if error:
             return self._create_error_response(error)
+        return await self._change_statuses(
+            params,
+            "task_id",
+            "Task",
+            "tasks",
+            lambda task_id: self._change_task_status(task_id, params),
+            "Failed to update task",
+        )
 
-        try:
-            # Get current task with GitHub info
-            current_tasks = self.db.get_records(
-                "tasks", "status, assignee, github_issue_number, github_issue_url", "id = ?", [params["task_id"]]
-            )
+    async def _change_task_status(self, task_id: str, params: dict[str, Any]) -> StatusChange:
+        """Move one task to new_status with its assignee and comment, and sync its GitHub issue"""
+        # Get current task with GitHub info
+        current_tasks = self.db.get_records(
+            "tasks", "status, assignee, github_issue_number, github_issue_url", "id = ?", [task_id]
+        )
 
-            if not current_tasks:
-                return self._create_error_response("Task not found")
+        if not current_tasks:
+            raise StatusRefused("Task not found")
 
-            current_task = dict(current_tasks[0])  # Convert Row to dict for .get() method
-            current_status = current_task["status"]
-            new_status = params["new_status"]
+        current_task = dict(current_tasks[0])  # Convert Row to dict for .get() method
+        current_status = current_task["status"]
+        new_status = params["new_status"]
 
-            # Update status and assignee. CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
-            assignments, values = "status = ?, updated_at = CURRENT_TIMESTAMP", [new_status]
-            if params.get("assignee"):
-                assignments += ", assignee = ?"
-                values.append(params["assignee"])
-            self.db.execute_query(f"UPDATE tasks SET {assignments} WHERE id = ?", [*values, params["task_id"]])
+        # Update status and assignee. CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
+        assignments, values = "status = ?, updated_at = CURRENT_TIMESTAMP", [new_status]
+        if params.get("assignee"):
+            assignments += ", assignee = ?"
+            values.append(params["assignee"])
+        self.db.execute_query(f"UPDATE tasks SET {assignments} WHERE id = ?", [*values, task_id])
 
-            # Add comment if provided
-            if params.get("comment"):
-                self._add_review_comment("task", params["task_id"], params["comment"])
+        # Add comment if provided
+        if params.get("comment"):
+            self._add_review_comment("task", task_id, params["comment"])
 
-            # Update GitHub issue if it exists using sync-safe operations
-            github_updated = False
-            github_error = None
+        # Update GitHub issue if it exists using sync-safe operations
+        github_updated = False
+        github_error = None
 
-            if current_task.get("github_issue_number") and GitHubUtils.is_github_available():
-                try:
-                    # Prepare GitHub updates
-                    github_updates = {}
+        if current_task.get("github_issue_number") and GitHubUtils.is_github_available():
+            try:
+                # Prepare GitHub updates
+                github_updates = {}
 
-                    # Map task status to GitHub state
-                    if new_status == "Complete":
-                        github_updates["state"] = "closed"
-                    elif new_status in ["Not Started", "In Progress", "Blocked"]:
-                        github_updates["state"] = "open"
+                # Map task status to GitHub state
+                if new_status == "Complete":
+                    github_updates["state"] = "closed"
+                elif new_status in ["Not Started", "In Progress", "Blocked"]:
+                    github_updates["state"] = "open"
 
-                    # Prepare comment
-                    github_comment = f"Task status updated from '{current_status}' to '{new_status}'"
-                    if params.get("comment"):
-                        github_comment += f"\n\n{params['comment']}"
-                    github_updates["comment"] = github_comment
+                # Prepare comment
+                github_comment = f"Task status updated from '{current_status}' to '{new_status}'"
+                if params.get("comment"):
+                    github_comment += f"\n\n{params['comment']}"
+                github_updates["comment"] = github_comment
 
-                    # Update assignee if changed
-                    if params.get("assignee") and params["assignee"] != current_task.get("assignee"):
-                        github_updates["assignees"] = [params["assignee"]] if params["assignee"] else []
+                # Update assignee if changed
+                if params.get("assignee") and params["assignee"] != current_task.get("assignee"):
+                    github_updates["assignees"] = [params["assignee"]] if params["assignee"] else []
 
-                    # Use sync-safe update with current ETag
-                    current_etag = current_task.get("github_etag")
-                    success, error_msg, updated_issue = await GitHubUtils.update_github_issue_safe(
-                        str(current_task["github_issue_number"]), github_updates, expected_etag=current_etag
+                # Use sync-safe update with current ETag
+                current_etag = current_task.get("github_etag")
+                success, error_msg, updated_issue = await GitHubUtils.update_github_issue_safe(
+                    str(current_task["github_issue_number"]), github_updates, expected_etag=current_etag
+                )
+
+                if success and updated_issue:
+                    github_updated = True
+                    # Update stored ETag and sync timestamp
+                    self.db.update_record(
+                        "tasks",
+                        {"github_etag": updated_issue.get("etag"), "github_last_sync": datetime.now().isoformat()},
+                        "id = ?",
+                        [task_id],
                     )
+                else:
+                    github_error = error_msg or "GitHub update failed"
+                    self.logger.warning(f"GitHub sync failed for task {task_id}: {github_error}")
 
-                    if success and updated_issue:
-                        github_updated = True
-                        # Update stored ETag and sync timestamp
-                        self.db.update_record(
-                            "tasks",
-                            {"github_etag": updated_issue.get("etag"), "github_last_sync": datetime.now().isoformat()},
-                            "id = ?",
-                            [params["task_id"]],
-                        )
-                    else:
-                        github_error = error_msg or "GitHub update failed"
-                        self.logger.warning(f"GitHub sync failed for task {params['task_id']}: {github_error}")
+            except Exception as e:
+                github_error = f"GitHub update error: {str(e)}"
+                self.logger.error(f"GitHub integration error: {github_error}")
+        else:
+            if current_task.get("github_issue_number"):
+                github_error = GitHubUtils.unavailable_reason()
 
-                except Exception as e:
-                    github_error = f"GitHub update error: {str(e)}"
-                    self.logger.error(f"GitHub integration error: {github_error}")
-            else:
-                if current_task.get("github_issue_number"):
-                    github_error = GitHubUtils.unavailable_reason()
+        github_info = ""
+        if github_updated:
+            github_info = f"🔗 GitHub issue #{current_task['github_issue_number']} synced"
+        elif github_error:
+            github_info = f"⚠️ GitHub sync failed: {github_error}"
 
-            # Create above-the-fold response
-            key_info = f"Task {params['task_id']} updated"
-            action_info = f"📈 {current_status} → {new_status}"
-
-            github_info = ""
-            if github_updated:
-                github_info = f"🔗 GitHub issue #{current_task['github_issue_number']} synced"
-            elif github_error:
-                github_info = f"⚠️ GitHub sync failed: {github_error}"
-
-            structured = {"id": params["task_id"], "from_status": current_status, "to_status": new_status}
-            return self._create_structured_response("SUCCESS", key_info, structured, action_info, github_info)
-
-        except Exception as e:
-            return self._create_error_response("Failed to update task", e)
+        return StatusChange(task_id, current_status, new_status, note=github_info)
 
     def _query_tasks(self, **params) -> list[TextContent]:
         """Query tasks with filters"""
@@ -917,6 +927,15 @@ class TaskHandler(BaseHandler):
                     parent = dict(parent_tasks[0])  # Convert Row to dict for consistency
                     task_info += "\n## Parent Task\n"
                     task_info += f"- {parent['id']}: {parent['title']} [{parent['status']}]\n"
+
+            # Architecture decisions this task implements (roadmap R9)
+            task_info += self._format_linked(
+                "Implements Decisions",
+                "SELECT a.id, a.title, a.status FROM architecture a JOIN relationships rel ON rel.target_id = a.id "
+                "WHERE rel.source_type = 'task' AND rel.source_id = ? AND rel.target_type = 'architecture' "
+                "AND rel.relationship_type = 'implements' ORDER BY a.id",
+                task["id"],
+            )
 
             task_info += self._format_comments("task", task["id"])
 

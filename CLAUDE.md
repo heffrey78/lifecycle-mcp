@@ -106,11 +106,12 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
   `requirement_tasks`, `requirement_architecture`, `task_dependencies`, `requirement_dependencies` tables and
   `tasks.parent_task_id`). Write links with `BaseHandler._link()`. Direction conventions: requirement → task
   (`implements`), requirement → architecture (`addresses`), child → parent (`parent`), dependent → dependency
-  (`depends`/`requires`/`informs`), blocker → blocked (`blocks`). `create_relationship` normalizes reversed
-  requirement links.
+  (`depends`/`requires`/`informs`), blocker → blocked (`blocks`), task → architecture (`implements`), newer →
+  older architecture (`supersedes`). `create_relationship` normalizes reversed requirement and task/ADR links;
+  a `supersedes` link also moves the older ADR to Superseded in the same transaction (ADR-0003).
 - **Views**: requirement_progress, task_hierarchy, blocked_items, requirement_hierarchy (all over `relationships`)
-- **Triggers on relationships**: keep `requirements.task_count`/`tasks_completed` current and enforce requirement
-  decomposition depth and no circular parents
+- **Triggers on relationships**: keep `requirements.task_count`/`tasks_completed` current, keep
+  `architecture.superseded_by` equal to the incoming `supersedes` link (migration 14) and refuse circular parents
 
 ### MCP Tools Available
 
@@ -119,21 +120,21 @@ The server exposes 23 tools (24 with `LIFECYCLE_GITHUB=on`) across 7 handler mod
 **Requirement Management (5 tools):**
 - `create_requirement` - Create new requirements with validation
 - `update_requirement` - Edit content in place; reason required at Approved or later
-- `update_requirement_status` - Move requirements through lifecycle with state validation
+- `update_requirement_status` - Move one or many requirements; walks the allowed path, never through Approved or Validated
 - `query_requirements` - Search and filter requirements (text list plus structured records)
 - `trace_requirement` - Full lifecycle traceability
 
 **Task Management (4 tools, plus 1 when GitHub is on):**
 - `create_task` - Create tasks linked to requirements
 - `update_task` - Edit content, move to another parent, replace requirement links
-- `update_task_status` - Update task progress
+- `update_task_status` - Update progress of one or many tasks
 - `query_tasks` - Search and filter tasks (text list plus structured records)
 - `sync_github_tasks` - Sync one task or every linked task from GitHub issues (listed only when `LIFECYCLE_GITHUB=on`)
 
 **Architecture Management (4 tools):**
 - `create_architecture_decision` - Record ADRs
 - `update_architecture` - Edit content while Proposed
-- `update_architecture_status` - Update ADR status
+- `update_architecture_status` - Update status of one or many ADRs; Superseded needs a supersedes link
 - `query_architecture_decisions` - Search architecture decisions (text list plus structured records)
 
 **Any Record (3 tools):**
@@ -168,6 +169,11 @@ The server uses the `LIFECYCLE_DB` environment variable to specify the SQLite da
   - requirement edits at Approved or later need a reason
   - ADRs are editable only while Proposed
   - deletes (`BaseHandler._delete_entity`) only remove early-stage records nothing depends on
+- **Status tools**: each `_update_*_status` passes a per-record `_change_*_status` to `BaseHandler._change_statuses`,
+  which runs it for the single ID or for each ID of the list form (`*_ids`) and builds the response; a per-record
+  move raises `StatusRefused` to refuse. Requirement moves follow `requirement_path()`: the shortest path in
+  `REQUIREMENT_TRANSITIONS`, never through `REQUIREMENT_STOP_STATUSES` (Approved, Validated), every step in one
+  transaction (ADR-0003)
 - **Changed since last review is derived, not stored**: `changes_since_review()` in `requirement_handler.py` finds field edits after a reviewed requirement's latest status change. The next transition clears it and its comment is the acknowledgement. Don't add a marker column or an acknowledgement tool (owner decision, TASK-0019)
 - **Schema coverage**: `tests/test_schema_coverage.py` fails when a requirements, tasks or architecture column can't be set by that table's create or update tool, or when a tool property has no column. When adding a column, expose it (tool schema, handler, details, export) or put it on the test's explicit system or pending list with the reason
 - **Tool surface budget**: every tool definition costs client context on every request. `tests/test_tool_surface_budget.py` fails when a handler's tool count or `tools/list` definition size exceeds `tests/tool_surface_budget.json`. Adding a tool or parameter means raising that budget in the same change; `uv run python scripts/tool_surface_report.py` shows sizes per handler and tool (roadmap R15)

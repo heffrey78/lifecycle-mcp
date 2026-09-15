@@ -385,7 +385,7 @@ async def test_links_survive_a_restart_and_power_trace_blocked_items_and_diagram
 
     for task_id in ("TASK-0001-00-00", "TASK-0001-01-00", "TASK-0002-00-00"):
         await call(second, "update_task_status", {"task_id": task_id, "new_status": "Complete"})
-    details = text_of(await call(second, "get_requirement_details", {"requirement_id": req}))
+    details = text_of(await call(second, "get_details", {"entity_id": req}))
     assert "Linked Tasks (3)" in details
     for status_name in ("Architecture", "Ready", "Implemented", "Validated"):
         result = await call(second, "update_requirement_status", {"requirement_id": req, "new_status": status_name})

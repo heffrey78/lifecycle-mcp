@@ -12,7 +12,7 @@ class TestArchitectureHandler:
     def test_get_tool_definitions(self, architecture_handler):
         """Test that handler returns correct tool definitions"""
         tools = architecture_handler.get_tool_definitions()
-        assert len(tools) == 8
+        assert len(tools) == 5  # details, comments and delete are record tools (RecordHandler)
 
         tool_names = [tool["name"] for tool in tools]
         expected_tools = [
@@ -20,9 +20,7 @@ class TestArchitectureHandler:
             "update_architecture_status",
             "query_architecture_decisions",
             "query_architecture_decisions_json",
-            "get_architecture_details",
-            "add_architecture_review",
-            "delete_architecture",
+            "update_architecture",
         ]
         assert all(tool in tool_names for tool in expected_tools)
 
@@ -88,14 +86,6 @@ class TestArchitectureHandler:
     def test_get_architecture_details_not_found(self, architecture_handler):
         """Test getting details for non-existent ADR"""
         result = architecture_handler._get_architecture_details(architecture_id="ADR-9999")
-
-        assert len(result) == 1
-        assert "ERROR" in result[0].text
-        assert "Architecture decision not found" in result[0].text
-
-    def test_add_architecture_review_not_found(self, architecture_handler):
-        """Test adding review to non-existent ADR"""
-        result = architecture_handler._add_architecture_review(architecture_id="ADR-9999", comment="Test review")
 
         assert len(result) == 1
         assert "ERROR" in result[0].text

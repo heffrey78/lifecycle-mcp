@@ -17,7 +17,6 @@ from lifecycle_mcp.database_manager import DatabaseManager
 from lifecycle_mcp.handlers import (
     ArchitectureHandler,
     ExportHandler,
-    InterviewHandler,
     RequirementHandler,
     StatusHandler,
     TaskHandler,
@@ -172,12 +171,6 @@ def task_handler(db_manager):
 def architecture_handler(db_manager):
     """Create an ArchitectureHandler instance"""
     return ArchitectureHandler(db_manager)
-
-
-@pytest.fixture
-def interview_handler(db_manager, requirement_handler):
-    """Create an InterviewHandler instance"""
-    return InterviewHandler(db_manager, requirement_handler)
 
 
 @pytest.fixture

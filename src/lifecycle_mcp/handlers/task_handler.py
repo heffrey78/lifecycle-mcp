@@ -82,7 +82,7 @@ class TaskHandler(BaseHandler):
 
     def get_tool_definitions(self) -> list[dict[str, Any]]:
         """Return task tool definitions"""
-        return [
+        tools = [
             {
                 "name": "create_task",
                 "description": "Create implementation task from requirement",
@@ -136,7 +136,7 @@ class TaskHandler(BaseHandler):
             },
             {
                 "name": "query_tasks_json",
-                "description": "Query tasks and return structured JSON data for UI",
+                "description": "Search and filter tasks, as JSON",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -148,46 +148,8 @@ class TaskHandler(BaseHandler):
                 },
             },
             {
-                "name": "get_task_details",
-                "description": "Get full task details with dependencies",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"task_id": {"type": "string"}},
-                    "required": ["task_id"],
-                },
-            },
-            {
-                "name": "sync_task_from_github",
-                "description": "Sync individual task from GitHub issue changes",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"task_id": {"type": "string"}},
-                    "required": ["task_id"],
-                },
-            },
-            {
-                "name": "bulk_sync_github_tasks",
-                "description": "Sync all tasks with their GitHub issues",
-                "inputSchema": {"type": "object", "properties": {}},
-            },
-            {
-                "name": "delete_task",
-                "description": (
-                    "Delete a Not Started task created by mistake. Refused when it has subtasks, other tasks "
-                    "depend on it or it is linked to a GitHub issue; mark anything else Abandoned instead."
-                ),
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"task_id": {"type": "string"}},
-                    "required": ["task_id"],
-                },
-            },
-            {
                 "name": "update_task",
-                "description": (
-                    "Edit a task's content, move it under another parent or change the requirements it implements. "
-                    "The task ID never changes; status moves go through update_task_status."
-                ),
+                "description": "Edit content, move under another parent or change requirements. The ID never changes.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -201,15 +163,12 @@ class TaskHandler(BaseHandler):
                         "implementation_plan": {"type": "array", "items": {"type": "string"}},
                         "test_plan": {"type": "array", "items": {"type": "string"}},
                         "definition_of_done": {"type": "array", "items": {"type": "string"}},
-                        "parent_task_id": {
-                            "type": "string",
-                            "description": "New parent task; an empty string makes it a top-level task",
-                        },
+                        "parent_task_id": {"type": "string", "description": "Empty string makes it top-level"},
                         "requirement_ids": {
                             "type": "array",
                             "items": {"type": "string"},
                             "minItems": 1,
-                            "description": "Replaces the requirements it implements; added ones must be approved",
+                            "description": "Replaces its requirements; added ones must be approved",
                         },
                         **EDIT_OPTION_PROPERTIES,
                     },
@@ -217,6 +176,16 @@ class TaskHandler(BaseHandler):
                 },
             },
         ]
+        if GitHubUtils.is_github_enabled():
+            # Opt-in feature: listed only when LIFECYCLE_GITHUB=on (ADR-0002).
+            tools.append(
+                {
+                    "name": "sync_github_tasks",
+                    "description": "Sync tasks from their GitHub issues: one task with task_id, else every linked task",
+                    "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string"}}},
+                }
+            )
+        return tools
 
     async def handle_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
         """Route tool calls to appropriate handler methods"""
@@ -229,17 +198,9 @@ class TaskHandler(BaseHandler):
                 return self._query_tasks(**arguments)
             elif tool_name == "query_tasks_json":
                 return self._query_tasks_json(**arguments)
-            elif tool_name == "get_task_details":
-                return self._get_task_details(**arguments)
-            elif tool_name == "sync_task_from_github":
-                task_id = arguments.get("task_id", "")
-                if not task_id:
-                    return self._create_error_response("task_id parameter required")
-                return await self._sync_from_github(task_id)
-            elif tool_name == "bulk_sync_github_tasks":
-                return await self._bulk_sync_with_github(**arguments)
-            elif tool_name == "delete_task":
-                return self._delete_task(**arguments)
+            elif tool_name == "sync_github_tasks" and GitHubUtils.is_github_enabled():
+                task_id = arguments.get("task_id")
+                return await (self._sync_from_github(task_id) if task_id else self._bulk_sync_with_github())
             elif tool_name == "update_task":
                 return self._update_task(**arguments)
             else:
@@ -1016,6 +977,8 @@ class TaskHandler(BaseHandler):
                     parent = dict(parent_tasks[0])  # Convert Row to dict for consistency
                     task_info += "\n## Parent Task\n"
                     task_info += f"- {parent['id']}: {parent['title']} [{parent['status']}]\n"
+
+            task_info += self._format_comments("task", task["id"])
 
             # Create above-the-fold summary
             key_info = self._format_status_summary("Task", task["id"], task["status"])

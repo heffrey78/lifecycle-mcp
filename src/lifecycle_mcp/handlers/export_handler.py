@@ -39,21 +39,21 @@ class ExportHandler(BaseHandler):
         return [
             {
                 "name": "export_project_documentation",
-                "description": "Export comprehensive project documentation in markdown format",
+                "description": "Export requirements, tasks and ADRs as Markdown files",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "project_name": {"type": "string", "description": "Name for the project to use in filenames"},
+                        "project_name": {"type": "string", "description": "Used in file names"},
                         "include_requirements": {"type": "boolean", "default": True},
                         "include_tasks": {"type": "boolean", "default": True},
                         "include_architecture": {"type": "boolean", "default": True},
-                        "output_directory": {"type": "string", "description": "Directory to save the exported files"},
+                        "output_directory": {"type": "string"},
                     },
                 },
             },
             {
                 "name": "create_architectural_diagrams",
-                "description": "Generate Mermaid diagrams for project architecture and relationships",
+                "description": "Generate Mermaid diagrams of the project",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -68,27 +68,14 @@ class ExportHandler(BaseHandler):
                                 "dependencies",
                             ],
                         },
-                        "requirement_ids": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Specific requirements to include",
-                        },
+                        "requirement_ids": {"type": "array", "items": {"type": "string"}},
                         "include_relationships": {"type": "boolean", "default": True},
                         "output_format": {
                             "type": "string",
                             "enum": ["mermaid", "markdown_with_mermaid"],
                             "default": "mermaid",
                         },
-                        "interactive": {
-                            "type": "boolean",
-                            "default": False,
-                            "description": "Start interactive conversation for complex diagrams",
-                        },
-                        "output_path": {
-                            "type": "string",
-                            "default": "exports",
-                            "description": "Directory path to save diagram files (defaults to 'exports')",
-                        },
+                        "output_path": {"type": "string", "default": "exports"},
                     },
                 },
             },
@@ -365,16 +352,6 @@ class ExportHandler(BaseHandler):
 
     def _create_architectural_diagrams(self, **params) -> list[TextContent]:
         """Generate Mermaid diagrams for project architecture"""
-        # Check if interactive mode is requested
-        if params.get("interactive", False):
-            # For interactive mode, we'd need to integrate with InterviewHandler
-            # For now, provide a helpful message
-            return self._create_above_fold_response(
-                "INFO",
-                "Interactive mode requires architectural conversation",
-                "Use start_architectural_conversation tool first",
-            )
-
         try:
             diagram_type = params.get("diagram_type", "full_project")
             include_relationships = params.get("include_relationships", True)

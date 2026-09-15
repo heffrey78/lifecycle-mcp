@@ -15,7 +15,7 @@ async def listed_tools(server) -> list[types.Tool]:
 
 async def test_every_tool_schema_forbids_undeclared_fields(mcp_server):  # noqa: F811
     tools = await listed_tools(mcp_server)
-    assert len(tools) >= 30
+    assert len(tools) >= 20  # a floor that catches an empty or broken listing; the exact count is budgeted
     assert [tool.name for tool in tools if tool.inputSchema.get("additionalProperties") is not False] == []
 
 

@@ -108,7 +108,7 @@ class RequirementHandler(BaseHandler):
         return [
             {
                 "name": "create_requirement",
-                "description": "Create a new requirement from interview data",
+                "description": "Create a new requirement",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -171,7 +171,7 @@ class RequirementHandler(BaseHandler):
             },
             {
                 "name": "query_requirements_json",
-                "description": "Query requirements and return structured JSON data for UI",
+                "description": "Search and filter requirements, as JSON",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -180,15 +180,6 @@ class RequirementHandler(BaseHandler):
                         "type": {"type": "string"},
                         "search_text": {"type": "string"},
                     },
-                },
-            },
-            {
-                "name": "get_requirement_details",
-                "description": "Get full requirement with all relationships",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"requirement_id": {"type": "string"}},
-                    "required": ["requirement_id"],
                 },
             },
             {
@@ -201,23 +192,10 @@ class RequirementHandler(BaseHandler):
                 },
             },
             {
-                "name": "delete_requirement",
-                "description": (
-                    "Delete a Draft requirement created by mistake. Refused when tasks, architecture decisions "
-                    "or other requirements link to it; move anything else to Deprecated instead."
-                ),
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"requirement_id": {"type": "string"}},
-                    "required": ["requirement_id"],
-                },
-            },
-            {
                 "name": "update_requirement",
                 "description": (
-                    "Edit a requirement's content in place. At Approved or later a reason is required, and the "
-                    "requirement shows as changed since last review until its next status change. Status moves go "
-                    "through update_requirement_status; the type and ID never change."
+                    "Edit content in place. At Approved or later a reason is required, and the requirement is "
+                    "flagged changed since last review until its next status change."
                 ),
                 "inputSchema": {
                     "type": "object",
@@ -237,10 +215,7 @@ class RequirementHandler(BaseHandler):
                         "validation_metrics": {"type": "array", "items": {"type": "string"}},
                         "out_of_scope": {"type": "array", "items": {"type": "string"}},
                         **EDIT_OPTION_PROPERTIES,
-                        "reason": {
-                            "type": "string",
-                            "description": "Why the change is made; required at Approved or later",
-                        },
+                        "reason": {"type": "string", "description": "Required at Approved or later"},
                     },
                     "required": ["requirement_id"],
                 },
@@ -258,12 +233,8 @@ class RequirementHandler(BaseHandler):
                 return self._query_requirements(**arguments)
             elif tool_name == "query_requirements_json":
                 return self._query_requirements_json(**arguments)
-            elif tool_name == "get_requirement_details":
-                return self._get_requirement_details(**arguments)
             elif tool_name == "trace_requirement":
                 return self._trace_requirement(**arguments)
-            elif tool_name == "delete_requirement":
-                return self._delete_requirement(**arguments)
             elif tool_name == "update_requirement":
                 return self._update_requirement(**arguments)
             else:
@@ -932,6 +903,8 @@ Guidelines:
                 report += f"\n## Linked Tasks ({len(tasks)})\n"
                 for task in tasks:
                     report += f"- {task['id']}: {task['title']} [{task['status']}]\n"
+
+            report += self._format_comments("requirement", req["id"])
 
             # Create above-the-fold response for requirement details
             key_info = f"Requirement {req['id']} details"

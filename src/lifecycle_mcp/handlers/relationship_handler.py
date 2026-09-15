@@ -8,9 +8,7 @@ from typing import Any
 
 from mcp.types import TextContent
 
-from .base_handler import BaseHandler
-
-ENTITY_TABLES = {"requirement": "requirements", "task": "tasks", "architecture": "architecture"}
+from .base_handler import ENTITY_TABLES, BaseHandler
 
 
 class RelationshipHandler(BaseHandler):
@@ -61,48 +59,23 @@ class RelationshipHandler(BaseHandler):
             },
             {
                 "name": "query_relationships",
-                "description": "Query relationships for visualization",
+                "description": "One record's links by direction and type, or without entity_id every link as JSON",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "entity_id": {"type": "string"},
                         "relationship_type": {"type": "string"},
-                        "include_incoming": {"type": "boolean", "default": True},
-                        "include_outgoing": {"type": "boolean", "default": True},
-                    },
-                },
-            },
-            {
-                "name": "get_entity_relationships",
-                "description": "Get all relationships for a specific entity",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "entity_id": {"type": "string"},
-                    },
-                    "required": ["entity_id"],
-                },
-            },
-            {
-                "name": "query_all_relationships",
-                "description": "Get all relationships for visualization graph building",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
+                        "direction": {"type": "string", "enum": ["incoming", "outgoing", "both"]},
                         "entity_types": {
                             "type": "array",
                             "items": {"type": "string", "enum": ["requirement", "task", "architecture"]},
-                            "default": ["requirement", "task", "architecture"],
                         },
                     },
                 },
             },
             {
                 "name": "get_entity_history",
-                "description": (
-                    "Show how a requirement, task or architecture decision changed over time: creation, field "
-                    "edits with before and after values and reasons, status changes, comments and deletion"
-                ),
+                "description": "A record's history: creation, edits (before, after, reason), status changes, comments",
                 "inputSchema": {
                     "type": "object",
                     "properties": {"entity_id": {"type": "string"}},
@@ -120,10 +93,6 @@ class RelationshipHandler(BaseHandler):
                 return await self._delete_relationship(arguments)
             elif tool_name == "query_relationships":
                 return await self._query_relationships(arguments)
-            elif tool_name == "get_entity_relationships":
-                return await self._get_entity_relationships(arguments)
-            elif tool_name == "query_all_relationships":
-                return await self._query_all_relationships(arguments)
             elif tool_name == "get_entity_history":
                 return self._get_entity_history(arguments)
             else:
@@ -269,77 +238,46 @@ class RelationshipHandler(BaseHandler):
             return self._create_error_response(f"No relationship found between {source_id} and {target_id}")
 
     async def _query_relationships(self, args: dict[str, Any]) -> list[TextContent]:
-        """Query relationships for a specific entity or type"""
+        """One record's links (optionally by direction), or every link as JSON for building a graph"""
         entity_id = args.get("entity_id")
         rel_type = args.get("relationship_type")
+        direction = args.get("direction")
+        entity_types = args.get("entity_types")
+
+        if entity_id and not self._get_entity_type(entity_id):
+            return self._create_error_response(f"Invalid entity ID: {entity_id}")
+        if direction and not entity_id:
+            return self._create_error_response(
+                "direction needs entity_id: it selects that record's incoming or outgoing links"
+            )
 
         relationships = self._fetch_all_relationships()
-
-        # Filter by entity_id if specified
-        if entity_id:
-            relationships = [r for r in relationships if r["source_id"] == entity_id or r["target_id"] == entity_id]
-
-        # Filter by relationship type if specified
         if rel_type:
-            relationships = [r for r in relationships if r.get("type") == rel_type]
+            relationships = [r for r in relationships if r["type"] == rel_type]
+        if entity_types:
+            relationships = [
+                r
+                for r in relationships
+                if self._get_entity_type(r["source_id"]) in entity_types
+                and self._get_entity_type(r["target_id"]) in entity_types
+            ]
 
-        if entity_id:
-            key_info = f"Found {len(relationships)} relationship(s) for {entity_id}"
-        else:
-            key_info = f"Found {len(relationships)} relationship(s) of type {rel_type or 'all'}"
+        if not entity_id:
+            details = self._format_all_relationships_json(relationships)
+            return self._create_above_fold_response(
+                "SUCCESS", f"Found {len(relationships)} relationship(s)", "", details
+            )
 
-        # Format relationships for display
-        details = self._format_relationships_details(relationships)
-
-        return self._create_above_fold_response("SUCCESS", key_info, "", details)
-
-    async def _get_entity_relationships(self, args: dict[str, Any]) -> list[TextContent]:
-        """Get all relationships for a specific entity"""
-        error = self._validate_required_params(args, ["entity_id"])
-        if error:
-            return self._create_error_response(error)
-
-        entity_id = args["entity_id"]
-        all_relationships = self._fetch_all_relationships()
-
-        # Filter to only relationships involving this entity
-        relationships = [r for r in all_relationships if r["source_id"] == entity_id or r["target_id"] == entity_id]
-
+        outgoing = direction in (None, "both", "outgoing")
+        incoming = direction in (None, "both", "incoming")
+        relationships = [
+            r
+            for r in relationships
+            if (outgoing and r["source_id"] == entity_id) or (incoming and r["target_id"] == entity_id)
+        ]
         key_info = f"Entity {entity_id} has {len(relationships)} relationship(s)"
         details = self._format_entity_relationships_details(entity_id, relationships)
-
         return self._create_above_fold_response("SUCCESS", key_info, "", details)
-
-    async def _query_all_relationships(self, args: dict[str, Any]) -> list[TextContent]:
-        """Get all relationships for graph visualization"""
-        entity_types = args.get("entity_types", ["requirement", "task", "architecture"])
-
-        all_relationships = self._fetch_all_relationships()
-
-        # Filter by entity types if specified
-        if entity_types != ["requirement", "task", "architecture"]:
-            filtered_relationships = []
-            for rel in all_relationships:
-                source_type = self._get_entity_type(rel["source_id"])
-                target_type = self._get_entity_type(rel["target_id"])
-                if source_type in entity_types and target_type in entity_types:
-                    filtered_relationships.append(rel)
-            all_relationships = filtered_relationships
-
-        key_info = f"Found {len(all_relationships)} total relationship(s)"
-        details = self._format_all_relationships_json(all_relationships)
-
-        return self._create_above_fold_response("SUCCESS", key_info, "", details)
-
-    def _get_entity_type(self, entity_id: str) -> str | None:
-        """Determine entity type from ID prefix"""
-        if entity_id.startswith("REQ-"):
-            return "requirement"
-        elif entity_id.startswith("TASK-"):
-            return "task"
-        elif entity_id.startswith("ADR-") or entity_id.startswith("TDD-"):
-            return "architecture"
-        return None
 
     @staticmethod
     def _normalize_direction(source_id: str, target_id: str, source_type: str, target_type: str):
@@ -497,23 +435,6 @@ class RelationshipHandler(BaseHandler):
             )
 
         return relationships
-
-    def _format_relationships_details(self, relationships: list[dict[str, Any]]) -> str:
-        """Format relationships for display"""
-        if not relationships:
-            return "No relationships found."
-
-        lines = ["# Relationships\n"]
-        for rel in relationships:
-            source_title = rel.get("source_title", rel["source_id"])
-            target_title = rel.get("target_title", rel["target_id"])
-            rel_type = rel["type"]
-
-            lines.append(
-                f"- **{source_title}** ({rel['source_id']}) → **{target_title}** ({rel['target_id']}) [{rel_type}]"
-            )
-
-        return "\n".join(lines)
 
     def _format_entity_relationships_details(self, entity_id: str, relationships: list[dict[str, Any]]) -> str:
         """Format entity relationships for detailed display"""

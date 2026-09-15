@@ -28,7 +28,7 @@ class StatusHandler(BaseHandler):
             },
             {
                 "name": "get_project_metrics",
-                "description": "Get structured project metrics for programmatic use",
+                "description": "Project metrics as JSON",
                 "inputSchema": {"type": "object", "properties": {}},
             },
         ]

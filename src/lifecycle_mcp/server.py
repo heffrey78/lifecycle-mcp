@@ -20,7 +20,7 @@ from .database_manager import DatabaseManager
 from .handlers import (
     ArchitectureHandler,
     ExportHandler,
-    InterviewHandler,
+    RecordHandler,
     RelationshipHandler,
     RequirementHandler,
     StatusHandler,
@@ -54,7 +54,9 @@ class LifecycleMCPServer:
         self.task_handler = TaskHandler(self.db_manager)
         self.architecture_handler = ArchitectureHandler(self.db_manager, self.mcp_client)
         self.relationship_handler = RelationshipHandler(self.db_manager)
-        self.interview_handler = InterviewHandler(self.db_manager, self.requirement_handler)
+        self.record_handler = RecordHandler(
+            self.db_manager, self.requirement_handler, self.task_handler, self.architecture_handler
+        )
         self.export_handler = ExportHandler(self.db_manager)
         self.status_handler = StatusHandler(self.db_manager)
 
@@ -65,41 +67,30 @@ class LifecycleMCPServer:
             "update_requirement_status": self.requirement_handler,
             "query_requirements": self.requirement_handler,
             "query_requirements_json": self.requirement_handler,
-            "get_requirement_details": self.requirement_handler,
             "trace_requirement": self.requirement_handler,
-            "delete_requirement": self.requirement_handler,
             "update_requirement": self.requirement_handler,
             # Task tools
             "create_task": self.task_handler,
             "update_task_status": self.task_handler,
             "query_tasks": self.task_handler,
             "query_tasks_json": self.task_handler,
-            "get_task_details": self.task_handler,
-            "sync_task_from_github": self.task_handler,
-            "bulk_sync_github_tasks": self.task_handler,
-            "delete_task": self.task_handler,
+            "sync_github_tasks": self.task_handler,  # listed and routed only when LIFECYCLE_GITHUB=on
             "update_task": self.task_handler,
             # Relationship tools
             "create_relationship": self.relationship_handler,
             "delete_relationship": self.relationship_handler,
             "query_relationships": self.relationship_handler,
-            "get_entity_relationships": self.relationship_handler,
-            "query_all_relationships": self.relationship_handler,
             "get_entity_history": self.relationship_handler,
+            # Record tools: any requirement, task or architecture decision ID
+            "get_details": self.record_handler,
+            "delete_record": self.record_handler,
+            "add_comment": self.record_handler,
             # Architecture tools
             "create_architecture_decision": self.architecture_handler,
             "update_architecture_status": self.architecture_handler,
             "query_architecture_decisions": self.architecture_handler,
             "query_architecture_decisions_json": self.architecture_handler,
-            "get_architecture_details": self.architecture_handler,
-            "add_architecture_review": self.architecture_handler,
-            "delete_architecture": self.architecture_handler,
             "update_architecture": self.architecture_handler,
-            # Interview tools
-            "start_requirement_interview": self.interview_handler,
-            "continue_requirement_interview": self.interview_handler,
-            "start_architectural_conversation": self.interview_handler,
-            "continue_architectural_conversation": self.interview_handler,
             # Export tools
             "export_project_documentation": self.export_handler,
             "create_architectural_diagrams": self.export_handler,
@@ -132,7 +123,7 @@ class LifecycleMCPServer:
                 self.task_handler,
                 self.architecture_handler,
                 self.relationship_handler,
-                self.interview_handler,
+                self.record_handler,
                 self.export_handler,
                 self.status_handler,
             ]:

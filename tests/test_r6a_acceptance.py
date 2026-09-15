@@ -39,7 +39,7 @@ async def test_1_criteria_edit_on_an_approved_requirement_is_visible_and_flagged
     }
     await ok(mcp_server, "update_requirement", edit)
 
-    details = await ok(mcp_server, "get_requirement_details", {"requirement_id": REQ})
+    details = await ok(mcp_server, "get_details", {"entity_id": REQ})
     assert "- Ranks results by relevance" in details
     assert f"{FLAG}**: acceptance_criteria edited at Approved" in details
     assert f"{FLAG}**: acceptance_criteria" in await ok(mcp_server, "trace_requirement", {"requirement_id": REQ})
@@ -51,7 +51,7 @@ async def test_1_criteria_edit_on_an_approved_requirement_is_visible_and_flagged
     transition = {"requirement_id": REQ, "new_status": "Ready", "comment": "Ranking accepted"}
     await ok(mcp_server, "update_requirement_status", transition)
 
-    assert FLAG not in await ok(mcp_server, "get_requirement_details", {"requirement_id": REQ})
+    assert FLAG not in await ok(mcp_server, "get_details", {"entity_id": REQ})
     assert FLAG not in await ok(mcp_server, "trace_requirement", {"requirement_id": REQ})
     assert FLAG not in await ok(mcp_server, "get_project_status", {})
 
@@ -63,7 +63,7 @@ async def test_2_the_same_edit_without_a_reason_is_refused(mcp_server):  # noqa:
     refused = await call(mcp_server, "update_requirement", edit)
 
     assert refused.isError and "a reason is required" in text_of(refused)
-    details = await ok(mcp_server, "get_requirement_details", {"requirement_id": REQ})
+    details = await ok(mcp_server, "get_details", {"entity_id": REQ})
     assert "Ranks results by relevance" not in details and "**Revision**: 0" in details
 
 
@@ -77,7 +77,7 @@ async def test_3_editing_an_accepted_decision_is_refused_with_guidance_to_supers
     assert refused.isError
     assert "only Proposed decisions can be edited" in text_of(refused)
     assert "create_architecture_decision" in text_of(refused) and "Superseded" in text_of(refused)
-    assert "SQLite FTS5" in await ok(mcp_server, "get_architecture_details", {"architecture_id": ADR})
+    assert "SQLite FTS5" in await ok(mcp_server, "get_details", {"entity_id": ADR})
 
 
 async def test_4_a_subtask_moved_to_a_new_parent_keeps_its_id_and_both_parents_list_it_correctly(
@@ -91,10 +91,10 @@ async def test_4_a_subtask_moved_to_a_new_parent_keeps_its_id_and_both_parents_l
 
     await ok(mcp_server, "update_task", {"task_id": "TASK-0001-01-00", "parent_task_id": "TASK-0002-00-00"})
 
-    assert "Subtasks" not in await ok(mcp_server, "get_task_details", {"task_id": TASK})
-    new_parent = await ok(mcp_server, "get_task_details", {"task_id": "TASK-0002-00-00"})
+    assert "Subtasks" not in await ok(mcp_server, "get_details", {"entity_id": TASK})
+    new_parent = await ok(mcp_server, "get_details", {"entity_id": "TASK-0002-00-00"})
     assert "## Subtasks (1)\n- TASK-0001-01-00: Child" in new_parent
-    child = await ok(mcp_server, "get_task_details", {"task_id": "TASK-0001-01-00"})
+    child = await ok(mcp_server, "get_details", {"entity_id": "TASK-0001-01-00"})
     assert "## Parent Task\n- TASK-0002-00-00: Parent B" in child
     assert "Found 3 task(s)" in await ok(mcp_server, "query_tasks", {})
 
@@ -132,9 +132,9 @@ async def test_6_an_unlinked_draft_requirement_is_deleted_and_one_with_tasks_is_
     mcp_server,  # noqa: F811
 ):
     await ok(mcp_server, "create_requirement", REQUIREMENT)
-    deleted = await ok(mcp_server, "delete_requirement", {"requirement_id": REQ})
+    deleted = await ok(mcp_server, "delete_record", {"entity_id": REQ})
     assert "deleted" in deleted
-    assert (await call(mcp_server, "get_requirement_details", {"requirement_id": REQ})).isError
+    assert (await call(mcp_server, "get_details", {"entity_id": REQ})).isError
 
     await approved_requirement(mcp_server)  # recreated as REQ-0001-FUNC-00
     await ok(mcp_server, "create_task", {"requirement_ids": [REQ], "title": "Build index", "priority": "P1"})
@@ -142,9 +142,9 @@ async def test_6_an_unlinked_draft_requirement_is_deleted_and_one_with_tasks_is_
     link = {"source_id": "REQ-0002-FUNC-00", "target_id": TASK, "relationship_type": "implements"}
     await ok(mcp_server, "create_relationship", link)
 
-    past_draft = await call(mcp_server, "delete_requirement", {"requirement_id": REQ})
+    past_draft = await call(mcp_server, "delete_record", {"entity_id": REQ})
     assert past_draft.isError and "is Approved" in text_of(past_draft)
-    with_tasks = await call(mcp_server, "delete_requirement", {"requirement_id": "REQ-0002-FUNC-00"})
+    with_tasks = await call(mcp_server, "delete_record", {"entity_id": "REQ-0002-FUNC-00"})
     assert with_tasks.isError and f"tasks: {TASK}" in text_of(with_tasks)
 
 
@@ -177,16 +177,16 @@ async def test_8_an_update_with_a_stale_if_revision_fails_and_leaves_the_record_
     await ok(mcp_server, "create_task", {"requirement_ids": [REQ], "title": "Build index", "priority": "P1"})
     await ok(mcp_server, "create_architecture_decision", DECISION)
     records = [
-        ("update_requirement", "get_requirement_details", {"requirement_id": REQ, "reason": "Rename"}),
-        ("update_task", "get_task_details", {"task_id": TASK}),
-        ("update_architecture", "get_architecture_details", {"architecture_id": ADR}),
+        ("update_requirement", {"requirement_id": REQ, "reason": "Rename"}, REQ),
+        ("update_task", {"task_id": TASK}, TASK),
+        ("update_architecture", {"architecture_id": ADR}, ADR),
     ]
 
-    for update, details, identity in records:
+    for update, identity, entity_id in records:
         await ok(mcp_server, update, {**identity, "title": "First", "if_revision": 0})
 
         stale = await call(mcp_server, update, {**identity, "title": "Second", "if_revision": 0})
 
         assert stale.isError and "at revision 1, not 0" in text_of(stale), update
-        shown = await ok(mcp_server, details, {key: value for key, value in identity.items() if key != "reason"})
+        shown = await ok(mcp_server, "get_details", {"entity_id": entity_id})
         assert "**Title**: First" in shown and "**Revision**: 1" in shown, update

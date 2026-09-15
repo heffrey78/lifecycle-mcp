@@ -17,7 +17,7 @@ async def ok(server, name: str, arguments: dict) -> str:
 
 
 async def requirement_details(server, requirement_id: str = REQ_1) -> str:
-    return await ok(server, "get_requirement_details", {"requirement_id": requirement_id})
+    return await ok(server, "get_details", {"entity_id": requirement_id})
 
 
 async def trace(server, requirement_id: str = REQ_1) -> str:
@@ -25,7 +25,7 @@ async def trace(server, requirement_id: str = REQ_1) -> str:
 
 
 async def task_details(server, task_id: str = TASK) -> str:
-    return await ok(server, "get_task_details", {"task_id": task_id})
+    return await ok(server, "get_details", {"entity_id": task_id})
 
 
 async def history(server, entity_id: str) -> str:
@@ -251,7 +251,7 @@ async def test_proposed_decision_is_edited_and_the_edit_logged(mcp_server):  # n
     }
     await ok(mcp_server, "update_architecture", edit)
 
-    details = await ok(mcp_server, "get_architecture_details", {"architecture_id": "ADR-0001"})
+    details = await ok(mcp_server, "get_details", {"entity_id": "ADR-0001"})
     assert "SQLite FTS5 with trigram tokenizer" in details and "- Fuzzy matching" in details
     assert "**Revision**: 1" in details
     edits = await history(mcp_server, "ADR-0001")
@@ -269,5 +269,5 @@ async def test_decided_decision_edit_is_refused_with_supersede_guidance(mcp_serv
     assert refused.isError
     assert "is Accepted; only Proposed decisions can be edited" in text_of(refused)
     assert "Superseded" in text_of(refused)
-    details = await ok(mcp_server, "get_architecture_details", {"architecture_id": "ADR-0001"})
+    details = await ok(mcp_server, "get_details", {"entity_id": "ADR-0001"})
     assert "**Title**: Use FTS5" in details

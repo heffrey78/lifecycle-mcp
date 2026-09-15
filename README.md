@@ -138,66 +138,57 @@ claude mcp add lifecycle /path/to/venv/bin/lifecycle-mcp -e LIFECYCLE_DB=./lifec
 
 ## MCP Tools Reference
 
-The server exposes 39 MCP tools across 7 handler modules for comprehensive lifecycle management. Every tool rejects fields it does not declare, and the error names the field.
+The server exposes 27 MCP tools (28 with GitHub integration on) across 7 handler modules for comprehensive lifecycle management. Every tool rejects fields it does not declare, and the error names the field. [CHANGELOG.md](CHANGELOG.md) lists tools that were removed or renamed, with their replacements.
 
 ### Tool List
 **Requirements**
-- `create_requirement` - Create new requirements from interview data
+- `create_requirement` - Create new requirements
 - `update_requirement` - Edit a requirement's content (a reason is required at Approved or later)
 - `update_requirement_status` - Move requirements through lifecycle states
-- `delete_requirement` - Delete a Draft requirement created by mistake
 - `query_requirements` - Search and filter requirements
 - `query_requirements_json` - Query requirements as structured JSON
-- `get_requirement_details` - Get full requirement with relationships
 - `trace_requirement` - Trace requirement through implementation
 
 **Tasks**
 - `create_task` - Create implementation tasks from requirements
 - `update_task` - Edit a task's content, move it to another parent or change its requirements
 - `update_task_status` - Update task progress
-- `delete_task` - Delete a Not Started task created by mistake
 - `query_tasks` - Search and filter tasks
 - `query_tasks_json` - Query tasks as structured JSON
-- `get_task_details` - Get full task details with dependencies
-- `sync_task_from_github` - Sync individual task from GitHub issue changes
-- `bulk_sync_github_tasks` - Sync all tasks with their GitHub issues
+- `sync_github_tasks` - Sync one task, or every linked task, from GitHub issues (listed only when `LIFECYCLE_GITHUB=on`)
 
 **Architecture decisions**
 - `create_architecture_decision` - Record architecture decisions (ADRs)
 - `update_architecture` - Edit a Proposed architecture decision
 - `update_architecture_status` - Update architecture decision status
-- `delete_architecture` - Delete a Proposed architecture decision created by mistake
 - `query_architecture_decisions` - Search and filter architecture decisions
 - `query_architecture_decisions_json` - Query architecture decisions as structured JSON
-- `get_architecture_details` - Get full architecture decision details
-- `add_architecture_review` - Add review comments to architecture decisions
+
+**Any record (requirement, task or architecture decision, by ID)**
+- `get_details` - Full details of a record, with its links and comments
+- `delete_record` - Delete a Draft requirement, Not Started task or Proposed architecture decision created by mistake
+- `add_comment` - Comment on a record; comments show in its details and history
 
 **Relationships and history**
 - `create_relationship` - Link two records (dependencies, refinements, blocks and more)
 - `delete_relationship` - Remove a link between two records
-- `query_relationships` - Query links for visualization
-- `get_entity_relationships` - Get all links for one record
-- `query_all_relationships` - Get every link for building a graph
+- `query_relationships` - Query links: one record's links by direction and type, or every link as JSON for a graph
 - `get_entity_history` - Show how a record changed: creation, edits with before and after values, status changes, comments and deletion
 
-**Status, interviews and export**
+**Status and export**
 - `get_project_status` - Get project health metrics and dashboards
 - `get_project_metrics` - Get structured project metrics for programmatic use
-- `start_requirement_interview` - Start interactive requirement gathering
-- `continue_requirement_interview` - Continue requirement interview sessions
-- `start_architectural_conversation` - Start interactive architecture discussions
-- `continue_architectural_conversation` - Continue architecture conversations
 - `export_project_documentation` - Export comprehensive markdown documentation
 - `create_architectural_diagrams` - Generate Mermaid diagrams for project visualization
 
 ### Editing, Deleting and History
 
-These rules apply to `update_requirement`, `update_task`, `update_architecture` and the delete tools:
+These rules apply to `update_requirement`, `update_task`, `update_architecture` and `delete_record`:
 
 - **Edits happen in place.** Update tools change content only; status moves stay with the `update_*_status` tools, and record IDs never change.
 - **Every change is recorded.** Each changed field is logged with its before and after values, the actor and the reason. `get_entity_history` shows the log.
 - **Revisions guard against lost updates.** Each record has a revision, shown in its details, that goes up by one with every update that changes something. Pass `if_revision` to have the update refused, with nothing written, when the record has changed since you read it.
-- **Approved requirements need a reason.** Editing a requirement at Approved or later requires `reason`. The requirement then shows as *Changed Since Last Review* in `get_requirement_details`, `trace_requirement` and `get_project_status`, listing the edited fields.
+- **Approved requirements need a reason.** Editing a requirement at Approved or later requires `reason`. The requirement then shows as *Changed Since Last Review* in `get_details`, `trace_requirement` and `get_project_status`, listing the edited fields.
 - **The next status change is the acknowledgement.** There is no separate acknowledgement step: the requirement's next status transition clears the flag, and that transition's comment records the review.
 - **Decided architecture is not rewritten.** Architecture decisions can be edited only while Proposed. To change a decided one, record a new decision with `create_architecture_decision` and move the old one to Superseded.
 - **Deleting is for mistakes.** Only Draft requirements, Not Started tasks and Proposed architecture decisions can be deleted, and only when nothing depends on them. Refusals name the blocking records. A deleted record's own links go with it, and its history remains.
@@ -210,10 +201,41 @@ Show how a requirement, task or architecture decision changed over time, oldest 
 
 **Returns:** Creation, field edits with before and after values and reasons, status changes, comments and deletion. Still available after the record is deleted.
 
+#### `get_details`
+Full details of a requirement, task or architecture decision. The ID prefix (`REQ-`, `TASK-`, `ADR-`) tells the server which kind of record it is.
+
+**Parameters:**
+- `entity_id` (required): Requirement, task or architecture decision ID
+
+**Returns:** The record's fields, revision, links (linked tasks, subtasks and parent, linked requirements) and comments. A reviewed requirement edited since its last status change is flagged *Changed Since Last Review*.
+
+#### `delete_record`
+Delete a record created by mistake.
+
+**Parameters:**
+- `entity_id` (required): Requirement, task or architecture decision ID
+
+Only Draft requirements, Not Started tasks and Proposed architecture decisions can be deleted. Refused, naming what blocks it, when:
+- **Requirement:** tasks, architecture decisions or other requirements link to it.
+- **Task:** it has subtasks, other tasks depend on it, or it is linked to a GitHub issue.
+- **Architecture decision:** another decision is superseded by it, or records other than its own requirement links point to it.
+
+Anything past its early stage changes status instead (Deprecated, Abandoned, Rejected or Superseded).
+
+#### `add_comment`
+Comment on a requirement, task or architecture decision.
+
+**Parameters:**
+- `entity_id` (required): Requirement, task or architecture decision ID
+- `comment` (required): The comment
+- `author` (optional): Who wrote it (default: MCP User)
+
+**Returns:** Confirmation. The comment appears in the record's details under Comments and in `get_entity_history`.
+
 ### Requirement Management
 
 #### `create_requirement`
-Create new requirements from interview data or analysis.
+Create a new requirement.
 
 **Parameters:**
 - `type` (required): Requirement type - "FUNC", "NFUNC", "TECH", "BUS", "INTF"
@@ -273,14 +295,6 @@ Search and filter requirements by various criteria.
 - `type` (optional): Filter by requirement type
 - `search_text` (optional): Text search in title and desired state
 
-#### `get_requirement_details`
-Get comprehensive requirement information including all relationships.
-
-**Parameters:**
-- `requirement_id` (required): Requirement ID
-
-**Returns:** Detailed report with basic info, problem definition, functional requirements, acceptance criteria, and linked tasks.
-
 #### `trace_requirement`
 Trace a requirement through its complete implementation lifecycle.
 
@@ -308,14 +322,6 @@ Edit a requirement's content in place. See [Editing, Deleting and History](#edit
   "if_revision": 2
 }
 ```
-
-#### `delete_requirement`
-Delete a Draft requirement created by mistake.
-
-**Parameters:**
-- `requirement_id` (required): Requirement ID
-
-Refused when the requirement is past Draft (move it to Deprecated instead) or when tasks, architecture decisions or other requirements link to it.
 
 ### Task Management
 
@@ -366,28 +372,13 @@ Search and filter tasks by various criteria.
 - `assignee` (optional): Filter by assignee
 - `requirement_id` (optional): Filter by linked requirement
 
-#### `get_task_details`
-Get comprehensive task information including dependencies and relationships.
+#### `sync_github_tasks`
+Sync tasks from their linked GitHub issues, with conflict detection. Listed only when `LIFECYCLE_GITHUB=on`.
 
 **Parameters:**
-- `task_id` (required): Task ID
+- `task_id` (optional): Task to sync with its linked GitHub issue; omit it to sync every task linked to an issue
 
-**Returns:** Detailed report with basic info, description, acceptance criteria, and linked requirements.
-
-#### `sync_task_from_github`
-Sync individual task from GitHub issue changes with conflict detection.
-
-**Parameters:**
-- `task_id` (required): Task ID to sync with its linked GitHub issue
-
-**Returns:** Sync status and any updates applied from GitHub issue data.
-
-#### `bulk_sync_github_tasks`
-Sync all tasks with their GitHub issues in batch operation.
-
-**Parameters:** None
-
-**Returns:** Summary of sync operations performed across all tasks with GitHub issue links.
+**Returns:** Sync status and any updates applied from the GitHub issue data.
 
 #### `update_task`
 Edit a task's content, move it under another parent or change the requirements it implements. The task ID never changes.
@@ -400,14 +391,6 @@ Edit a task's content, move it under another parent or change the requirements i
 - `reason`, `actor`, `if_revision` (optional): As in `update_requirement`
 
 Pass at least one field to change. Changes are not pushed to a linked GitHub issue.
-
-#### `delete_task`
-Delete a Not Started task created by mistake.
-
-**Parameters:**
-- `task_id` (required): Task ID
-
-Refused when the task has started (mark it Abandoned instead), has subtasks, has tasks depending on it or is linked to a GitHub issue.
 
 ### Architecture Management
 
@@ -461,22 +444,6 @@ Search and filter architecture decisions by various criteria.
 - `requirement_id` (optional): Filter by linked requirement
 - `search_text` (optional): Text search in title and context
 
-#### `get_architecture_details`
-Get comprehensive architecture decision information including all relationships and reviews.
-
-**Parameters:**
-- `architecture_id` (required): Architecture ID
-
-**Returns:** Detailed report with basic info, context, decision details, drivers, options, consequences, linked requirements, and review history.
-
-#### `add_architecture_review`
-Add review comments to architecture decisions.
-
-**Parameters:**
-- `architecture_id` (required): Architecture ID
-- `comment` (required): Review comment
-- `reviewer` (optional): Reviewer name (default: "MCP User")
-
 #### `update_architecture`
 Edit an architecture decision's content while it is Proposed. Decisions in any other status are refused: record a new decision with `create_architecture_decision` and move the old one to Superseded.
 
@@ -484,14 +451,6 @@ Edit an architecture decision's content while it is Proposed. Decisions in any o
 - `architecture_id` (required): Architecture ID
 - `title`, `context`, `decision`, `consequences`, `decision_drivers`, `considered_options`, `authors`, `deciders`, `implementation_notes`, `validation_criteria`, `risk_assessment` (at least one): New values, with the same types as in `create_architecture_decision`
 - `reason`, `actor`, `if_revision` (optional): As in `update_requirement`
-
-#### `delete_architecture`
-Delete a Proposed architecture decision created by mistake.
-
-**Parameters:**
-- `architecture_id` (required): Architecture ID
-
-Refused when the decision is past Proposed (reject or supersede it instead), when another decision is superseded by it or when records other than its own requirement links point to it.
 
 ### Project Monitoring
 
@@ -502,53 +461,6 @@ Get comprehensive project health metrics and dashboards.
 - `include_blocked` (optional): Include blocked items analysis (default: true)
 
 **Returns:** Dashboard with requirement overview, task statistics, completion percentages, and blocked items analysis.
-
-### Interactive Interview Tools
-
-#### `start_requirement_interview`
-Start an interactive requirement gathering interview session.
-
-**Parameters:**
-- `project_context` (optional): Description of the project or system
-- `stakeholder_role` (optional): Role of the person being interviewed
-
-**Returns:** Session ID and initial questions to guide requirement gathering.
-
-**Example:**
-```json
-{
-  "project_context": "E-commerce platform modernization",
-  "stakeholder_role": "Product Manager"
-}
-```
-
-#### `continue_requirement_interview`
-Continue an active interview session by providing answers to questions.
-
-**Parameters:**
-- `session_id` (required): Interview session ID from start_requirement_interview
-- `answers` (required): Object containing answers to the current questions
-
-**Returns:** Next set of questions or completion summary with created requirement.
-
-**Example:**
-```json
-{
-  "session_id": "a1b2c3d4",
-  "answers": {
-    "current_problem": "Users struggle with complex checkout process",
-    "desired_outcome": "Streamlined one-click checkout experience",
-    "success_criteria": "Checkout completion rate increases by 25%"
-  }
-}
-```
-
-**Interview Flow:**
-1. **Problem Identification**: Understanding the current challenge
-2. **Solution Definition**: Defining the desired outcome and constraints
-3. **Details Gathering**: Collecting priority, type, and technical details
-4. **Validation**: Establishing acceptance criteria and success metrics
-5. **Completion**: Automatic requirement creation with interview summary
 
 ### Documentation Export Tools
 
@@ -588,7 +500,6 @@ Generate Mermaid diagrams for project architecture and relationships visualizati
 - `requirement_ids` (optional): Array of specific requirement IDs to include
 - `include_relationships` (optional): Include relationship arrows in diagrams (default: true)
 - `output_format` (optional): Output format - "mermaid", "markdown_with_mermaid" (default: "mermaid")
-- `interactive` (optional): Start interactive conversation for complex diagrams (default: false)
 
 **Returns:** Mermaid diagram code or markdown-wrapped diagram.
 
@@ -614,50 +525,6 @@ Generate Mermaid diagrams for project architecture and relationships visualizati
 }
 ```
 
-### Interactive Architectural Conversation Tools
-
-#### `start_architectural_conversation`
-Start an interactive conversation for complex architectural diagram generation.
-
-**Parameters:**
-- `project_context` (optional): Description of the project or system
-- `diagram_purpose` (optional): Purpose and goals for the diagram
-- `complexity_level` (optional): Conversation complexity - "simple", "medium", "complex" (default: "medium")
-
-**Returns:** Session ID and contextual questions based on complexity level.
-
-**Complexity Levels:**
-- **Simple**: Basic component and relationship questions
-- **Medium**: Architectural challenges, stakeholders, and detail level questions
-- **Complex**: Deep architectural patterns, compliance, security, and performance considerations
-
-#### `continue_architectural_conversation`
-Continue an active architectural conversation session with responses.
-
-**Parameters:**
-- `session_id` (required): Conversation session ID from start_architectural_conversation
-- `responses` (required): Object containing responses to current questions
-
-**Returns:** Next questions or completion with generated diagram.
-
-**Conversation Flow:**
-1. **Context Gathering**: Understanding architectural needs and stakeholders
-2. **Diagram Specification**: Determining optimal diagram type and focus
-3. **Detail Refinement**: Visual preferences and emphasis areas
-4. **Completion**: Automatic diagram generation with conversation summary
-
-**Example:**
-```json
-{
-  "session_id": "a1b2c3d4",
-  "responses": {
-    "main_challenge": "Visualizing microservice dependencies for new team members",
-    "stakeholders": "Development team and system architects",
-    "detail_level": "High-level overview with key integration points"
-  }
-}
-```
-
 ## Database Schema
 
 The server maintains a comprehensive SQLite database with the following key entities:
@@ -667,7 +534,7 @@ The server maintains a comprehensive SQLite database with the following key enti
 - **Architecture**: ADRs and technical design documents
 - **Relationships**: Many-to-many links between requirements, tasks, and architecture
 - **Events**: Automatic logging of lifecycle events and status changes
-- **Reviews**: Comments and feedback on requirements and tasks
+- **Comments**: Notes on requirements, tasks and architecture decisions, added with `add_comment` or a status change's `comment`
 
 ## Entity ID Formats
 
@@ -678,7 +545,7 @@ The server maintains a comprehensive SQLite database with the following key enti
 ## Environment Variables
 
 - `LIFECYCLE_DB`: Path to SQLite database file (default: "./lifecycle.db")
-- `LIFECYCLE_GITHUB`: Set to `on` to create and sync a GitHub issue for each task (default: off). Requires an authenticated `gh` CLI and a github.com `origin` remote in the server's working directory. When off, the server never runs `gh` or `git`.
+- `LIFECYCLE_GITHUB`: Set to `on` to create and sync a GitHub issue for each task (default: off). Requires an authenticated `gh` CLI and a github.com `origin` remote in the server's working directory. When off, the server never runs `gh` or `git`, and the `sync_github_tasks` tool is not listed.
 - `LIFECYCLE_CALL_LOG`: Path to a file where the server appends one JSON line per tool call: tool name, argument names (not values), duration, whether it failed and response size. Off by default. `scripts/tool_usage_report.py` summarises these logs.
 
 ## Troubleshooting

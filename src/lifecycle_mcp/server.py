@@ -26,7 +26,7 @@ from .handlers import (
     StatusHandler,
     TaskHandler,
 )
-from .handlers.base_handler import ErrorResult
+from .handlers.base_handler import ErrorResult, StructuredResult
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +145,9 @@ class LifecycleMCPServer:
             return tools
 
         @self.server.call_tool()
-        async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+        async def call_tool(
+            name: str, arguments: dict[str, Any]
+        ) -> list[TextContent] | tuple[list[TextContent], dict[str, Any]]:
             """Route tool calls to appropriate handlers
 
             Failures are raised as ToolCallError, which the MCP layer turns into a result with
@@ -162,6 +164,9 @@ class LifecycleMCPServer:
                 raise
             response_chars = sum(len(getattr(block, "text", "")) for block in result)
             self._record_call(name, arguments, started, is_error=False, response_chars=response_chars)
+            if isinstance(result, StructuredResult):
+                # The MCP layer returns a (content, data) pair as content plus structuredContent.
+                return list(result), result.structured
             return result
 
     async def _route_tool_call(self, name: str, arguments: dict[str, Any]) -> list[TextContent]:

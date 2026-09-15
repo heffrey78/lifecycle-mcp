@@ -324,7 +324,6 @@ class RequirementHandler(BaseHandler):
         try:
             # Perform LLM analysis for requirement decomposition
             llm_analysis = await self._analyze_requirement_with_llm(params)
-            analysis_warning = ""
 
             # Handle LLM analysis results
             if llm_analysis:
@@ -334,18 +333,22 @@ class RequirementHandler(BaseHandler):
                 elif llm_analysis.get("recommendation") == "decompose":
                     # Automatically create decomposed requirements
                     return await self._create_decomposed_requirements(llm_analysis, params)
-            else:
-                analysis_warning = "\n⚠️  LLM analysis not available - proceeding with standard creation"
 
             # Standard requirement creation (single requirement)
             req_id = self._create_single_requirement(params)
 
-            # Create above-the-fold response
-            key_info = f"Requirement {req_id} created"
-            action_info = f"📄 {params['title']} | {params['type']} | {params['priority']}"
-            warning_info = analysis_warning.strip() if analysis_warning else ""
-
-            return self._create_above_fold_response("SUCCESS", key_info, action_info, warning_info)
+            # One status line; the facts an agent needs next come back as structured data (roadmap R10).
+            return self._create_structured_response(
+                "SUCCESS",
+                f"Requirement {req_id} created",
+                {
+                    "id": req_id,
+                    "type": params["type"],
+                    "title": params["title"],
+                    "priority": params["priority"],
+                    "status": "Draft",
+                },
+            )
 
         except Exception as e:
             return self._create_error_response("Failed to create requirement", e)

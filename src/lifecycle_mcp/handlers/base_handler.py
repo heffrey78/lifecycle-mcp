@@ -23,6 +23,14 @@ class ErrorResult(list):
     """Content for a failed tool call. The server reports it to the client with isError=true."""
 
 
+class StructuredResult(list):
+    """Content for a tool call plus the same facts as data; the server sends the data as structuredContent."""
+
+    def __init__(self, content: list[TextContent], structured: dict[str, Any]):
+        super().__init__(content)
+        self.structured = structured
+
+
 class RevisionConflict(Exception):
     """An edit named an if_revision that is no longer current; nothing was written."""
 
@@ -104,6 +112,15 @@ class BaseHandler(ABC):
             response_lines.append(details)
 
         return [TextContent(type="text", text="\n".join(response_lines))]
+
+    def _create_structured_response(
+        self, status: str, key_info: str, structured: dict[str, Any], action_info: str = "", details: str = ""
+    ) -> list[TextContent]:
+        """Above-the-fold text plus structured data for the same result (roadmap R10).
+
+        No tool declares an outputSchema: schemas would count against the tool surface budget (ADR-0002).
+        """
+        return StructuredResult(self._create_above_fold_response(status, key_info, action_info, details), structured)
 
     def _format_status_summary(self, entity_type: str, entity_id: str, status: str, extra_info: str = "") -> str:
         """Format a concise status summary for above-the-fold display"""

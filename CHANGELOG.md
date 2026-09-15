@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Structured results (roadmap R10)
+
+The server now lists **23 tools** by default and **24** with `LIFECYCLE_GITHUB=on`, which is the target in ADR-0002. Tool
+definitions sent to clients shrink from 12,818 to 11,815 characters. Tools still return text, and most also return the
+same facts as data in `structuredContent`. No tool declares an `outputSchema`.
+
+**Breaking:** the removed tools have no aliases. Calling one returns an "Unknown tool" error.
+
+| Removed tool | Use instead |
+|---|---|
+| `query_requirements_json` | `query_requirements`; `structuredContent` is `{requirements, count}` |
+| `query_tasks_json` | `query_tasks`; `structuredContent` is `{tasks, count}` |
+| `query_architecture_decisions_json` | `query_architecture_decisions`; `structuredContent` is `{architecture_decisions, count}` |
+| `get_project_metrics` | `get_project_status`; `structuredContent` holds the metrics |
+
+Query results include full records. JSON list fields such as `acceptance_criteria` are returned as lists.
+
+#### Changed
+- `create_requirement` returns one status line. `structuredContent` holds `id`, `type`, `title`, `priority` and
+  `status`.
+- `create_task` returns `id`, `status`, `requirement_ids`, `parent_task_id` and `github_issue_url`.
+  `create_architecture_decision` returns `id`, `status` and `requirement_ids`.
+- `update_requirement`, `update_task` and `update_architecture` return `id`, the `changed` fields and the new
+  `revision`. `update_requirement` also returns `changed_since_review`.
+- `update_requirement_status`, `update_task_status` and `update_architecture_status` return `id`, `from_status` and
+  `to_status`.
+
 ### Tool surface streamlined (ADR-0002)
 
 The server now lists **27 tools** by default, down from 39, and **28** with `LIFECYCLE_GITHUB=on`. Tool definitions sent to

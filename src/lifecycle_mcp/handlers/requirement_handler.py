@@ -170,19 +170,6 @@ class RequirementHandler(BaseHandler):
                 },
             },
             {
-                "name": "query_requirements_json",
-                "description": "Search and filter requirements, as JSON",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "status": {"type": "string"},
-                        "priority": {"type": "string"},
-                        "type": {"type": "string"},
-                        "search_text": {"type": "string"},
-                    },
-                },
-            },
-            {
                 "name": "trace_requirement",
                 "description": "Trace requirement through implementation",
                 "inputSchema": {
@@ -231,8 +218,6 @@ class RequirementHandler(BaseHandler):
                 return await self._update_requirement_status(**arguments)
             elif tool_name == "query_requirements":
                 return self._query_requirements(**arguments)
-            elif tool_name == "query_requirements_json":
-                return self._query_requirements_json(**arguments)
             elif tool_name == "trace_requirement":
                 return self._trace_requirement(**arguments)
             elif tool_name == "update_requirement":
@@ -300,9 +285,18 @@ class RequirementHandler(BaseHandler):
 
         action_info = self._describe_edit(result)
         status = result.before["status"]
-        if result.changed and status in REVIEWED_STATUSES:
+        flagged = bool(result.changed) and status in REVIEWED_STATUSES
+        if flagged:
             action_info += f" | ⚠️ changed since last review ({status}) until its next status change"
-        return self._create_above_fold_response("SUCCESS", f"Requirement {requirement_id} updated", action_info)
+        structured = {
+            "id": requirement_id,
+            "changed": result.changed,
+            "revision": result.revision,
+            "changed_since_review": flagged,
+        }
+        return self._create_structured_response(
+            "SUCCESS", f"Requirement {requirement_id} updated", structured, action_info
+        )
 
     def _changed_since_review_line(self, requirement_id: str) -> str:
         """Report line flagging edits made since the latest status change, or "" when there are none"""
@@ -324,7 +318,6 @@ class RequirementHandler(BaseHandler):
         try:
             # Perform LLM analysis for requirement decomposition
             llm_analysis = await self._analyze_requirement_with_llm(params)
-            analysis_warning = ""
 
             # Handle LLM analysis results
             if llm_analysis:
@@ -334,18 +327,22 @@ class RequirementHandler(BaseHandler):
                 elif llm_analysis.get("recommendation") == "decompose":
                     # Automatically create decomposed requirements
                     return await self._create_decomposed_requirements(llm_analysis, params)
-            else:
-                analysis_warning = "\n⚠️  LLM analysis not available - proceeding with standard creation"
 
             # Standard requirement creation (single requirement)
             req_id = self._create_single_requirement(params)
 
-            # Create above-the-fold response
-            key_info = f"Requirement {req_id} created"
-            action_info = f"📄 {params['title']} | {params['type']} | {params['priority']}"
-            warning_info = analysis_warning.strip() if analysis_warning else ""
-
-            return self._create_above_fold_response("SUCCESS", key_info, action_info, warning_info)
+            # One status line; the facts an agent needs next come back as structured data (roadmap R10).
+            return self._create_structured_response(
+                "SUCCESS",
+                f"Requirement {req_id} created",
+                {
+                    "id": req_id,
+                    "type": params["type"],
+                    "title": params["title"],
+                    "priority": params["priority"],
+                    "status": "Draft",
+                },
+            )
 
         except Exception as e:
             return self._create_error_response("Failed to create requirement", e)
@@ -709,8 +706,9 @@ Guidelines:
             # Create above-the-fold response
             key_info = f"Requirement {params['requirement_id']} updated"
             action_info = f"📈 {current_status} → {new_status}"
+            structured = {"id": params["requirement_id"], "from_status": current_status, "to_status": new_status}
 
-            return self._create_above_fold_response("SUCCESS", key_info, action_info)
+            return self._create_structured_response("SUCCESS", key_info, structured, action_info)
 
         except Exception as e:
             return self._create_error_response("Failed to update requirement status", e)
@@ -743,10 +741,15 @@ Guidelines:
             requirements = self.db.get_records(
                 "requirements", "*", where_clause, where_params, "priority, created_at DESC"
             )
+            # The full records, JSON fields parsed, as structured data next to the list (roadmap R10)
+            structured = {
+                "requirements": self._record_dicts(requirements, REQUIREMENT_JSON_FIELDS),
+                "count": len(requirements),
+            }
 
             if not requirements:
-                return self._create_above_fold_response(
-                    "INFO", "No requirements found", "Try adjusting search criteria"
+                return self._create_structured_response(
+                    "INFO", "No requirements found", structured, "Try adjusting search criteria"
                 )
 
             # Build filter description for above-the-fold
@@ -770,62 +773,10 @@ Guidelines:
             key_info = self._format_count_summary("requirement", len(requirements), filter_desc)
             details = "\n".join(req_list)
 
-            return self._create_above_fold_response("SUCCESS", key_info, "", details)
+            return self._create_structured_response("SUCCESS", key_info, structured, "", details)
 
         except Exception as e:
             return self._create_error_response("Failed to query requirements", e)
-
-    def _query_requirements_json(self, **params) -> list[TextContent]:
-        """Query requirements and return structured JSON data for UI"""
-        try:
-            where_clauses = []
-            where_params = []
-
-            if params.get("status"):
-                where_clauses.append("status = ?")
-                where_params.append(params["status"])
-
-            if params.get("priority"):
-                where_clauses.append("priority = ?")
-                where_params.append(params["priority"])
-
-            if params.get("type"):
-                where_clauses.append("type = ?")
-                where_params.append(params["type"])
-
-            if params.get("search_text"):
-                where_clauses.append("(title LIKE ? OR desired_state LIKE ?)")
-                search = f"%{params['search_text']}%"
-                where_params.extend([search, search])
-
-            where_clause = " AND ".join(where_clauses) if where_clauses else ""
-
-            requirements = self.db.get_records(
-                "requirements", "*", where_clause, where_params, "priority, created_at DESC"
-            )
-
-            # Convert database rows to JSON-serializable format
-            requirements_list = []
-            for req in requirements:
-                # Convert row object to dictionary and handle any special fields
-                req_dict = dict(req) if hasattr(req, "keys") else req
-
-                # Parse JSON fields if they exist as strings
-                json_fields = [*REQUIREMENT_JSON_FIELDS, "business_value"]
-                for field in json_fields:
-                    if field in req_dict and isinstance(req_dict[field], str):
-                        try:
-                            req_dict[field] = json.loads(req_dict[field]) if req_dict[field] else []
-                        except (json.JSONDecodeError, TypeError):
-                            req_dict[field] = []
-
-                requirements_list.append(req_dict)
-
-            # Return as JSON string in text content
-            return [TextContent(type="text", text=json.dumps(requirements_list))]
-
-        except Exception as e:
-            return self._create_error_response("Failed to query requirements as JSON", e)
 
     def _get_requirement_details(self, **params) -> list[TextContent]:
         """Get full requirement details"""

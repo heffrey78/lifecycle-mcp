@@ -52,7 +52,7 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
 ### Core Components
 
 1. **LifecycleMCPServer** (`src/lifecycle_mcp/server.py`): Refactored main server using modular handler architecture
-   - Exposes 27 tools (28 with `LIFECYCLE_GITHUB=on`) across 7 handler modules
+   - Exposes 23 tools (24 with `LIFECYCLE_GITHUB=on`) across 7 handler modules
    - Uses async architecture for proper MCP protocol compliance
    - Implements clean separation of concerns with handler registry for tool routing
    - Validates state transitions and business rules through domain-specific handlers
@@ -60,13 +60,13 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
 
 2. **Handler Architecture** (`src/lifecycle_mcp/handlers/`): Modular async handlers for different domains
    - `BaseHandler`: Abstract base class with common async patterns, utilities, and standardized response formatting
-   - `RequirementHandler`: Requirements lifecycle management (6 tools) - create, edit, status, query (text and JSON), trace
-   - `TaskHandler`: Task creation and progress tracking (5 tools, plus `sync_github_tasks` when GitHub is on) - create, edit, status, query (text and JSON)
-   - `ArchitectureHandler`: ADR management (5 tools) - create, edit, status, query (text and JSON)
+   - `RequirementHandler`: Requirements lifecycle management (5 tools) - create, edit, status, query, trace
+   - `TaskHandler`: Task creation and progress tracking (4 tools, plus `sync_github_tasks` when GitHub is on) - create, edit, status, query
+   - `ArchitectureHandler`: ADR management (4 tools) - create, edit, status, query
    - `RecordHandler`: Operations that take any record's ID (3 tools) - details, delete, comment; dispatches to the per-type handlers by ID prefix
    - `RelationshipHandler`: Links and history (4 tools) - create, delete, query links, entity history
    - `ExportHandler`: Documentation generation (2 tools) - export docs, create diagrams
-   - `StatusHandler`: Project health monitoring (2 tools) - project status and metrics
+   - `StatusHandler`: Project health monitoring (1 tool) - project status, with metrics as structured data
 
 3. **DatabaseManager** (`src/lifecycle_mcp/database_manager.py`): Centralized database operations
    - Manages SQLite database connections and schema initialization
@@ -114,27 +114,27 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
 
 ### MCP Tools Available
 
-The server exposes 27 tools (28 with `LIFECYCLE_GITHUB=on`) across 7 handler modules:
+The server exposes 23 tools (24 with `LIFECYCLE_GITHUB=on`) across 7 handler modules:
 
-**Requirement Management (6 tools):**
+**Requirement Management (5 tools):**
 - `create_requirement` - Create new requirements with validation
 - `update_requirement` - Edit content in place; reason required at Approved or later
 - `update_requirement_status` - Move requirements through lifecycle with state validation
-- `query_requirements` / `query_requirements_json` - Search and filter requirements (text or JSON)
+- `query_requirements` - Search and filter requirements (text list plus structured records)
 - `trace_requirement` - Full lifecycle traceability
 
-**Task Management (5 tools, plus 1 when GitHub is on):**
+**Task Management (4 tools, plus 1 when GitHub is on):**
 - `create_task` - Create tasks linked to requirements
 - `update_task` - Edit content, move to another parent, replace requirement links
 - `update_task_status` - Update task progress
-- `query_tasks` / `query_tasks_json` - Search and filter tasks (text or JSON)
+- `query_tasks` - Search and filter tasks (text list plus structured records)
 - `sync_github_tasks` - Sync one task or every linked task from GitHub issues (listed only when `LIFECYCLE_GITHUB=on`)
 
-**Architecture Management (5 tools):**
+**Architecture Management (4 tools):**
 - `create_architecture_decision` - Record ADRs
 - `update_architecture` - Edit content while Proposed
 - `update_architecture_status` - Update ADR status
-- `query_architecture_decisions` / `query_architecture_decisions_json` - Search architecture decisions (text or JSON)
+- `query_architecture_decisions` - Search architecture decisions (text list plus structured records)
 
 **Any Record (3 tools):**
 - `get_details` - Full details of a requirement, task or ADR by ID, with links and comments
@@ -150,9 +150,8 @@ The server exposes 27 tools (28 with `LIFECYCLE_GITHUB=on`) across 7 handler mod
 - `export_project_documentation` - Generate project docs
 - `create_architectural_diagrams` - Generate architecture diagrams
 
-**Status Monitoring (2 tools):**
-- `get_project_status` - Project health dashboard
-- `get_project_metrics` - Structured metrics
+**Status Monitoring (1 tool):**
+- `get_project_status` - Project health dashboard, with metrics as structured data
 
 ### Database Environment
 

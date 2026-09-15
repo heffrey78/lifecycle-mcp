@@ -133,19 +133,6 @@ class ArchitectureHandler(BaseHandler):
                 },
             },
             {
-                "name": "query_architecture_decisions_json",
-                "description": "Search and filter architecture decisions, as JSON",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "status": {"type": "string"},
-                        "type": {"type": "string"},
-                        "requirement_id": {"type": "string"},
-                        "search_text": {"type": "string"},
-                    },
-                },
-            },
-            {
                 "name": "update_architecture",
                 "description": "Edit while Proposed. Otherwise record a new decision that supersedes it.",
                 "inputSchema": {
@@ -176,8 +163,6 @@ class ArchitectureHandler(BaseHandler):
                 return self._update_architecture_status(**arguments)
             elif tool_name == "query_architecture_decisions":
                 return self._query_architecture_decisions(**arguments)
-            elif tool_name == "query_architecture_decisions_json":
-                return self._query_architecture_decisions_json(**arguments)
             elif tool_name == "update_architecture":
                 return self._update_architecture(**arguments)
             else:
@@ -240,8 +225,11 @@ class ArchitectureHandler(BaseHandler):
             )
         except (LookupError, RevisionConflict, EditRefused) as e:
             return self._create_error_response(str(e))
-        return self._create_above_fold_response(
-            "SUCCESS", f"Architecture decision {architecture_id} updated", self._describe_edit(result)
+        return self._create_structured_response(
+            "SUCCESS",
+            f"Architecture decision {architecture_id} updated",
+            {"id": architecture_id, "changed": result.changed, "revision": result.revision},
+            self._describe_edit(result),
         )
 
     async def _create_architecture_decision(self, **params) -> list[TextContent]:
@@ -295,6 +283,7 @@ class ArchitectureHandler(BaseHandler):
 
             # Analyze ADR for diagram suggestions using LLM
             diagram_suggestions = await self._analyze_adr_for_diagrams(arch_data)
+            structured = {"id": adr_id, "status": "Proposed", "requirement_ids": params["requirement_ids"]}
 
             if diagram_suggestions and diagram_suggestions.get("suggested_diagrams"):
                 # Format diagram suggestions for user
@@ -302,12 +291,12 @@ class ArchitectureHandler(BaseHandler):
                 key_info = f"Architecture decision {adr_id} created with diagram suggestions"
                 suggestions_count = len(diagram_suggestions["suggested_diagrams"])
                 action_info = f"📐 {params['title']} | {suggestions_count} diagram suggestions"
-                return self._create_above_fold_response("SUCCESS", key_info, action_info, suggestions_text)
+                return self._create_structured_response("SUCCESS", key_info, structured, action_info, suggestions_text)
             else:
                 # Standard response without suggestions
                 key_info = f"Architecture decision {adr_id} created"
                 action_info = f"📐 {params['title']} | {params.get('status', 'Proposed')} | ADR"
-                return self._create_above_fold_response("SUCCESS", key_info, action_info)
+                return self._create_structured_response("SUCCESS", key_info, structured, action_info)
 
         except Exception as e:
             return self._create_error_response("Failed to create architecture decision", e)
@@ -342,7 +331,8 @@ class ArchitectureHandler(BaseHandler):
             # Create above-the-fold response
             key_info = f"Architecture {params['architecture_id']} updated"
             action_info = f"📈 {current_status} → {new_status}"
-            return self._create_above_fold_response("SUCCESS", key_info, action_info)
+            structured = {"id": params["architecture_id"], "from_status": current_status, "to_status": new_status}
+            return self._create_structured_response("SUCCESS", key_info, structured, action_info)
 
         except Exception as e:
             return self._create_error_response("Failed to update architecture status", e)
@@ -396,9 +386,15 @@ class ArchitectureHandler(BaseHandler):
 
             decisions = self.db.execute_query(base_query, where_params, fetch_all=True, row_factory=True)
 
+            # The full records, JSON fields parsed, as structured data next to the list (roadmap R10)
+            structured = {
+                "architecture_decisions": self._record_dicts(decisions, ARCHITECTURE_JSON_FIELDS),
+                "count": len(decisions),
+            }
+
             if not decisions:
-                return self._create_above_fold_response(
-                    "INFO", "No architecture decisions found", "Try adjusting search criteria"
+                return self._create_structured_response(
+                    "INFO", "No architecture decisions found", structured, "Try adjusting search criteria"
                 )
 
             # Build filter description for above-the-fold
@@ -420,82 +416,10 @@ class ArchitectureHandler(BaseHandler):
             key_info = self._format_count_summary("architecture decision", len(decisions), filter_desc)
             details = "\n".join(decision_list)
 
-            return self._create_above_fold_response("SUCCESS", key_info, "", details)
+            return self._create_structured_response("SUCCESS", key_info, structured, "", details)
 
         except Exception as e:
             return self._create_error_response("Failed to query architecture decisions", e)
-
-    def _query_architecture_decisions_json(self, **params) -> list[TextContent]:
-        """Query architecture decisions and return structured JSON data for UI"""
-        try:
-            import json
-
-            where_clauses = []
-            where_params = []
-            base_query = "SELECT * FROM architecture"
-
-            # Handle requirement_id filter specially (requires join)
-            if params.get("requirement_id"):
-                base_query = """
-                    SELECT a.* FROM architecture a
-                    JOIN relationships rel ON rel.target_id = a.id
-                    WHERE rel.source_type = 'requirement' AND rel.source_id = ?
-                      AND rel.target_type = 'architecture' AND rel.relationship_type = 'addresses'
-                """
-                where_params.append(params["requirement_id"])
-
-                # Add additional filters for the joined query
-                if params.get("search_text"):
-                    where_clauses.append("(a.title LIKE ? OR a.context LIKE ?)")
-                    search = f"%{params['search_text']}%"
-                    where_params.extend([search, search])
-            else:
-                # Build standard filters
-                if params.get("status"):
-                    where_clauses.append("status = ?")
-                    where_params.append(params["status"])
-
-                if params.get("type"):
-                    where_clauses.append("type = ?")
-                    where_params.append(params["type"])
-
-                if params.get("search_text"):
-                    where_clauses.append("(title LIKE ? OR context LIKE ?)")
-                    search = f"%{params['search_text']}%"
-                    where_params.extend([search, search])
-
-            # Construct final query
-            if where_clauses:
-                if "WHERE" in base_query:
-                    base_query += " AND " + " AND ".join(where_clauses)
-                else:
-                    base_query += " WHERE " + " AND ".join(where_clauses)
-
-            # relationships also has created_at, so qualify it when joined
-            base_query += " ORDER BY a.created_at DESC" if params.get("requirement_id") else " ORDER BY created_at DESC"
-
-            decisions = self.db.execute_query(base_query, where_params, fetch_all=True, row_factory=True)
-
-            # Convert to list of dictionaries with JSON parsing
-            decisions_list = []
-            for decision in decisions:
-                decision_dict = dict(decision) if hasattr(decision, "keys") else decision
-
-                # Parse JSON fields if they exist as strings
-                json_fields = ARCHITECTURE_JSON_FIELDS
-                for field in json_fields:
-                    if field in decision_dict and isinstance(decision_dict[field], str):
-                        try:
-                            decision_dict[field] = json.loads(decision_dict[field]) if decision_dict[field] else []
-                        except (json.JSONDecodeError, TypeError):
-                            decision_dict[field] = []
-
-                decisions_list.append(decision_dict)
-
-            return [TextContent(type="text", text=json.dumps(decisions_list))]
-
-        except Exception as e:
-            return self._create_error_response("Failed to query architecture decisions for JSON", e)
 
     def _get_architecture_details(self, **params) -> list[TextContent]:
         """Get full architecture decision details"""

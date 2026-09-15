@@ -12,14 +12,13 @@ class TestTaskHandler:
     def test_get_tool_definitions(self, task_handler):
         """Test that handler returns correct tool definitions"""
         tools = task_handler.get_tool_definitions()
-        assert len(tools) == 5  # sync_github_tasks is listed only when LIFECYCLE_GITHUB=on
+        assert len(tools) == 4  # sync_github_tasks is listed only when LIFECYCLE_GITHUB=on
 
         tool_names = [tool["name"] for tool in tools]
         expected_tools = [
             "create_task",
             "update_task_status",
             "query_tasks",
-            "query_tasks_json",
             "update_task",
         ]
         assert all(tool in tool_names for tool in expected_tools)

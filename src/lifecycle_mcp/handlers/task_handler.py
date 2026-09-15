@@ -135,19 +135,6 @@ class TaskHandler(BaseHandler):
                 },
             },
             {
-                "name": "query_tasks_json",
-                "description": "Search and filter tasks, as JSON",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "status": {"type": "string"},
-                        "priority": {"type": "string"},
-                        "assignee": {"type": "string"},
-                        "requirement_id": {"type": "string"},
-                    },
-                },
-            },
-            {
                 "name": "update_task",
                 "description": "Edit content, move under another parent or change requirements. The ID never changes.",
                 "inputSchema": {
@@ -196,8 +183,6 @@ class TaskHandler(BaseHandler):
                 return await self._update_task_status(**arguments)
             elif tool_name == "query_tasks":
                 return self._query_tasks(**arguments)
-            elif tool_name == "query_tasks_json":
-                return self._query_tasks_json(**arguments)
             elif tool_name == "sync_github_tasks" and GitHubUtils.is_github_enabled():
                 task_id = arguments.get("task_id")
                 return await (self._sync_from_github(task_id) if task_id else self._bulk_sync_with_github())
@@ -258,7 +243,12 @@ class TaskHandler(BaseHandler):
             )
         except (LookupError, RevisionConflict, EditRefused) as e:
             return self._create_error_response(str(e))
-        return self._create_above_fold_response("SUCCESS", f"Task {task_id} updated", self._describe_edit(result))
+        return self._create_structured_response(
+            "SUCCESS",
+            f"Task {task_id} updated",
+            {"id": task_id, "changed": result.changed, "revision": result.revision},
+            self._describe_edit(result),
+        )
 
     def _move_to_parent(self, cur, task_id: str, parent_id: str | None) -> dict[str, tuple[Any, Any]]:
         """Replace the task's parent link inside the edit transaction; parent_id None makes it top-level"""
@@ -450,7 +440,14 @@ class TaskHandler(BaseHandler):
             elif github_error:
                 github_info = f"⚠️ GitHub: {github_error}"
 
-            return self._create_above_fold_response("SUCCESS", key_info, action_info, github_info)
+            structured = {
+                "id": task_id,
+                "status": "Not Started",
+                "requirement_ids": params["requirement_ids"],
+                "parent_task_id": params.get("parent_task_id"),
+                "github_issue_url": github_url,
+            }
+            return self._create_structured_response("SUCCESS", key_info, structured, action_info, github_info)
 
         except Exception as e:
             return self._create_error_response("Failed to create task", e)
@@ -547,7 +544,8 @@ class TaskHandler(BaseHandler):
             elif github_error:
                 github_info = f"⚠️ GitHub sync failed: {github_error}"
 
-            return self._create_above_fold_response("SUCCESS", key_info, action_info, github_info)
+            structured = {"id": params["task_id"], "from_status": current_status, "to_status": new_status}
+            return self._create_structured_response("SUCCESS", key_info, structured, action_info, github_info)
 
         except Exception as e:
             return self._create_error_response("Failed to update task", e)
@@ -590,8 +588,13 @@ class TaskHandler(BaseHandler):
 
                 tasks = self.db.get_records("tasks", "*", where_clause, where_params, "priority, created_at DESC")
 
+            # The full records, JSON fields parsed, as structured data next to the list (roadmap R10)
+            structured = {"tasks": self._record_dicts(tasks, TASK_JSON_FIELDS), "count": len(tasks)}
+
             if not tasks:
-                return self._create_above_fold_response("INFO", "No tasks found", "Try adjusting search criteria")
+                return self._create_structured_response(
+                    "INFO", "No tasks found", structured, "Try adjusting search criteria"
+                )
 
             # Build filter description for above-the-fold
             filters = []
@@ -614,71 +617,10 @@ class TaskHandler(BaseHandler):
             key_info = self._format_count_summary("task", len(tasks), filter_desc)
             details = "\n".join(task_list)
 
-            return self._create_above_fold_response("SUCCESS", key_info, "", details)
+            return self._create_structured_response("SUCCESS", key_info, structured, "", details)
 
         except Exception as e:
             return self._create_error_response("Failed to query tasks", e)
-
-    def _query_tasks_json(self, **params) -> list[TextContent]:
-        """Query tasks and return structured JSON data for UI"""
-        try:
-            import json
-
-            where_clauses = []
-            where_params = []
-
-            # Handle requirement_id filter specially (requires join)
-            if params.get("requirement_id"):
-                tasks = self.db.execute_query(
-                    """
-                    SELECT t.* FROM tasks t
-                    JOIN relationships rel ON rel.target_id = t.id
-                    WHERE rel.source_type = 'requirement' AND rel.source_id = ?
-                      AND rel.target_type = 'task' AND rel.relationship_type = 'implements'
-                    ORDER BY t.priority, t.created_at DESC
-                """,
-                    [params["requirement_id"]],
-                    fetch_all=True,
-                    row_factory=True,
-                )
-            else:
-                # Build standard filters
-                if params.get("status"):
-                    where_clauses.append("status = ?")
-                    where_params.append(params["status"])
-
-                if params.get("priority"):
-                    where_clauses.append("priority = ?")
-                    where_params.append(params["priority"])
-
-                if params.get("assignee"):
-                    where_clauses.append("assignee = ?")
-                    where_params.append(params["assignee"])
-
-                where_clause = " AND ".join(where_clauses) if where_clauses else ""
-
-                tasks = self.db.get_records("tasks", "*", where_clause, where_params, "priority, created_at DESC")
-
-            # Convert to list of dictionaries with JSON parsing
-            tasks_list = []
-            for task in tasks:
-                task_dict = dict(task) if hasattr(task, "keys") else task
-
-                # Parse JSON fields if they exist as strings
-                json_fields = TASK_JSON_FIELDS
-                for field in json_fields:
-                    if field in task_dict and isinstance(task_dict[field], str):
-                        try:
-                            task_dict[field] = json.loads(task_dict[field]) if task_dict[field] else []
-                        except (json.JSONDecodeError, TypeError):
-                            task_dict[field] = []
-
-                tasks_list.append(task_dict)
-
-            return [TextContent(type="text", text=json.dumps(tasks_list))]
-
-        except Exception as e:
-            return self._create_error_response("Failed to query tasks for JSON", e)
 
     async def _sync_from_github(self, task_id: str) -> list[TextContent]:
         """Sync task from GitHub issue changes"""

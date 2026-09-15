@@ -9,7 +9,16 @@ from typing import Any
 
 from mcp.types import TextContent
 
-from .base_handler import EDIT_OPTION_PROPERTIES, BaseHandler, DeleteRefused, EditRefused, RevisionConflict
+from .base_handler import (
+    EDIT_OPTION_PROPERTIES,
+    STATUS_ID_LIST_PROPERTY,
+    BaseHandler,
+    DeleteRefused,
+    EditRefused,
+    RevisionConflict,
+    StatusChange,
+    StatusRefused,
+)
 
 # Records that depend on an architecture decision and therefore block deleting it. The requirement links it
 # addresses belong to the decision itself and are removed with it.
@@ -100,6 +109,7 @@ class ArchitectureHandler(BaseHandler):
                     "type": "object",
                     "properties": {
                         "architecture_id": {"type": "string"},
+                        "architecture_ids": STATUS_ID_LIST_PROPERTY,
                         "new_status": {
                             "type": "string",
                             "enum": [
@@ -116,7 +126,7 @@ class ArchitectureHandler(BaseHandler):
                         },
                         "comment": {"type": "string"},
                     },
-                    "required": ["architecture_id", "new_status"],
+                    "required": ["new_status"],
                 },
             },
             {
@@ -160,7 +170,7 @@ class ArchitectureHandler(BaseHandler):
             if tool_name == "create_architecture_decision":
                 return await self._create_architecture_decision(**arguments)
             elif tool_name == "update_architecture_status":
-                return self._update_architecture_status(**arguments)
+                return await self._update_architecture_status(**arguments)
             elif tool_name == "query_architecture_decisions":
                 return self._query_architecture_decisions(**arguments)
             elif tool_name == "update_architecture":
@@ -301,41 +311,40 @@ class ArchitectureHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to create architecture decision", e)
 
-    def _update_architecture_status(self, **params) -> list[TextContent]:
-        """Update architecture decision status"""
-        # Validate required parameters
-        error = self._validate_required_params(params, ["architecture_id", "new_status"])
+    async def _update_architecture_status(self, **params) -> list[TextContent]:
+        """Move one architecture decision, or each of architecture_ids, to new_status (roadmap R9)"""
+        error = self._validate_required_params(params, ["new_status"])
         if error:
             return self._create_error_response(error)
+        return await self._change_statuses(
+            params,
+            "architecture_id",
+            "Architecture",
+            "architecture decisions",
+            lambda architecture_id: self._change_architecture_status(architecture_id, params),
+            "Failed to update architecture status",
+        )
 
-        try:
-            # Get current status
-            current_arch = self.db.get_records("architecture", "status", "id = ?", [params["architecture_id"]])
+    async def _change_architecture_status(self, architecture_id: str, params: dict[str, Any]) -> StatusChange:
+        """Move one architecture decision to new_status; raises StatusRefused when it doesn't exist"""
+        current_arch = self.db.get_records("architecture", "status", "id = ?", [architecture_id])
+        if not current_arch:
+            raise StatusRefused("Architecture decision not found")
 
-            if not current_arch:
-                return self._create_error_response("Architecture decision not found")
+        current_status = current_arch[0]["status"]
+        new_status = params["new_status"]
 
-            current_status = current_arch[0]["status"]
-            new_status = params["new_status"]
+        # Update status. CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
+        self.db.execute_query(
+            "UPDATE architecture SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            [new_status, architecture_id],
+        )
 
-            # Update status. CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
-            self.db.execute_query(
-                "UPDATE architecture SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                [new_status, params["architecture_id"]],
-            )
+        # Add review comment if provided
+        if params.get("comment"):
+            self._add_review_comment("architecture", architecture_id, params["comment"])
 
-            # Add review comment if provided
-            if params.get("comment"):
-                self._add_review_comment("architecture", params["architecture_id"], params["comment"])
-
-            # Create above-the-fold response
-            key_info = f"Architecture {params['architecture_id']} updated"
-            action_info = f"📈 {current_status} → {new_status}"
-            structured = {"id": params["architecture_id"], "from_status": current_status, "to_status": new_status}
-            return self._create_structured_response("SUCCESS", key_info, structured, action_info)
-
-        except Exception as e:
-            return self._create_error_response("Failed to update architecture status", e)
+        return StatusChange(architecture_id, current_status, new_status)
 
     def _query_architecture_decisions(self, **params) -> list[TextContent]:
         """Query architecture decisions with filters"""

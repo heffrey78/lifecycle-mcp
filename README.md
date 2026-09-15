@@ -138,31 +138,28 @@ claude mcp add lifecycle /path/to/venv/bin/lifecycle-mcp -e LIFECYCLE_DB=./lifec
 
 ## MCP Tools Reference
 
-The server exposes 27 MCP tools (28 with GitHub integration on) across 7 handler modules for comprehensive lifecycle management. Every tool rejects fields it does not declare, and the error names the field. [CHANGELOG.md](CHANGELOG.md) lists tools that were removed or renamed, with their replacements.
+The server exposes 24 MCP tools (25 with GitHub integration on) across 7 handler modules for comprehensive lifecycle management. Every tool rejects fields it does not declare, and the error names the field. [CHANGELOG.md](CHANGELOG.md) lists tools that were removed or renamed, with their replacements.
 
 ### Tool List
 **Requirements**
 - `create_requirement` - Create new requirements
 - `update_requirement` - Edit a requirement's content (a reason is required at Approved or later)
 - `update_requirement_status` - Move requirements through lifecycle states
-- `query_requirements` - Search and filter requirements
-- `query_requirements_json` - Query requirements as structured JSON
+- `query_requirements` - Search and filter requirements; the matching records also come back as structured data
 - `trace_requirement` - Trace requirement through implementation
 
 **Tasks**
 - `create_task` - Create implementation tasks from requirements
 - `update_task` - Edit a task's content, move it to another parent or change its requirements
 - `update_task_status` - Update task progress
-- `query_tasks` - Search and filter tasks
-- `query_tasks_json` - Query tasks as structured JSON
+- `query_tasks` - Search and filter tasks; the matching records also come back as structured data
 - `sync_github_tasks` - Sync one task, or every linked task, from GitHub issues (listed only when `LIFECYCLE_GITHUB=on`)
 
 **Architecture decisions**
 - `create_architecture_decision` - Record architecture decisions (ADRs)
 - `update_architecture` - Edit a Proposed architecture decision
 - `update_architecture_status` - Update architecture decision status
-- `query_architecture_decisions` - Search and filter architecture decisions
-- `query_architecture_decisions_json` - Query architecture decisions as structured JSON
+- `query_architecture_decisions` - Search and filter architecture decisions; the matching records also come back as structured data
 
 **Any record (requirement, task or architecture decision, by ID)**
 - `get_details` - Full details of a record, with its links and comments

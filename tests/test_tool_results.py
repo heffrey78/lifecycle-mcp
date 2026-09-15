@@ -107,16 +107,13 @@ async def test_every_read_query_and_report_tool_succeeds_on_populated_db(mcp_ser
     ids = await populate(mcp_server)
     calls = [
         ("query_requirements", {}),
-        ("query_requirements_json", {}),
         ("get_details", {"entity_id": ids["requirement"]}),
         ("trace_requirement", {"requirement_id": ids["requirement"]}),
         ("query_tasks", {}),
         ("query_tasks", {"requirement_id": ids["requirement"]}),
-        ("query_tasks_json", {}),
         ("get_details", {"entity_id": ids["task"]}),
         ("query_architecture_decisions", {}),
         ("query_architecture_decisions", {"requirement_id": ids["requirement"]}),
-        ("query_architecture_decisions_json", {}),
         ("get_details", {"entity_id": ids["adr"]}),
         ("query_relationships", {"entity_id": ids["task"]}),
         ("query_relationships", {"entity_id": ids["requirement"], "direction": "outgoing"}),

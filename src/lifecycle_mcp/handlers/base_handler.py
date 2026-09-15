@@ -179,6 +179,18 @@ class BaseHandler(ABC):
                 text += template.format(title=title, body=body)
         return text
 
+    def _record_dicts(self, rows: Iterable[Any], json_fields: Iterable[str]) -> list[dict[str, Any]]:
+        """Rows as plain dicts with their JSON text fields parsed, for structured results"""
+        json_fields = tuple(json_fields)
+        records = []
+        for row in rows:
+            record = dict(row)
+            for field in json_fields:
+                if isinstance(record.get(field), str):
+                    record[field] = self._safe_json_loads(record[field])
+            records.append(record)
+        return records
+
     def _safe_json_dumps(self, data: Any) -> str:
         """Safely dump data to JSON string"""
         try:

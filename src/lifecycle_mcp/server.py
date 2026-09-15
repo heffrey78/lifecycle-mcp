@@ -66,14 +66,12 @@ class LifecycleMCPServer:
             "create_requirement": self.requirement_handler,
             "update_requirement_status": self.requirement_handler,
             "query_requirements": self.requirement_handler,
-            "query_requirements_json": self.requirement_handler,
             "trace_requirement": self.requirement_handler,
             "update_requirement": self.requirement_handler,
             # Task tools
             "create_task": self.task_handler,
             "update_task_status": self.task_handler,
             "query_tasks": self.task_handler,
-            "query_tasks_json": self.task_handler,
             "sync_github_tasks": self.task_handler,  # listed and routed only when LIFECYCLE_GITHUB=on
             "update_task": self.task_handler,
             # Relationship tools
@@ -89,7 +87,6 @@ class LifecycleMCPServer:
             "create_architecture_decision": self.architecture_handler,
             "update_architecture_status": self.architecture_handler,
             "query_architecture_decisions": self.architecture_handler,
-            "query_architecture_decisions_json": self.architecture_handler,
             "update_architecture": self.architecture_handler,
             # Export tools
             "export_project_documentation": self.export_handler,

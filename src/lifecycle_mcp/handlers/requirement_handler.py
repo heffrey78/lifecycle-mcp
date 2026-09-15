@@ -170,19 +170,6 @@ class RequirementHandler(BaseHandler):
                 },
             },
             {
-                "name": "query_requirements_json",
-                "description": "Search and filter requirements, as JSON",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "status": {"type": "string"},
-                        "priority": {"type": "string"},
-                        "type": {"type": "string"},
-                        "search_text": {"type": "string"},
-                    },
-                },
-            },
-            {
                 "name": "trace_requirement",
                 "description": "Trace requirement through implementation",
                 "inputSchema": {
@@ -231,8 +218,6 @@ class RequirementHandler(BaseHandler):
                 return await self._update_requirement_status(**arguments)
             elif tool_name == "query_requirements":
                 return self._query_requirements(**arguments)
-            elif tool_name == "query_requirements_json":
-                return self._query_requirements_json(**arguments)
             elif tool_name == "trace_requirement":
                 return self._trace_requirement(**arguments)
             elif tool_name == "update_requirement":
@@ -748,10 +733,15 @@ Guidelines:
             requirements = self.db.get_records(
                 "requirements", "*", where_clause, where_params, "priority, created_at DESC"
             )
+            # The full records, JSON fields parsed, as structured data next to the list (roadmap R10)
+            structured = {
+                "requirements": self._record_dicts(requirements, REQUIREMENT_JSON_FIELDS),
+                "count": len(requirements),
+            }
 
             if not requirements:
-                return self._create_above_fold_response(
-                    "INFO", "No requirements found", "Try adjusting search criteria"
+                return self._create_structured_response(
+                    "INFO", "No requirements found", structured, "Try adjusting search criteria"
                 )
 
             # Build filter description for above-the-fold
@@ -775,62 +765,10 @@ Guidelines:
             key_info = self._format_count_summary("requirement", len(requirements), filter_desc)
             details = "\n".join(req_list)
 
-            return self._create_above_fold_response("SUCCESS", key_info, "", details)
+            return self._create_structured_response("SUCCESS", key_info, structured, "", details)
 
         except Exception as e:
             return self._create_error_response("Failed to query requirements", e)
-
-    def _query_requirements_json(self, **params) -> list[TextContent]:
-        """Query requirements and return structured JSON data for UI"""
-        try:
-            where_clauses = []
-            where_params = []
-
-            if params.get("status"):
-                where_clauses.append("status = ?")
-                where_params.append(params["status"])
-
-            if params.get("priority"):
-                where_clauses.append("priority = ?")
-                where_params.append(params["priority"])
-
-            if params.get("type"):
-                where_clauses.append("type = ?")
-                where_params.append(params["type"])
-
-            if params.get("search_text"):
-                where_clauses.append("(title LIKE ? OR desired_state LIKE ?)")
-                search = f"%{params['search_text']}%"
-                where_params.extend([search, search])
-
-            where_clause = " AND ".join(where_clauses) if where_clauses else ""
-
-            requirements = self.db.get_records(
-                "requirements", "*", where_clause, where_params, "priority, created_at DESC"
-            )
-
-            # Convert database rows to JSON-serializable format
-            requirements_list = []
-            for req in requirements:
-                # Convert row object to dictionary and handle any special fields
-                req_dict = dict(req) if hasattr(req, "keys") else req
-
-                # Parse JSON fields if they exist as strings
-                json_fields = [*REQUIREMENT_JSON_FIELDS, "business_value"]
-                for field in json_fields:
-                    if field in req_dict and isinstance(req_dict[field], str):
-                        try:
-                            req_dict[field] = json.loads(req_dict[field]) if req_dict[field] else []
-                        except (json.JSONDecodeError, TypeError):
-                            req_dict[field] = []
-
-                requirements_list.append(req_dict)
-
-            # Return as JSON string in text content
-            return [TextContent(type="text", text=json.dumps(requirements_list))]
-
-        except Exception as e:
-            return self._create_error_response("Failed to query requirements as JSON", e)
 
     def _get_requirement_details(self, **params) -> list[TextContent]:
         """Get full requirement details"""

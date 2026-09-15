@@ -142,7 +142,7 @@ The server exposes 39 MCP tools across 7 handler modules for comprehensive lifec
 
 ### Tool List
 **Requirements**
-- `create_requirement` - Create new requirements from interview data
+- `create_requirement` - Create new requirements
 - `update_requirement` - Edit a requirement's content (a reason is required at Approved or later)
 - `update_requirement_status` - Move requirements through lifecycle states
 - `delete_requirement` - Delete a Draft requirement created by mistake
@@ -177,13 +177,9 @@ The server exposes 39 MCP tools across 7 handler modules for comprehensive lifec
 - `query_relationships` - Query links: one record's links by direction and type, or every link as JSON for a graph
 - `get_entity_history` - Show how a record changed: creation, edits with before and after values, status changes, comments and deletion
 
-**Status, interviews and export**
+**Status and export**
 - `get_project_status` - Get project health metrics and dashboards
 - `get_project_metrics` - Get structured project metrics for programmatic use
-- `start_requirement_interview` - Start interactive requirement gathering
-- `continue_requirement_interview` - Continue requirement interview sessions
-- `start_architectural_conversation` - Start interactive architecture discussions
-- `continue_architectural_conversation` - Continue architecture conversations
 - `export_project_documentation` - Export comprehensive markdown documentation
 - `create_architectural_diagrams` - Generate Mermaid diagrams for project visualization
 
@@ -210,7 +206,7 @@ Show how a requirement, task or architecture decision changed over time, oldest 
 ### Requirement Management
 
 #### `create_requirement`
-Create new requirements from interview data or analysis.
+Create a new requirement.
 
 **Parameters:**
 - `type` (required): Requirement type - "FUNC", "NFUNC", "TECH", "BUS", "INTF"
@@ -493,53 +489,6 @@ Get comprehensive project health metrics and dashboards.
 
 **Returns:** Dashboard with requirement overview, task statistics, completion percentages, and blocked items analysis.
 
-### Interactive Interview Tools
-
-#### `start_requirement_interview`
-Start an interactive requirement gathering interview session.
-
-**Parameters:**
-- `project_context` (optional): Description of the project or system
-- `stakeholder_role` (optional): Role of the person being interviewed
-
-**Returns:** Session ID and initial questions to guide requirement gathering.
-
-**Example:**
-```json
-{
-  "project_context": "E-commerce platform modernization",
-  "stakeholder_role": "Product Manager"
-}
-```
-
-#### `continue_requirement_interview`
-Continue an active interview session by providing answers to questions.
-
-**Parameters:**
-- `session_id` (required): Interview session ID from start_requirement_interview
-- `answers` (required): Object containing answers to the current questions
-
-**Returns:** Next set of questions or completion summary with created requirement.
-
-**Example:**
-```json
-{
-  "session_id": "a1b2c3d4",
-  "answers": {
-    "current_problem": "Users struggle with complex checkout process",
-    "desired_outcome": "Streamlined one-click checkout experience",
-    "success_criteria": "Checkout completion rate increases by 25%"
-  }
-}
-```
-
-**Interview Flow:**
-1. **Problem Identification**: Understanding the current challenge
-2. **Solution Definition**: Defining the desired outcome and constraints
-3. **Details Gathering**: Collecting priority, type, and technical details
-4. **Validation**: Establishing acceptance criteria and success metrics
-5. **Completion**: Automatic requirement creation with interview summary
-
 ### Documentation Export Tools
 
 #### `export_project_documentation`
@@ -578,7 +527,6 @@ Generate Mermaid diagrams for project architecture and relationships visualizati
 - `requirement_ids` (optional): Array of specific requirement IDs to include
 - `include_relationships` (optional): Include relationship arrows in diagrams (default: true)
 - `output_format` (optional): Output format - "mermaid", "markdown_with_mermaid" (default: "mermaid")
-- `interactive` (optional): Start interactive conversation for complex diagrams (default: false)
 
 **Returns:** Mermaid diagram code or markdown-wrapped diagram.
 
@@ -601,50 +549,6 @@ Generate Mermaid diagrams for project architecture and relationships visualizati
   "diagram_type": "requirements",
   "include_relationships": true,
   "output_format": "markdown_with_mermaid"
-}
-```
-
-### Interactive Architectural Conversation Tools
-
-#### `start_architectural_conversation`
-Start an interactive conversation for complex architectural diagram generation.
-
-**Parameters:**
-- `project_context` (optional): Description of the project or system
-- `diagram_purpose` (optional): Purpose and goals for the diagram
-- `complexity_level` (optional): Conversation complexity - "simple", "medium", "complex" (default: "medium")
-
-**Returns:** Session ID and contextual questions based on complexity level.
-
-**Complexity Levels:**
-- **Simple**: Basic component and relationship questions
-- **Medium**: Architectural challenges, stakeholders, and detail level questions
-- **Complex**: Deep architectural patterns, compliance, security, and performance considerations
-
-#### `continue_architectural_conversation`
-Continue an active architectural conversation session with responses.
-
-**Parameters:**
-- `session_id` (required): Conversation session ID from start_architectural_conversation
-- `responses` (required): Object containing responses to current questions
-
-**Returns:** Next questions or completion with generated diagram.
-
-**Conversation Flow:**
-1. **Context Gathering**: Understanding architectural needs and stakeholders
-2. **Diagram Specification**: Determining optimal diagram type and focus
-3. **Detail Refinement**: Visual preferences and emphasis areas
-4. **Completion**: Automatic diagram generation with conversation summary
-
-**Example:**
-```json
-{
-  "session_id": "a1b2c3d4",
-  "responses": {
-    "main_challenge": "Visualizing microservice dependencies for new team members",
-    "stakeholders": "Development team and system architects",
-    "detail_level": "High-level overview with key integration points"
-  }
 }
 ```
 

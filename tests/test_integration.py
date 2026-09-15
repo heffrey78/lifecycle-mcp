@@ -77,13 +77,12 @@ class TestMCPServerIntegration:
         assert server_instance.requirement_handler is not None
         assert server_instance.task_handler is not None
         assert server_instance.architecture_handler is not None
-        assert server_instance.interview_handler is not None
         assert server_instance.export_handler is not None
         assert server_instance.status_handler is not None
 
         # Verify all tools are registered
         # Total number of MCP tools including relationship handler, JSON query, delete, update and history tools
-        expected_tool_count = 36
+        expected_tool_count = 32
         assert len(server_instance.handlers) == expected_tool_count
 
     @pytest.mark.asyncio
@@ -338,25 +337,6 @@ class TestMCPServerIntegration:
             diagram_files = list(Path(diagram_dir).glob("*.mmd"))
             assert len(diagram_files) > 0, "No Mermaid diagram files were created"
 
-    @pytest.mark.asyncio
-    async def test_interview_workflow(self, server_instance):
-        """Test interactive interview workflow"""
-        server = server_instance
-
-        # Start requirement interview
-        interview_result = await server.interview_handler.handle_tool_call(
-            "start_requirement_interview",
-            {"project_context": "Test project for integration testing", "stakeholder_role": "Product Owner"},
-        )
-
-        assert len(interview_result) == 1
-        assert "SUCCESS" in interview_result[0].text
-
-        # Extract session ID from response
-        response_text = interview_result[0].text
-        # Session ID should be in the response - check for actual response format
-        assert "Interview session" in response_text or "session" in response_text.lower()
-
     def test_tool_routing_accuracy(self, server_instance):
         """Test that tools are correctly routed to handlers"""
         server = server_instance
@@ -366,7 +346,6 @@ class TestMCPServerIntegration:
             "create_requirement": server.requirement_handler,
             "create_task": server.task_handler,
             "create_architecture_decision": server.architecture_handler,
-            "start_requirement_interview": server.interview_handler,
             "export_project_documentation": server.export_handler,
             "get_project_status": server.status_handler,
         }

@@ -108,7 +108,7 @@ class RequirementHandler(BaseHandler):
         return [
             {
                 "name": "create_requirement",
-                "description": "Create a new requirement from interview data",
+                "description": "Create a new requirement",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

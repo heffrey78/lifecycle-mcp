@@ -79,11 +79,6 @@ class ExportHandler(BaseHandler):
                             "enum": ["mermaid", "markdown_with_mermaid"],
                             "default": "mermaid",
                         },
-                        "interactive": {
-                            "type": "boolean",
-                            "default": False,
-                            "description": "Start interactive conversation for complex diagrams",
-                        },
                         "output_path": {
                             "type": "string",
                             "default": "exports",
@@ -365,16 +360,6 @@ class ExportHandler(BaseHandler):
 
     def _create_architectural_diagrams(self, **params) -> list[TextContent]:
         """Generate Mermaid diagrams for project architecture"""
-        # Check if interactive mode is requested
-        if params.get("interactive", False):
-            # For interactive mode, we'd need to integrate with InterviewHandler
-            # For now, provide a helpful message
-            return self._create_above_fold_response(
-                "INFO",
-                "Interactive mode requires architectural conversation",
-                "Use start_architectural_conversation tool first",
-            )
-
         try:
             diagram_type = params.get("diagram_type", "full_project")
             include_relationships = params.get("include_relationships", True)

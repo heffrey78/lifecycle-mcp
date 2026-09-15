@@ -841,8 +841,7 @@ Based on your ADR content, I recommend the following diagrams to support impleme
 
         response += """## Next Steps
 To generate these diagrams, use the `create_architectural_diagrams` tool:
-- For individual diagrams: specify the `diagram_type` (e.g., "requirements", "architecture")
-- For custom diagrams: use the interactive mode with `"interactive": true`
+- Specify the `diagram_type` (e.g., "requirements", "architecture")
 
 Example: `create_architectural_diagrams(diagram_type="architecture", output_format="markdown_with_mermaid")`
 """

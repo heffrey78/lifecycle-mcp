@@ -20,7 +20,6 @@ from .database_manager import DatabaseManager
 from .handlers import (
     ArchitectureHandler,
     ExportHandler,
-    InterviewHandler,
     RelationshipHandler,
     RequirementHandler,
     StatusHandler,
@@ -54,7 +53,6 @@ class LifecycleMCPServer:
         self.task_handler = TaskHandler(self.db_manager)
         self.architecture_handler = ArchitectureHandler(self.db_manager, self.mcp_client)
         self.relationship_handler = RelationshipHandler(self.db_manager)
-        self.interview_handler = InterviewHandler(self.db_manager, self.requirement_handler)
         self.export_handler = ExportHandler(self.db_manager)
         self.status_handler = StatusHandler(self.db_manager)
 
@@ -92,11 +90,6 @@ class LifecycleMCPServer:
             "add_architecture_review": self.architecture_handler,
             "delete_architecture": self.architecture_handler,
             "update_architecture": self.architecture_handler,
-            # Interview tools
-            "start_requirement_interview": self.interview_handler,
-            "continue_requirement_interview": self.interview_handler,
-            "start_architectural_conversation": self.interview_handler,
-            "continue_architectural_conversation": self.interview_handler,
             # Export tools
             "export_project_documentation": self.export_handler,
             "create_architectural_diagrams": self.export_handler,
@@ -129,7 +122,6 @@ class LifecycleMCPServer:
                 self.task_handler,
                 self.architecture_handler,
                 self.relationship_handler,
-                self.interview_handler,
                 self.export_handler,
                 self.status_handler,
             ]:

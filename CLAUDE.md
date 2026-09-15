@@ -63,8 +63,7 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
    - `RequirementHandler`: Requirements lifecycle management (8 tools) - create, edit, status, delete, query (text and JSON), details, trace
    - `TaskHandler`: Task creation and progress tracking (7 tools, plus `sync_github_tasks` when GitHub is on) - create, edit, status, delete, query (text and JSON), details
    - `ArchitectureHandler`: ADR management and reviews (8 tools) - create, edit, status, delete, query (text and JSON), details, review
-   - `RelationshipHandler`: Links and history (6 tools) - create, delete, three link queries, entity history
-   - `InterviewHandler`: Interactive requirement gathering (4 tools) - start/continue interviews and conversations
+   - `RelationshipHandler`: Links and history (4 tools) - create, delete, query links, entity history
    - `ExportHandler`: Documentation generation (2 tools) - export docs, create diagrams
    - `StatusHandler`: Project health monitoring (2 tools) - project status and metrics
 
@@ -147,12 +146,6 @@ The server exposes 39 tools across 7 handler modules:
 - `create_relationship` / `delete_relationship` - Add or remove a link
 - `query_relationships` - One record's links (by direction and type) or every link as JSON
 - `get_entity_history` - Creation, field edits, status changes, comments and deletion for one record
-
-**Interactive Interviews (4 tools):**
-- `start_requirement_interview` - Begin requirement gathering
-- `continue_requirement_interview` - Continue interview process
-- `start_architectural_conversation` - Begin architecture discussion
-- `continue_architectural_conversation` - Continue architecture discussion
 
 **Documentation Export (2 tools):**
 - `export_project_documentation` - Generate project docs

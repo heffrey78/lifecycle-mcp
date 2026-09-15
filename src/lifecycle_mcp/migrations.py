@@ -692,6 +692,15 @@ def allow_supersedes_links(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+# --- migration 15 ------------------------------------------------------------------------------
+
+
+def add_blocked_reason(conn: sqlite3.Connection) -> None:
+    """Why a task is blocked, kept from the comment given with its move to Blocked (roadmap R7)."""
+    if "blocked_reason" not in _columns(conn, "tasks"):
+        conn.execute("ALTER TABLE tasks ADD COLUMN blocked_reason TEXT")
+
+
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "GitHub integration fields", add_github_integration_columns),
     (2, "GitHub sync metadata fields", add_github_sync_metadata_columns),
@@ -707,6 +716,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (12, "Log architecture status changes", log_architecture_status_changes),
     (13, "Repair architecture updated_at stored as the text CURRENT_TIMESTAMP", repair_literal_updated_at),
     (14, "Allow supersedes links and keep superseded_by in step", allow_supersedes_links),
+    (15, "Keep the reason a task is blocked", add_blocked_reason),
 ]
 
 

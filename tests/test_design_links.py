@@ -157,7 +157,7 @@ def test_migration_14_allows_supersedes_and_keeps_every_link_object(tmp_path):
                 "VALUES ('x', 'architecture', 'ADR-0002', 'architecture', 'ADR-0001', 'supersedes')"
             )
 
-    assert apply_all_migrations(db) == LATEST == 14
+    assert apply_all_migrations(db) == LATEST
 
     assert schema_objects(db, "view") == before["view"]
     assert schema_objects(db, "index") == before["index"]

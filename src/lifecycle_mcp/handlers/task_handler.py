@@ -125,7 +125,7 @@ class TaskHandler(BaseHandler):
             },
             {
                 "name": "update_task_status",
-                "description": "Update task progress",
+                "description": "Update task progress; the comment on a move to Blocked is kept as the reason",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -506,6 +506,12 @@ class TaskHandler(BaseHandler):
 
         # Update status and assignee. CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
         assignments, values = "status = ?, updated_at = CURRENT_TIMESTAMP", [new_status]
+        # The comment given with a move to Blocked is why it's blocked; leaving Blocked clears it (roadmap R7).
+        if new_status != "Blocked":
+            assignments += ", blocked_reason = NULL"
+        elif params.get("comment") or current_status != "Blocked":
+            assignments += ", blocked_reason = ?"
+            values.append(params.get("comment"))
         if params.get("assignee"):
             assignments += ", assignee = ?"
             values.append(params["assignee"])
@@ -861,6 +867,9 @@ class TaskHandler(BaseHandler):
 - **Created**: {task["created_at"]}
 - **Updated**: {task["updated_at"]}
 - **Revision**: {task["revision"]}"""
+
+            if task["status"] == "Blocked":
+                task_info += f"\n- **Blocked Reason**: {task['blocked_reason'] or 'Not given'}"
 
             if task["github_issue_number"]:
                 task_info += f"\n- **GitHub Issue**: #{task['github_issue_number']} - {task['github_issue_url']}"

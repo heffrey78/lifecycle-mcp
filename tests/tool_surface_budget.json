@@ -1,0 +1,13 @@
+{
+  "_note": "Tool count and tools/list definition size (compact JSON characters) per handler, checked by tests/test_tool_surface_budget.py. Raise a number only on purpose, in the same change that grows the surface; scripts/tool_surface_report.py shows the current sizes. Recorded at 39 tools / 17136 chars on 2026-09-14 (roadmap R15).",
+  "total": {"tools": 39, "chars": 17136},
+  "handlers": {
+    "Architecture": {"tools": 8, "chars": 4040},
+    "Export": {"tools": 2, "chars": 1381},
+    "Interview": {"tools": 4, "chars": 1189},
+    "Relationship": {"tools": 6, "chars": 1966},
+    "Requirement": {"tools": 8, "chars": 4251},
+    "Status": {"tools": 2, "chars": 368},
+    "Task": {"tools": 9, "chars": 3941}
+  }
+}

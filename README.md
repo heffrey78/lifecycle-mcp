@@ -679,6 +679,7 @@ The server maintains a comprehensive SQLite database with the following key enti
 
 - `LIFECYCLE_DB`: Path to SQLite database file (default: "./lifecycle.db")
 - `LIFECYCLE_GITHUB`: Set to `on` to create and sync a GitHub issue for each task (default: off). Requires an authenticated `gh` CLI and a github.com `origin` remote in the server's working directory. When off, the server never runs `gh` or `git`.
+- `LIFECYCLE_CALL_LOG`: Path to a file where the server appends one JSON line per tool call: tool name, argument names (not values), duration, whether it failed and response size. Off by default. `scripts/tool_usage_report.py` summarises these logs.
 
 ## Troubleshooting
 

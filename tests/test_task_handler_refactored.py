@@ -38,15 +38,14 @@ class TestTaskHandlerRefactored:
     def test_get_tool_definitions(self, task_handler):
         """Test that handler returns correct tool definitions"""
         tools = task_handler.get_tool_definitions()
-        assert len(tools) == 7  # sync_github_tasks is listed only when LIFECYCLE_GITHUB=on
+        assert len(tools) == 5  # sync_github_tasks is listed only when LIFECYCLE_GITHUB=on
 
         expected_tools = [
             "create_task",
             "update_task_status",
             "query_tasks",
             "query_tasks_json",
-            "get_task_details",
-            "delete_task",
+            "update_task",
         ]
         tool_names = [tool["name"] for tool in tools]
         assert all(tool in tool_names for tool in expected_tools)
@@ -315,7 +314,7 @@ class TestTaskHandlerRefactored:
             ("create_task", sample_task_data),
             ("update_task_status", {"task_id": "TASK-0001-00-00", "new_status": "In Progress"}),
             ("query_tasks", {}),
-            ("get_task_details", {"task_id": "TASK-0001-00-00"}),
+            ("update_task", {"task_id": "TASK-0001-00-00", "title": "Renamed"}),
             ("unknown_tool", {}),
         ]
 
@@ -329,4 +328,4 @@ class TestTaskHandlerRefactored:
             if tool_name == "unknown_tool":
                 assert "Unknown tool: unknown_tool" in result[0].text
             else:
-                assert "ERROR" not in result[0].text or tool_name == "get_task_details"
+                assert "ERROR" not in result[0].text

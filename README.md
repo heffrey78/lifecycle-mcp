@@ -138,38 +138,36 @@ claude mcp add lifecycle /path/to/venv/bin/lifecycle-mcp -e LIFECYCLE_DB=./lifec
 
 ## MCP Tools Reference
 
-The server exposes 39 MCP tools across 7 handler modules for comprehensive lifecycle management. Every tool rejects fields it does not declare, and the error names the field.
+The server exposes 27 MCP tools (28 with GitHub integration on) across 7 handler modules for comprehensive lifecycle management. Every tool rejects fields it does not declare, and the error names the field.
 
 ### Tool List
 **Requirements**
 - `create_requirement` - Create new requirements
 - `update_requirement` - Edit a requirement's content (a reason is required at Approved or later)
 - `update_requirement_status` - Move requirements through lifecycle states
-- `delete_requirement` - Delete a Draft requirement created by mistake
 - `query_requirements` - Search and filter requirements
 - `query_requirements_json` - Query requirements as structured JSON
-- `get_requirement_details` - Get full requirement with relationships
 - `trace_requirement` - Trace requirement through implementation
 
 **Tasks**
 - `create_task` - Create implementation tasks from requirements
 - `update_task` - Edit a task's content, move it to another parent or change its requirements
 - `update_task_status` - Update task progress
-- `delete_task` - Delete a Not Started task created by mistake
 - `query_tasks` - Search and filter tasks
 - `query_tasks_json` - Query tasks as structured JSON
-- `get_task_details` - Get full task details with dependencies
 - `sync_github_tasks` - Sync one task, or every linked task, from GitHub issues (listed only when `LIFECYCLE_GITHUB=on`)
 
 **Architecture decisions**
 - `create_architecture_decision` - Record architecture decisions (ADRs)
 - `update_architecture` - Edit a Proposed architecture decision
 - `update_architecture_status` - Update architecture decision status
-- `delete_architecture` - Delete a Proposed architecture decision created by mistake
 - `query_architecture_decisions` - Search and filter architecture decisions
 - `query_architecture_decisions_json` - Query architecture decisions as structured JSON
-- `get_architecture_details` - Get full architecture decision details
-- `add_architecture_review` - Add review comments to architecture decisions
+
+**Any record (requirement, task or architecture decision, by ID)**
+- `get_details` - Full details of a record, with its links and comments
+- `delete_record` - Delete a Draft requirement, Not Started task or Proposed architecture decision created by mistake
+- `add_comment` - Comment on a record; comments show in its details and history
 
 **Relationships and history**
 - `create_relationship` - Link two records (dependencies, refinements, blocks and more)
@@ -185,12 +183,12 @@ The server exposes 39 MCP tools across 7 handler modules for comprehensive lifec
 
 ### Editing, Deleting and History
 
-These rules apply to `update_requirement`, `update_task`, `update_architecture` and the delete tools:
+These rules apply to `update_requirement`, `update_task`, `update_architecture` and `delete_record`:
 
 - **Edits happen in place.** Update tools change content only; status moves stay with the `update_*_status` tools, and record IDs never change.
 - **Every change is recorded.** Each changed field is logged with its before and after values, the actor and the reason. `get_entity_history` shows the log.
 - **Revisions guard against lost updates.** Each record has a revision, shown in its details, that goes up by one with every update that changes something. Pass `if_revision` to have the update refused, with nothing written, when the record has changed since you read it.
-- **Approved requirements need a reason.** Editing a requirement at Approved or later requires `reason`. The requirement then shows as *Changed Since Last Review* in `get_requirement_details`, `trace_requirement` and `get_project_status`, listing the edited fields.
+- **Approved requirements need a reason.** Editing a requirement at Approved or later requires `reason`. The requirement then shows as *Changed Since Last Review* in `get_details`, `trace_requirement` and `get_project_status`, listing the edited fields.
 - **The next status change is the acknowledgement.** There is no separate acknowledgement step: the requirement's next status transition clears the flag, and that transition's comment records the review.
 - **Decided architecture is not rewritten.** Architecture decisions can be edited only while Proposed. To change a decided one, record a new decision with `create_architecture_decision` and move the old one to Superseded.
 - **Deleting is for mistakes.** Only Draft requirements, Not Started tasks and Proposed architecture decisions can be deleted, and only when nothing depends on them. Refusals name the blocking records. A deleted record's own links go with it, and its history remains.
@@ -202,6 +200,37 @@ Show how a requirement, task or architecture decision changed over time, oldest 
 - `entity_id` (required): Requirement, task or architecture decision ID
 
 **Returns:** Creation, field edits with before and after values and reasons, status changes, comments and deletion. Still available after the record is deleted.
+
+#### `get_details`
+Full details of a requirement, task or architecture decision. The ID prefix (`REQ-`, `TASK-`, `ADR-`) tells the server which kind of record it is.
+
+**Parameters:**
+- `entity_id` (required): Requirement, task or architecture decision ID
+
+**Returns:** The record's fields, revision, links (linked tasks, subtasks and parent, linked requirements) and comments. A reviewed requirement edited since its last status change is flagged *Changed Since Last Review*.
+
+#### `delete_record`
+Delete a record created by mistake.
+
+**Parameters:**
+- `entity_id` (required): Requirement, task or architecture decision ID
+
+Only Draft requirements, Not Started tasks and Proposed architecture decisions can be deleted. Refused, naming what blocks it, when:
+- **Requirement:** tasks, architecture decisions or other requirements link to it.
+- **Task:** it has subtasks, other tasks depend on it, or it is linked to a GitHub issue.
+- **Architecture decision:** another decision is superseded by it, or records other than its own requirement links point to it.
+
+Anything past its early stage changes status instead (Deprecated, Abandoned, Rejected or Superseded).
+
+#### `add_comment`
+Comment on a requirement, task or architecture decision.
+
+**Parameters:**
+- `entity_id` (required): Requirement, task or architecture decision ID
+- `comment` (required): The comment
+- `author` (optional): Who wrote it (default: MCP User)
+
+**Returns:** Confirmation. The comment appears in the record's details under Comments and in `get_entity_history`.
 
 ### Requirement Management
 
@@ -266,14 +295,6 @@ Search and filter requirements by various criteria.
 - `type` (optional): Filter by requirement type
 - `search_text` (optional): Text search in title and desired state
 
-#### `get_requirement_details`
-Get comprehensive requirement information including all relationships.
-
-**Parameters:**
-- `requirement_id` (required): Requirement ID
-
-**Returns:** Detailed report with basic info, problem definition, functional requirements, acceptance criteria, and linked tasks.
-
 #### `trace_requirement`
 Trace a requirement through its complete implementation lifecycle.
 
@@ -301,14 +322,6 @@ Edit a requirement's content in place. See [Editing, Deleting and History](#edit
   "if_revision": 2
 }
 ```
-
-#### `delete_requirement`
-Delete a Draft requirement created by mistake.
-
-**Parameters:**
-- `requirement_id` (required): Requirement ID
-
-Refused when the requirement is past Draft (move it to Deprecated instead) or when tasks, architecture decisions or other requirements link to it.
 
 ### Task Management
 
@@ -359,14 +372,6 @@ Search and filter tasks by various criteria.
 - `assignee` (optional): Filter by assignee
 - `requirement_id` (optional): Filter by linked requirement
 
-#### `get_task_details`
-Get comprehensive task information including dependencies and relationships.
-
-**Parameters:**
-- `task_id` (required): Task ID
-
-**Returns:** Detailed report with basic info, description, acceptance criteria, and linked requirements.
-
 #### `sync_github_tasks`
 Sync tasks from their linked GitHub issues, with conflict detection. Listed only when `LIFECYCLE_GITHUB=on`.
 
@@ -386,14 +391,6 @@ Edit a task's content, move it under another parent or change the requirements i
 - `reason`, `actor`, `if_revision` (optional): As in `update_requirement`
 
 Pass at least one field to change. Changes are not pushed to a linked GitHub issue.
-
-#### `delete_task`
-Delete a Not Started task created by mistake.
-
-**Parameters:**
-- `task_id` (required): Task ID
-
-Refused when the task has started (mark it Abandoned instead), has subtasks, has tasks depending on it or is linked to a GitHub issue.
 
 ### Architecture Management
 
@@ -447,22 +444,6 @@ Search and filter architecture decisions by various criteria.
 - `requirement_id` (optional): Filter by linked requirement
 - `search_text` (optional): Text search in title and context
 
-#### `get_architecture_details`
-Get comprehensive architecture decision information including all relationships and reviews.
-
-**Parameters:**
-- `architecture_id` (required): Architecture ID
-
-**Returns:** Detailed report with basic info, context, decision details, drivers, options, consequences, linked requirements, and review history.
-
-#### `add_architecture_review`
-Add review comments to architecture decisions.
-
-**Parameters:**
-- `architecture_id` (required): Architecture ID
-- `comment` (required): Review comment
-- `reviewer` (optional): Reviewer name (default: "MCP User")
-
 #### `update_architecture`
 Edit an architecture decision's content while it is Proposed. Decisions in any other status are refused: record a new decision with `create_architecture_decision` and move the old one to Superseded.
 
@@ -470,14 +451,6 @@ Edit an architecture decision's content while it is Proposed. Decisions in any o
 - `architecture_id` (required): Architecture ID
 - `title`, `context`, `decision`, `consequences`, `decision_drivers`, `considered_options`, `authors`, `deciders`, `implementation_notes`, `validation_criteria`, `risk_assessment` (at least one): New values, with the same types as in `create_architecture_decision`
 - `reason`, `actor`, `if_revision` (optional): As in `update_requirement`
-
-#### `delete_architecture`
-Delete a Proposed architecture decision created by mistake.
-
-**Parameters:**
-- `architecture_id` (required): Architecture ID
-
-Refused when the decision is past Proposed (reject or supersede it instead), when another decision is superseded by it or when records other than its own requirement links point to it.
 
 ### Project Monitoring
 
@@ -561,7 +534,7 @@ The server maintains a comprehensive SQLite database with the following key enti
 - **Architecture**: ADRs and technical design documents
 - **Relationships**: Many-to-many links between requirements, tasks, and architecture
 - **Events**: Automatic logging of lifecycle events and status changes
-- **Reviews**: Comments and feedback on requirements and tasks
+- **Comments**: Notes on requirements, tasks and architecture decisions, added with `add_comment` or a status change's `comment`
 
 ## Entity ID Formats
 

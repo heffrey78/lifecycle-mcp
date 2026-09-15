@@ -71,7 +71,7 @@ async def test_success_is_not_flagged_as_error(mcp_server):
 
 
 async def test_not_found_is_flagged_as_error(mcp_server):
-    result = await call(mcp_server, "get_requirement_details", {"requirement_id": "REQ-9999-FUNC-00"})
+    result = await call(mcp_server, "get_details", {"entity_id": "REQ-9999-FUNC-00"})
     assert result.isError is True
     assert "not found" in text_of(result)
 
@@ -90,7 +90,7 @@ async def test_unexpected_exception_message_reaches_the_agent(mcp_server, monkey
         raise sqlite3.OperationalError("disk I/O error: simulated")
 
     monkeypatch.setattr(mcp_server.requirement_handler.db, "get_records", broken)
-    result = await call(mcp_server, "get_requirement_details", {"requirement_id": "REQ-0001-FUNC-00"})
+    result = await call(mcp_server, "get_details", {"entity_id": "REQ-0001-FUNC-00"})
     assert result.isError is True
     assert "disk I/O error: simulated" in text_of(result)
 
@@ -108,16 +108,16 @@ async def test_every_read_query_and_report_tool_succeeds_on_populated_db(mcp_ser
     calls = [
         ("query_requirements", {}),
         ("query_requirements_json", {}),
-        ("get_requirement_details", {"requirement_id": ids["requirement"]}),
+        ("get_details", {"entity_id": ids["requirement"]}),
         ("trace_requirement", {"requirement_id": ids["requirement"]}),
         ("query_tasks", {}),
         ("query_tasks", {"requirement_id": ids["requirement"]}),
         ("query_tasks_json", {}),
-        ("get_task_details", {"task_id": ids["task"]}),
+        ("get_details", {"entity_id": ids["task"]}),
         ("query_architecture_decisions", {}),
         ("query_architecture_decisions", {"requirement_id": ids["requirement"]}),
         ("query_architecture_decisions_json", {}),
-        ("get_architecture_details", {"architecture_id": ids["adr"]}),
+        ("get_details", {"entity_id": ids["adr"]}),
         ("query_relationships", {"entity_id": ids["task"]}),
         ("query_relationships", {"entity_id": ids["requirement"], "direction": "outgoing"}),
         ("query_relationships", {"entity_types": ["requirement", "task"]}),
@@ -140,6 +140,6 @@ async def test_every_read_query_and_report_tool_succeeds_on_populated_db(mcp_ser
 
 async def test_architecture_details_include_the_decision(mcp_server):
     ids = await populate(mcp_server)
-    result = await call(mcp_server, "get_architecture_details", {"architecture_id": ids["adr"]})
+    result = await call(mcp_server, "get_details", {"entity_id": ids["adr"]})
     assert result.isError is False
     assert "SQLite FTS5" in text_of(result) and ids["requirement"] in text_of(result)

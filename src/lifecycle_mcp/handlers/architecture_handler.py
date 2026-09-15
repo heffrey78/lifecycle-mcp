@@ -146,40 +146,6 @@ class ArchitectureHandler(BaseHandler):
                 },
             },
             {
-                "name": "get_architecture_details",
-                "description": "Get full architecture decision details",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"architecture_id": {"type": "string"}},
-                    "required": ["architecture_id"],
-                },
-            },
-            {
-                "name": "add_architecture_review",
-                "description": "Add review comment to architecture decision",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "architecture_id": {"type": "string"},
-                        "comment": {"type": "string"},
-                        "reviewer": {"type": "string"},
-                    },
-                    "required": ["architecture_id", "comment"],
-                },
-            },
-            {
-                "name": "delete_architecture",
-                "description": (
-                    "Delete a Proposed architecture decision created by mistake. Refused when another decision "
-                    "is superseded by it or other records link to it; reject or supersede anything else instead."
-                ),
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"architecture_id": {"type": "string"}},
-                    "required": ["architecture_id"],
-                },
-            },
-            {
                 "name": "update_architecture",
                 "description": (
                     "Edit a Proposed architecture decision in place. Decisions in any other status are refused: "
@@ -215,12 +181,6 @@ class ArchitectureHandler(BaseHandler):
                 return self._query_architecture_decisions(**arguments)
             elif tool_name == "query_architecture_decisions_json":
                 return self._query_architecture_decisions_json(**arguments)
-            elif tool_name == "get_architecture_details":
-                return self._get_architecture_details(**arguments)
-            elif tool_name == "add_architecture_review":
-                return self._add_architecture_review(**arguments)
-            elif tool_name == "delete_architecture":
-                return self._delete_architecture(**arguments)
             elif tool_name == "update_architecture":
                 return self._update_architecture(**arguments)
             else:
@@ -625,22 +585,7 @@ class ArchitectureHandler(BaseHandler):
                 for req in requirements:
                     report += f"- {req['id']}: {req['title']}\n"
 
-            # Get reviews
-            reviews = self.db.execute_query(
-                """
-                SELECT reviewer, comment, created_at FROM reviews
-                WHERE entity_type = 'architecture' AND entity_id = ?
-                ORDER BY created_at DESC
-            """,
-                [params["architecture_id"]],
-                fetch_all=True,
-                row_factory=True,
-            )
-
-            if reviews:
-                report += f"\n## Reviews ({len(reviews)})\n"
-                for review in reviews:
-                    report += f"- **{review['reviewer']}** ({review['created_at']}): {review['comment']}\n"
+            report += self._format_comments("architecture", arch["id"])
 
             # Create above-the-fold response for architecture details
             key_info = f"Architecture {arch['id']} details"
@@ -649,31 +594,6 @@ class ArchitectureHandler(BaseHandler):
 
         except Exception as e:
             return self._create_error_response("Failed to get architecture details", e)
-
-    def _add_architecture_review(self, **params) -> list[TextContent]:
-        """Add review comment to architecture decision"""
-        # Validate required parameters
-        error = self._validate_required_params(params, ["architecture_id", "comment"])
-        if error:
-            return self._create_error_response(error)
-
-        try:
-            # Verify architecture exists
-            if not self.db.check_exists("architecture", "id = ?", [params["architecture_id"]]):
-                return self._create_error_response("Architecture decision not found")
-
-            # Add review
-            self._add_review_comment(
-                "architecture", params["architecture_id"], params["comment"], params.get("reviewer", "MCP User")
-            )
-
-            # Create above-the-fold response
-            key_info = f"Review added to {params['architecture_id']}"
-            action_info = f"📝 Review by {params.get('reviewer', 'MCP User')}"
-            return self._create_above_fold_response("SUCCESS", key_info, action_info)
-
-        except Exception as e:
-            return self._create_error_response("Failed to add review", e)
 
     async def _analyze_adr_for_diagrams(self, adr_data: dict[str, Any]) -> dict[str, Any] | None:
         """Analyze ADR context using LLM sampling to suggest relevant diagrams"""

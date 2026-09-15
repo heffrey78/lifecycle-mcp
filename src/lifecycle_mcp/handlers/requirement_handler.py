@@ -183,29 +183,8 @@ class RequirementHandler(BaseHandler):
                 },
             },
             {
-                "name": "get_requirement_details",
-                "description": "Get full requirement with all relationships",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"requirement_id": {"type": "string"}},
-                    "required": ["requirement_id"],
-                },
-            },
-            {
                 "name": "trace_requirement",
                 "description": "Trace requirement through implementation",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"requirement_id": {"type": "string"}},
-                    "required": ["requirement_id"],
-                },
-            },
-            {
-                "name": "delete_requirement",
-                "description": (
-                    "Delete a Draft requirement created by mistake. Refused when tasks, architecture decisions "
-                    "or other requirements link to it; move anything else to Deprecated instead."
-                ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {"requirement_id": {"type": "string"}},
@@ -258,12 +237,8 @@ class RequirementHandler(BaseHandler):
                 return self._query_requirements(**arguments)
             elif tool_name == "query_requirements_json":
                 return self._query_requirements_json(**arguments)
-            elif tool_name == "get_requirement_details":
-                return self._get_requirement_details(**arguments)
             elif tool_name == "trace_requirement":
                 return self._trace_requirement(**arguments)
-            elif tool_name == "delete_requirement":
-                return self._delete_requirement(**arguments)
             elif tool_name == "update_requirement":
                 return self._update_requirement(**arguments)
             else:
@@ -932,6 +907,8 @@ Guidelines:
                 report += f"\n## Linked Tasks ({len(tasks)})\n"
                 for task in tasks:
                     report += f"- {task['id']}: {task['title']} [{task['status']}]\n"
+
+            report += self._format_comments("requirement", req["id"])
 
             # Create above-the-fold response for requirement details
             key_info = f"Requirement {req['id']} details"

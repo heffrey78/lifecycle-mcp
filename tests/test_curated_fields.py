@@ -47,7 +47,7 @@ def assert_sections(text: str, fields: dict, template: str, suffix: str = "") ->
 async def test_requirement_fields_round_trip(mcp_server, tmp_path):  # noqa: F811
     await ok(mcp_server, "create_requirement", {**REQUIREMENT, **as_lists(REQUIREMENT_FIELDS)})
 
-    details = await ok(mcp_server, "get_requirement_details", {"requirement_id": REQ})
+    details = await ok(mcp_server, "get_details", {"entity_id": REQ})
     assert_sections(details, REQUIREMENT_FIELDS, "### {heading}\n- {value}\n")
     assert_sections(
         await export(mcp_server, tmp_path, "requirements"), REQUIREMENT_FIELDS, "**{heading}**:\n- {value}\n"
@@ -55,7 +55,7 @@ async def test_requirement_fields_round_trip(mcp_server, tmp_path):  # noqa: F81
 
     await ok(mcp_server, "update_requirement", {"requirement_id": REQ, **as_lists(REQUIREMENT_FIELDS, " (revised)")})
 
-    details = await ok(mcp_server, "get_requirement_details", {"requirement_id": REQ})
+    details = await ok(mcp_server, "get_details", {"entity_id": REQ})
     assert_sections(details, REQUIREMENT_FIELDS, "### {heading}\n- {value}\n", " (revised)")
     assert "- Mobile apps\n" not in details
     exported = await export(mcp_server, tmp_path, "requirements")
@@ -68,13 +68,13 @@ async def test_task_fields_round_trip(mcp_server, tmp_path):  # noqa: F811
     task = {"requirement_ids": [REQ], "title": "Build index", "priority": "P1", **as_lists(TASK_FIELDS)}
     await ok(mcp_server, "create_task", task)
 
-    details = await ok(mcp_server, "get_task_details", {"task_id": TASK})
+    details = await ok(mcp_server, "get_details", {"entity_id": TASK})
     assert_sections(details, TASK_FIELDS, "## {heading}\n- {value}\n")
     assert_sections(await export(mcp_server, tmp_path, "tasks"), TASK_FIELDS, "**{heading}**:\n- {value}\n")
 
     await ok(mcp_server, "update_task", {"task_id": TASK, **as_lists(TASK_FIELDS, " (revised)")})
 
-    details = await ok(mcp_server, "get_task_details", {"task_id": TASK})
+    details = await ok(mcp_server, "get_details", {"entity_id": TASK})
     assert_sections(details, TASK_FIELDS, "## {heading}\n- {value}\n", " (revised)")
     assert "- Benchmark recorded\n" not in details
     assert_sections(
@@ -92,7 +92,7 @@ async def test_decision_fields_round_trip(mcp_server, tmp_path):  # noqa: F811
     }
     await ok(mcp_server, "create_architecture_decision", decision)
 
-    details = await ok(mcp_server, "get_architecture_details", {"architecture_id": ADR})
+    details = await ok(mcp_server, "get_details", {"entity_id": ADR})
     assert "- **Deciders**: Owner, Search lead" in details
     assert "## Implementation Notes\nBuild the index in a migration\n" in details
     assert_sections(details, DECISION_LISTS, "## {heading}\n- {value}\n")
@@ -109,7 +109,7 @@ async def test_decision_fields_round_trip(mcp_server, tmp_path):  # noqa: F811
     }
     await ok(mcp_server, "update_architecture", revised)
 
-    details = await ok(mcp_server, "get_architecture_details", {"architecture_id": ADR})
+    details = await ok(mcp_server, "get_details", {"entity_id": ADR})
     assert "- **Deciders**: Owner\n" in details and "## Implementation Notes\nBuild the index lazily\n" in details
     assert_sections(details, DECISION_LISTS, "## {heading}\n- {value}\n", " (revised)")
     exported = await export(mcp_server, tmp_path, "architecture")

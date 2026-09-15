@@ -148,27 +148,6 @@ class TaskHandler(BaseHandler):
                 },
             },
             {
-                "name": "get_task_details",
-                "description": "Get full task details with dependencies",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"task_id": {"type": "string"}},
-                    "required": ["task_id"],
-                },
-            },
-            {
-                "name": "delete_task",
-                "description": (
-                    "Delete a Not Started task created by mistake. Refused when it has subtasks, other tasks "
-                    "depend on it or it is linked to a GitHub issue; mark anything else Abandoned instead."
-                ),
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"task_id": {"type": "string"}},
-                    "required": ["task_id"],
-                },
-            },
-            {
                 "name": "update_task",
                 "description": (
                     "Edit a task's content, move it under another parent or change the requirements it implements. "
@@ -225,13 +204,9 @@ class TaskHandler(BaseHandler):
                 return self._query_tasks(**arguments)
             elif tool_name == "query_tasks_json":
                 return self._query_tasks_json(**arguments)
-            elif tool_name == "get_task_details":
-                return self._get_task_details(**arguments)
             elif tool_name == "sync_github_tasks" and GitHubUtils.is_github_enabled():
                 task_id = arguments.get("task_id")
                 return await (self._sync_from_github(task_id) if task_id else self._bulk_sync_with_github())
-            elif tool_name == "delete_task":
-                return self._delete_task(**arguments)
             elif tool_name == "update_task":
                 return self._update_task(**arguments)
             else:
@@ -1008,6 +983,8 @@ class TaskHandler(BaseHandler):
                     parent = dict(parent_tasks[0])  # Convert Row to dict for consistency
                     task_info += "\n## Parent Task\n"
                     task_info += f"- {parent['id']}: {parent['title']} [{parent['status']}]\n"
+
+            task_info += self._format_comments("task", task["id"])
 
             # Create above-the-fold summary
             key_info = self._format_status_summary("Task", task["id"], task["status"])

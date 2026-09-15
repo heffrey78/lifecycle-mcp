@@ -46,6 +46,9 @@ EDIT_OPTION_PROPERTIES = {
     "if_revision": {"type": "integer", "description": "Apply the edit only if the record is still at this revision"},
 }
 
+# Record type -> table, for tools that take any record's ID.
+ENTITY_TABLES = {"requirement": "requirements", "task": "tasks", "architecture": "architecture"}
+
 
 @dataclass
 class EditResult:
@@ -355,6 +358,34 @@ class BaseHandler(ABC):
             )
         except Exception as e:
             self.logger.warning(f"Failed to add review comment: {str(e)}")
+
+    @staticmethod
+    def _get_entity_type(entity_id: str) -> str | None:
+        """Record type from an ID prefix: REQ- requirement, TASK- task, ADR- or TDD- architecture"""
+        if entity_id.startswith("REQ-"):
+            return "requirement"
+        if entity_id.startswith("TASK-"):
+            return "task"
+        if entity_id.startswith(("ADR-", "TDD-")):
+            return "architecture"
+        return None
+
+    def _format_comments(self, entity_type: str, entity_id: str) -> str:
+        """Details section listing a record's comments, newest first; "" when it has none"""
+        rows = (
+            self.db.execute_query(
+                "SELECT reviewer, comment, created_at FROM reviews WHERE entity_type = ? AND entity_id = ? "
+                "ORDER BY created_at DESC, id DESC",
+                [entity_type, entity_id],
+                fetch_all=True,
+                row_factory=True,
+            )
+            or []
+        )
+        if not rows:
+            return ""
+        lines = "".join(f"- **{row['reviewer']}** ({row['created_at']}): {row['comment']}\n" for row in rows)
+        return f"\n## Comments ({len(rows)})\n{lines}"
 
     @abstractmethod
     def get_tool_definitions(self) -> list[dict[str, Any]]:

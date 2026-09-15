@@ -5,6 +5,7 @@ Handler modules for MCP Lifecycle Management Server
 from .architecture_handler import ArchitectureHandler
 from .base_handler import BaseHandler
 from .export_handler import ExportHandler
+from .record_handler import RecordHandler
 from .relationship_handler import RelationshipHandler
 from .requirement_handler import RequirementHandler
 from .status_handler import StatusHandler
@@ -16,6 +17,7 @@ __all__ = [
     "TaskHandler",
     "ArchitectureHandler",
     "RelationshipHandler",
+    "RecordHandler",
     "ExportHandler",
     "StatusHandler",
 ]

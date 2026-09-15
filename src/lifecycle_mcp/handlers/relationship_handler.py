@@ -8,9 +8,7 @@ from typing import Any
 
 from mcp.types import TextContent
 
-from .base_handler import BaseHandler
-
-ENTITY_TABLES = {"requirement": "requirements", "task": "tasks", "architecture": "architecture"}
+from .base_handler import ENTITY_TABLES, BaseHandler
 
 
 class RelationshipHandler(BaseHandler):
@@ -286,16 +284,6 @@ class RelationshipHandler(BaseHandler):
         key_info = f"Entity {entity_id} has {len(relationships)} relationship(s)"
         details = self._format_entity_relationships_details(entity_id, relationships)
         return self._create_above_fold_response("SUCCESS", key_info, "", details)
-
-    def _get_entity_type(self, entity_id: str) -> str | None:
-        """Determine entity type from ID prefix"""
-        if entity_id.startswith("REQ-"):
-            return "requirement"
-        elif entity_id.startswith("TASK-"):
-            return "task"
-        elif entity_id.startswith("ADR-") or entity_id.startswith("TDD-"):
-            return "architecture"
-        return None
 
     @staticmethod
     def _normalize_direction(source_id: str, target_id: str, source_type: str, target_type: str):

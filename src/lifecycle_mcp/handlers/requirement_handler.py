@@ -5,6 +5,8 @@ Handles all requirement-related operations
 """
 
 import json
+from collections import deque
+from collections.abc import Iterable
 from typing import Any
 
 from mcp.types import TextContent
@@ -85,6 +87,39 @@ REQUIREMENT_TRANSITIONS = {
     "Validated": ["Deprecated"],
     "Deprecated": [],
 }
+# A multi-step move may end at these statuses but never pass through them: tasks and ADRs are planned against an
+# approved requirement, and validation is a deliberate step (ADR-0003).
+REQUIREMENT_STOP_STATUSES = ("Approved", "Validated")
+
+
+def requirement_path(current: str, target: str, stops: Iterable[str] = REQUIREMENT_STOP_STATUSES) -> list[str] | None:
+    """The shortest allowed sequence of statuses from current to target that passes through none of stops"""
+    if target == current:
+        return None
+    paths, seen = deque([[current]]), {current}
+    while paths:
+        path = paths.popleft()
+        for status in REQUIREMENT_TRANSITIONS.get(path[-1], []):
+            if status == target:
+                return [*path, status]
+            if status not in seen and status not in stops:
+                seen.add(status)
+                paths.append([*path, status])
+    return None
+
+
+def refused_move_reason(current: str, target: str) -> str:
+    """Why update_requirement_status can't move a requirement from current to target, and what it can do instead"""
+    detour = requirement_path(current, target, stops=())
+    if detour:
+        stop = next(status for status in detour[1:-1] if status in REQUIREMENT_STOP_STATUSES)
+        return (
+            f"Invalid transition from {current} to {target} in one call: it would pass through {stop}. "
+            f"Move it to {stop} first"
+        )
+    allowed = ", ".join(REQUIREMENT_TRANSITIONS.get(current, [])) or "nothing"
+    return f"Invalid transition from {current} to {target}. From {current} it can move to: {allowed}"
+
 
 # Content edits to reviewed requirements made after their latest status change. The marker is derived rather than
 # stored: the next status transition clears it, and that transition's comment serves as the acknowledgement.
@@ -154,7 +189,10 @@ class RequirementHandler(BaseHandler):
             },
             {
                 "name": "update_requirement_status",
-                "description": "Move requirement through lifecycle states",
+                "description": (
+                    "Move requirements through lifecycle states; walks the allowed path, "
+                    "never through Approved or Validated"
+                ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -679,6 +717,9 @@ Guidelines:
 
         current_status = current_req[0]["status"]
         new_status = params["new_status"]
+        path = requirement_path(current_status, new_status)
+        if path is None:
+            raise StatusRefused(refused_move_reason(current_status, new_status))
 
         # Validate task completion before allowing Validated status
         if new_status == "Validated":
@@ -705,20 +746,21 @@ Guidelines:
                     f"All tasks must have 'Complete' status before requirement validation."
                 )
 
-        if new_status not in REQUIREMENT_TRANSITIONS.get(current_status, []):
-            raise StatusRefused(f"Invalid transition from {current_status} to {new_status}")
+        # One UPDATE per step, so the status trigger logs each step; all of them or none (ADR-0003).
+        # CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
+        with self.db.transaction() as cur:
+            for status in path[1:]:
+                cur.execute(
+                    "UPDATE requirements SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    [status, requirement_id],
+                )
+            if params.get("comment"):
+                cur.execute(
+                    "INSERT INTO reviews (entity_type, entity_id, reviewer, comment) VALUES ('requirement', ?, ?, ?)",
+                    [requirement_id, "MCP User", params["comment"]],
+                )
 
-        # Update status. CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
-        self.db.execute_query(
-            "UPDATE requirements SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            [new_status, requirement_id],
-        )
-
-        # Add review comment if provided
-        if params.get("comment"):
-            self._add_review_comment("requirement", requirement_id, params["comment"])
-
-        return StatusChange(requirement_id, current_status, new_status)
+        return StatusChange(requirement_id, current_status, new_status, path if len(path) > 2 else None)
 
     def _query_requirements(self, **params) -> list[TextContent]:
         """Query requirements with filters"""

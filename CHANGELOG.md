@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Short IDs and honest progress (roadmap R14)
+
+#### Added
+- Every tool that takes a record ID also accepts a short form, so the zero padding and the trailing version can be
+  left out: `REQ-12-FUNC` for `REQ-0012-FUNC-00`, `TASK-12` for `TASK-0012-00-00`, `TASK-12-1` for
+  `TASK-0012-01-00`, `ADR-4` for `ADR-0004`. A requirement's alias keeps its type because numbers repeat across
+  types: `REQ-12` alone can be four different records. Full stored IDs work exactly as before, an alias matching
+  nothing is refused as unknown, and one matching several is refused naming the candidates rather than guessing.
+  Resolution happens once in the server's routing, so no tool gained a parameter and the surface is unchanged.
+
+#### Fixed
+- Requirement progress counted a parent task and its subtasks separately, so a requirement whose one task was split
+  in two read three tasks (F-22). A task that something points at as its parent is now counted through its
+  subtasks. Migration 16 rebuilds the counter triggers and recomputes `task_count` and `tasks_completed` on existing
+  databases, touching no status.
+
 ### Diagrams that show structure (roadmap R13)
 
 Diagrams drew inventories: boxes hung off category nodes, at most 20 edges and only requirement-to-task ones, with

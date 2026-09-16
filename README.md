@@ -548,6 +548,19 @@ The server maintains a comprehensive SQLite database with the following key enti
 - **Events**: Automatic logging of lifecycle events and status changes
 - **Comments**: Notes on requirements, tasks and architecture decisions, added with `add_comment` or a status change's `comment`
 
+### Short IDs
+
+Anywhere a tool takes a record ID, the zero padding and the trailing version can be left out:
+
+| Typed | Resolves to |
+|---|---|
+| `REQ-12-FUNC` | `REQ-0012-FUNC-00` |
+| `TASK-12` | `TASK-0012-00-00` |
+| `TASK-12-1` | `TASK-0012-01-00` |
+| `ADR-4` | `ADR-0004` |
+
+A requirement's short form keeps its type, because requirement numbers repeat across types: `REQ-12` on its own can mean four different records. Full stored IDs always work. An alias that matches nothing is refused as unknown, and one that matches several is refused naming the candidates, so a tool never acts on a guess. Stored IDs never change; this is only an input form.
+
 ## Entity ID Formats
 
 - **Requirements**: `REQ-XXXX-TYPE-VV` (e.g., REQ-0001-FUNC-00)

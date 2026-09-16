@@ -137,7 +137,9 @@ def test_legacy_links_are_copied_normalised_and_counted(tmp_path):
             (row[0], (row[1], row[2]))
             for row in conn.execute("SELECT id, task_count, tasks_completed FROM requirements")
         )
-        assert counters == {"REQ-0001-FUNC-00": (2, 1), "REQ-0002-FUNC-00": (1, 0)}
+        # TASK-0001-01-00 is a subtask of TASK-0001-00-00, so the requirement has one leaf task, and it is
+        # Complete: the parent is counted through it rather than as a second task (migration 16, F-22).
+        assert counters == {"REQ-0001-FUNC-00": (1, 1), "REQ-0002-FUNC-00": (1, 0)}
         assert conn.execute("SELECT id, blocking_items FROM blocked_items").fetchall() == [
             ("TASK-0002-00-00", "TASK-0001-00-00")
         ]

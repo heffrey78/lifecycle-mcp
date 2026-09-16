@@ -161,7 +161,15 @@ def test_migration_14_allows_supersedes_and_keeps_every_link_object(tmp_path):
 
     assert schema_objects(db, "view") == before["view"]
     assert schema_objects(db, "index") == before["index"]
-    assert schema_objects(db, "trigger") == before["trigger"] | {"set_superseded_by", "clear_superseded_by"}
+    # Migration 14 adds the superseded_by pair; 16 adds the parent-link counters. What matters here is that
+    # migration 14 kept every trigger that was already there.
+    added = {
+        "set_superseded_by",
+        "clear_superseded_by",
+        "update_requirement_task_count_parent_insert",
+        "update_requirement_task_count_parent_delete",
+    }
+    assert schema_objects(db, "trigger") == before["trigger"] | added
     assert ("task", "TASK-0002-00-00", "task", "TASK-0001-00-00", "depends") in links(db)
     assert ("architecture", "ADR-0002", "architecture", "ADR-0001", "supersedes") in links(db)
     with sqlite3.connect(db) as conn:

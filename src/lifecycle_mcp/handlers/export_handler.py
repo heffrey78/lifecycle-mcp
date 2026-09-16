@@ -16,27 +16,38 @@ from .base_handler import BaseHandler
 from .requirement_handler import REQUIREMENT_LIST_SECTIONS
 from .task_handler import TASK_LIST_SECTIONS
 
-# Task-to-task dependency edges as (task_id depends on depends_on_task_id). "blocks" links point
-# blocker -> blocked, every other dependency kind points dependent -> dependency.
-TASK_DEPENDENCY_EDGES = """
-    SELECT e.task_id, e.depends_on_task_id
-    FROM (
-        SELECT source_id AS task_id, target_id AS depends_on_task_id FROM relationships
-        WHERE source_type = 'task' AND target_type = 'task' AND relationship_type IN ('depends', 'requires', 'informs')
-        UNION
-        SELECT target_id, source_id FROM relationships
-        WHERE source_type = 'task' AND target_type = 'task' AND relationship_type = 'blocks'
-    ) e
-    JOIN tasks t1 ON e.task_id = t1.id
-    JOIN tasks t2 ON e.depends_on_task_id = t2.id
-"""
-
-
 # Statuses left out of diagrams by default: finished history rather than the shape of the project (roadmap R13).
 DIAGRAM_OMITTED_STATUSES = {"requirements": ("Deprecated",), "architecture": ("Deprecated",)}
 
 # How much of a title a node label keeps before it is cut (roadmap R13).
 LABEL_LENGTH = 60
+
+# Node fills by status, shared by every diagram (roadmap R13).
+DEFAULT_COLOR = "fill:#ffffff"
+REQUIREMENT_STATUS_COLORS = {
+    "Draft": "fill:#ff9999",
+    "Under Review": "fill:#ffcc99",
+    "Approved": "fill:#99ccff",
+    "Architecture": "fill:#99ccff",
+    "Ready": "fill:#99ff99",
+    "Implemented": "fill:#ccffcc",
+    "Validated": "fill:#99ff99",
+    "Deprecated": "fill:#cccccc",
+}
+TASK_STATUS_COLORS = {
+    "Not Started": "fill:#ff9999",
+    "In Progress": "fill:#ffcc99",
+    "Blocked": "fill:#ff6666",
+    "Complete": "fill:#99ff99",
+    "Abandoned": "fill:#cccccc",
+}
+ARCHITECTURE_STATUS_COLORS = {
+    "Proposed": "fill:#ffcc99",
+    "Accepted": "fill:#99ff99",
+    "Rejected": "fill:#ff9999",
+    "Deprecated": "fill:#cccccc",
+    "Superseded": "fill:#cccccc",
+}
 
 
 @dataclass
@@ -416,18 +427,22 @@ class ExportHandler(BaseHandler):
             requirement_ids = params.get("requirement_ids", [])
 
             if diagram_type == "requirements":
-                mermaid_content = self._generate_requirements_diagram(requirement_ids)
+                diagram = self._generate_requirements_diagram(requirement_ids)
+                mermaid_content = diagram.content
             elif diagram_type == "tasks":
-                mermaid_content = self._generate_tasks_diagram(requirement_ids)
+                diagram = self._generate_tasks_diagram(requirement_ids)
+                mermaid_content = diagram.content
             elif diagram_type == "architecture":
-                mermaid_content = self._generate_architecture_diagram(requirement_ids)
+                diagram = self._generate_architecture_diagram(requirement_ids)
+                mermaid_content = diagram.content
             elif diagram_type == "full_project":
                 diagram = self._generate_full_project_diagram(include_relationships, requirement_ids)
                 mermaid_content = diagram.content
             elif diagram_type == "directory_structure":
                 mermaid_content = self._generate_directory_structure_diagram()
             elif diagram_type == "dependencies":
-                mermaid_content = self._generate_dependencies_diagram(requirement_ids)
+                diagram = self._generate_dependencies_diagram(requirement_ids)
+                mermaid_content = diagram.content
 
             if not mermaid_content:
                 return self._create_above_fold_response(
@@ -477,156 +492,89 @@ class ExportHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to create architectural diagram", e)
 
-    def _generate_requirements_diagram(self, requirement_ids: list[str] = None) -> str:
-        """Generate requirements flowchart"""
-        if requirement_ids:
-            # Filter specific requirements
-            placeholders = ",".join(["?"] * len(requirement_ids))
-            requirements = self.db.execute_query(
-                f"SELECT * FROM requirements WHERE id IN ({placeholders}) ORDER BY type, requirement_number",
-                requirement_ids,
-                fetch_all=True,
-                row_factory=True,
-            )
-        else:
-            requirements = self.db.get_records("requirements", "*", order_by="type, requirement_number")
-
+    def _generate_requirements_diagram(self, requirement_ids: list[str] = None) -> Diagram:
+        """Requirements grouped by type, with the links between them (roadmap R13)"""
+        requirements, left_out = self._diagram_requirements(requirement_ids)
         if not requirements:
-            return ""
+            return Diagram("")
 
-        mermaid_content = "flowchart TD\n"
+        by_type: dict[str, list[Any]] = {}
+        for record in requirements:
+            by_type.setdefault(record["type"], []).append(record)
 
-        # Group by type
-        req_by_type = {}
-        for req in requirements:
-            req_type = req["type"]
-            if req_type not in req_by_type:
-                req_by_type[req_type] = []
-            req_by_type[req_type].append(req)
+        lines = ["flowchart TD"]
+        for req_type in by_type:
+            lines.append(f"    {req_type}[{req_type} Requirements]")
+        for req_type, records in by_type.items():
+            for record in records:
+                name = node_id(record["id"])
+                lines.append(f"    {mermaid_label(record['id'], record['title'])}")
+                lines.append(f"    {req_type} --> {name}")
+                lines.append(f"    style {name} {REQUIREMENT_STATUS_COLORS.get(record['status'], DEFAULT_COLOR)}")
 
-        # Add type nodes
-        for req_type in req_by_type:
-            mermaid_content += f"    {req_type}[{req_type} Requirements]\n"
+        drawn = {record["id"] for record in requirements}
+        for link, label in (("parent", "parent of"), ("depends", "depends on")):
+            for source, target in self._diagram_links("requirement", "requirement", link):
+                if source in drawn and target in drawn:
+                    # parent links point child -> parent, so the parent is drawn above the child
+                    edge = (target, source) if link == "parent" else (source, target)
+                    lines.append(f"    {node_id(edge[0])} -->|{label}| {node_id(edge[1])}")
 
-        # Add requirement nodes
-        for req_type, reqs in req_by_type.items():
-            for req in reqs:
-                node_id = req["id"].replace("-", "_")
-                status_color = {
-                    "Draft": "fill:#ff9999",
-                    "Under Review": "fill:#ffcc99",
-                    "Approved": "fill:#99ccff",
-                    "Ready": "fill:#99ff99",
-                    "Implemented": "fill:#ccffcc",
-                    "Validated": "fill:#99ff99",
-                    "Deprecated": "fill:#cccccc",
-                }.get(req["status"], "fill:#ffffff")
+        return Diagram("\n".join(lines) + "\n", {"requirements": len(requirements)}, self._left_out(left_out, 0))
 
-                title_short = req["title"][:30] + "..." if len(req["title"]) > 30 else req["title"]
-                mermaid_content += f'    {node_id}["{req["id"]}<br/>{title_short}"]\n'
-                mermaid_content += f"    {req_type} --> {node_id}\n"
-                mermaid_content += f"    style {node_id} {status_color}\n"
-
-        return mermaid_content
-
-    def _generate_tasks_diagram(self, requirement_ids: list[str] = None) -> str:
-        """Generate task hierarchy diagram"""
-        if requirement_ids:
-            # Get tasks for specific requirements
-            placeholders = ",".join(["?"] * len(requirement_ids))
-            tasks = self.db.execute_query(
-                f"""
-                SELECT DISTINCT t.* FROM tasks t
-                JOIN relationships rel ON rel.target_id = t.id
-                WHERE rel.source_type = 'requirement' AND rel.target_type = 'task'
-                  AND rel.relationship_type = 'implements' AND rel.source_id IN ({placeholders})
-                ORDER BY t.task_number, t.subtask_number
-            """,
-                requirement_ids,
-                fetch_all=True,
-                row_factory=True,
-            )
-        else:
-            tasks = self.db.get_records("tasks", "*", order_by="task_number, subtask_number")
-
+    def _generate_tasks_diagram(self, requirement_ids: list[str] = None) -> Diagram:
+        """Tasks with their subtasks and the tasks they wait on (roadmap R13)"""
+        tasks = self._diagram_tasks(requirement_ids)
         if not tasks:
-            return ""
+            return Diagram("")
 
-        mermaid_content = "flowchart TD\n"
-        parent_of = {
-            row["source_id"]: row["target_id"]
-            for row in self.db.execute_query(
-                """
-                SELECT source_id, target_id FROM relationships
-                WHERE source_type = 'task' AND target_type = 'task' AND relationship_type = 'parent'
-            """,
-                fetch_all=True,
-                row_factory=True,
-            )
-        }
-
-        # Add task nodes
+        lines = ["flowchart TD"]
         for task in tasks:
-            node_id = task["id"].replace("-", "_")
-            status_color = {
-                "Not Started": "fill:#ff9999",
-                "In Progress": "fill:#ffcc99",
-                "Blocked": "fill:#ff6666",
-                "Complete": "fill:#99ff99",
-                "Abandoned": "fill:#cccccc",
-            }.get(task["status"], "fill:#ffffff")
+            name = node_id(task["id"])
+            lines.append(f"    {mermaid_label(task['id'], task['title'])}")
+            lines.append(f"    style {name} {TASK_STATUS_COLORS.get(task['status'], DEFAULT_COLOR)}")
 
-            title_short = task["title"][:30] + "..." if len(task["title"]) > 30 else task["title"]
-            mermaid_content += f'    {node_id}["{task["id"]}<br/>{title_short}"]\n'
-            mermaid_content += f"    style {node_id} {status_color}\n"
+        drawn = {task["id"] for task in tasks}
+        links = (("parent", "subtask of"), ("depends", "depends on"), ("requires", "requires"), ("blocks", "blocks"))
+        for link, label in links:
+            for source, target in self._diagram_links("task", "task", link):
+                if source in drawn and target in drawn:
+                    lines.append(f"    {node_id(source)} -->|{label}| {node_id(target)}")
 
-            # Add parent-child relationships
-            if task["id"] in parent_of:
-                parent_id = parent_of[task["id"]].replace("-", "_")
-                mermaid_content += f"    {parent_id} --> {node_id}\n"
+        return Diagram("\n".join(lines) + "\n", {"tasks": len(tasks)})
 
-        return mermaid_content
+    def _generate_architecture_diagram(self, requirement_ids: list[str] = None) -> Diagram:
+        """Decisions, what they supersede, and the requirements they address (roadmap R13)"""
+        decisions, left_out = self._diagram_decisions(requirement_ids)
+        if not decisions:
+            return Diagram("")
 
-    def _generate_architecture_diagram(self, requirement_ids: list[str] = None) -> str:
-        """Generate architecture decisions diagram"""
-        if requirement_ids:
-            # Get architecture decisions for specific requirements
-            placeholders = ",".join(["?"] * len(requirement_ids))
-            architecture = self.db.execute_query(
-                f"""
-                SELECT DISTINCT a.* FROM architecture a
-                JOIN relationships rel ON rel.target_id = a.id
-                WHERE rel.source_type = 'requirement' AND rel.target_type = 'architecture'
-                  AND rel.relationship_type = 'addresses' AND rel.source_id IN ({placeholders})
-                ORDER BY a.created_at DESC
-            """,
-                requirement_ids,
-                fetch_all=True,
-                row_factory=True,
-            )
-        else:
-            architecture = self.db.get_records("architecture", "*", order_by="created_at DESC")
+        lines = ["flowchart TD"]
+        for decision in decisions:
+            name = node_id(decision["id"])
+            lines.append(f"    {mermaid_label(decision['id'], decision['title'])}")
+            lines.append(f"    style {name} {ARCHITECTURE_STATUS_COLORS.get(decision['status'], DEFAULT_COLOR)}")
 
-        if not architecture:
-            return ""
+        drawn = {decision["id"] for decision in decisions}
+        for source, target in self._diagram_links("architecture", "architecture", "supersedes"):
+            if source in drawn and target in drawn:
+                lines.append(f"    {node_id(source)} -->|supersedes| {node_id(target)}")
 
-        mermaid_content = "flowchart TD\n"
+        # The requirements these decisions serve, so a decision is not a box on its own.
+        requirements, _ = self._diagram_requirements(requirement_ids)
+        titles = {record["id"]: record["title"] for record in requirements}
+        addressed = [
+            (source, target)
+            for source, target in self._diagram_links("requirement", "architecture", "addresses")
+            if target in drawn and source in titles
+        ]
+        for record_id in dict.fromkeys(source for source, _ in addressed):
+            lines.append(f"    {mermaid_label(record_id, titles[record_id])}")
+        for source, target in addressed:
+            lines.append(f"    {node_id(source)} -->|addresses| {node_id(target)}")
 
-        for arch in architecture:
-            node_id = arch["id"].replace("-", "_")
-            status_color = {
-                "Proposed": "fill:#ffcc99",
-                "Accepted": "fill:#99ff99",
-                "Rejected": "fill:#ff9999",
-                "Deprecated": "fill:#cccccc",
-                "Superseded": "fill:#cccccc",
-            }.get(arch["status"], "fill:#ffffff")
-
-            title_short = arch["title"][:30] + "..." if len(arch["title"]) > 30 else arch["title"]
-            mermaid_content += f'    {node_id}["{arch["id"]}<br/>{title_short}"]\n'
-            mermaid_content += f"    style {node_id} {status_color}\n"
-
-        return mermaid_content
+        counts = {"decisions": len(decisions), "requirements": len({source for source, _ in addressed})}
+        return Diagram("\n".join(lines) + "\n", counts, self._left_out(0, left_out))
 
     def _generate_full_project_diagram(self, include_relationships: bool, requirement_ids: list[str] = None) -> Diagram:
         """The project graph: every non-deprecated record, with the links between them (roadmap R13).
@@ -714,6 +662,12 @@ class ExportHandler(BaseHandler):
         kept = [record for record in records if record["status"] not in DIAGRAM_OMITTED_STATUSES["architecture"]]
         return kept, len(records) - len(kept)
 
+    @staticmethod
+    def _left_out(requirements: int, decisions: int) -> dict[str, int]:
+        """The omitted counts a Diagram reports, without the zeroes"""
+        counts = {"deprecated requirements": requirements, "deprecated decisions": decisions}
+        return {kind: count for kind, count in counts.items() if count}
+
     def _diagram_links(self, source_type: str, target_type: str, relationship_type: str) -> list[tuple[str, str]]:
         """Every link of one kind, as (source_id, target_id)"""
         rows = self.db.execute_query(
@@ -736,51 +690,28 @@ class ExportHandler(BaseHandler):
     Root --> Docs
     Root --> Tests"""
 
-    def _generate_dependencies_diagram(self, requirement_ids: list[str] = None) -> str:
-        """Generate dependencies diagram"""
-        if requirement_ids:
-            # Get task dependencies for specific requirements
-            placeholders = ",".join(["?"] * len(requirement_ids))
-            task_ids_query = self.db.execute_query(
-                f"""
-                SELECT DISTINCT target_id AS task_id FROM relationships
-                WHERE source_type = 'requirement' AND target_type = 'task'
-                  AND relationship_type = 'implements' AND source_id IN ({placeholders})
-            """,
-                requirement_ids,
-                fetch_all=True,
-                row_factory=True,
-            )
+    def _generate_dependencies_diagram(self, requirement_ids: list[str] = None) -> Diagram:
+        """The tasks that wait on other tasks, with titles rather than bare IDs (roadmap R13)"""
+        tasks = {task["id"]: task for task in self._diagram_tasks(requirement_ids)}
+        edges = []
+        for link, label in (("depends", "depends on"), ("requires", "requires"), ("informs", "informs")):
+            edges += [(source, target, label) for source, target in self._diagram_links("task", "task", link)]
+        edges += [(source, target, "blocks") for source, target in self._diagram_links("task", "task", "blocks")]
+        edges = [edge for edge in edges if edge[0] in tasks and edge[1] in tasks]
 
-            task_ids = [row["task_id"] for row in task_ids_query]
-            if task_ids:
-                task_placeholders = ",".join(["?"] * len(task_ids))
-                dependencies = self.db.execute_query(
-                    f"""
-                    {TASK_DEPENDENCY_EDGES}
-                    WHERE e.task_id IN ({task_placeholders})
-                       OR e.depends_on_task_id IN ({task_placeholders})
-                """,
-                    task_ids + task_ids,
-                    fetch_all=True,
-                    row_factory=True,
-                )
-            else:
-                dependencies = []
-        else:
-            dependencies = self.db.execute_query(TASK_DEPENDENCY_EDGES, fetch_all=True, row_factory=True)
+        if not edges:
+            return Diagram("flowchart TD\n    NoDeps[No task dependencies found]\n")
 
-        if not dependencies:
-            return "flowchart TD\n    NoDeps[No task dependencies found]\n"
+        lines = ["flowchart TD"]
+        drawn = dict.fromkeys([edge[0] for edge in edges] + [edge[1] for edge in edges])
+        for record_id in drawn:
+            task = tasks[record_id]
+            lines.append(f"    {mermaid_label(record_id, task['title'])}")
+            lines.append(f"    style {node_id(record_id)} {TASK_STATUS_COLORS.get(task['status'], DEFAULT_COLOR)}")
+        for source, target, label in edges:
+            lines.append(f"    {node_id(source)} -->|{label}| {node_id(target)}")
 
-        mermaid_content = "flowchart TD\n"
-
-        for dep in dependencies:
-            task_id = dep["task_id"].replace("-", "_")
-            depends_on = dep["depends_on_task_id"].replace("-", "_")
-            mermaid_content += f"    {depends_on} --> {task_id}\n"
-
-        return mermaid_content
+        return Diagram("\n".join(lines) + "\n", {"tasks": len(drawn), "dependencies": len(edges)})
 
     def _get_diagram_file_extension(self, output_format: str) -> str:
         """Get appropriate file extension based on output format"""

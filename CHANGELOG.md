@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Configurable workflow rules (roadmap R8, ADR-0004)
+
+`LIFECYCLE_RULES` chooses `off`, `warn` or `enforce`. **warn is the default**: every call keeps the outcome it has
+today, and a risky status move only gains an explanation, in the response text and in `structuredContent` under
+`warnings` (per record for a list of IDs). `enforce` refuses the move before anything is written; `off` checks
+nothing. An unrecognised value falls back to `warn`. The tool count stays 23 and definitions are unchanged.
+
+#### Added
+- Task rules: starting or completing a task whose dependencies are not all Complete names them; an abandoned
+  dependency is named separately, with the two ways out (drop the link, or abandon the waiting task); completing a
+  task while a subtask is open names the open subtasks; completing a task that was never started or is still
+  Blocked, and reopening a Complete task, each say so.
+- A requirement reaching Implemented while the tasks implementing it are open names them.
+- An architecture decision moving outside its vocabulary says where that status usually goes, with the ADR statuses
+  and the TDD chain as separate sets.
+- The dashboard and a task's details name abandoned dependencies instead of listing them as ordinary waits;
+  `structuredContent` carries them under `abandoned_dependencies`.
+
+#### Unchanged
+- Three rules apply whatever the mode, because they protect what the server maintains itself: the Validated gate,
+  the `supersedes` link behind Superseded, and the requirement transition map.
+
 ### What to work on next (roadmap R7)
 
 The server still lists 23 tools; definitions grow from 12,341 to 12,512 characters.

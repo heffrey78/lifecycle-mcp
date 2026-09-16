@@ -166,6 +166,11 @@ The server uses the `LIFECYCLE_DB` environment variable to specify the SQLite da
 - **Async Architecture**: All handler methods use async/await for MCP protocol compliance
 - **stdout is the protocol channel**: never `print()` in `src/` (ruff T20 enforces it); log to stderr. `scripts/mcp_handshake_smoke.py` verifies a server end to end
 - **GitHub is opt-in**: issues are only created or synced when `LIFECYCLE_GITHUB=on`. `tests/conftest.py` fails any test that spawns `gh` or `git`; tests needing a real repository are marked `github_live` and close their issues via `github_issue_cleanup`
+- **Workflow rules are configurable**: `LIFECYCLE_RULES` is `off`, `warn` (the default) or `enforce`. A handler collects
+  the reasons a status move is risky and passes them to `BaseHandler._rule_warnings`: warn returns them for the
+  response text and `structuredContent`, enforce raises `StatusRefused` before anything is written, off checks
+  nothing. The always-on rules are deliberately outside it: the Validated gate, R9's Superseded link and the
+  requirement transition map (roadmap R8, ADR-0004)
 - **Tool errors**: handlers return `_create_error_response(...)`; the server raises it as `ToolCallError` so clients receive `isError=true`
 - **Strict tool inputs**: `server.py` adds `additionalProperties: false` to every tool schema, so undeclared fields are refused by name. Declare every new parameter in the tool definition
 - **Editing records**: every update tool goes through `BaseHandler._apply_edit`. It bumps `revision` once, logs a `field_edit` event per changed field, honours `if_revision`, and takes a `check` hook for lifecycle rules (raise `EditRefused`) and a `relink` hook for link changes inside the same transaction. Rules:

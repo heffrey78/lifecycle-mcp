@@ -814,6 +814,17 @@ def count_leaf_tasks_only(conn: sqlite3.Connection) -> None:
     """)
 
 
+# --- migration 17 ------------------------------------------------------------------------------
+
+
+def add_task_evidence(conn: sqlite3.Connection) -> None:
+    """The commit and the evidence behind a task's status, kept from its status move (roadmap R12)."""
+    columns = _columns(conn, "tasks")
+    for column in ("commit_ref", "evidence"):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
+
+
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "GitHub integration fields", add_github_integration_columns),
     (2, "GitHub sync metadata fields", add_github_sync_metadata_columns),
@@ -831,6 +842,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (14, "Allow supersedes links and keep superseded_by in step", allow_supersedes_links),
     (15, "Keep the reason a task is blocked", add_blocked_reason),
     (16, "Count leaf tasks only in requirement progress", count_leaf_tasks_only),
+    (17, "Keep the commit and evidence behind a task's status", add_task_evidence),
 ]
 
 

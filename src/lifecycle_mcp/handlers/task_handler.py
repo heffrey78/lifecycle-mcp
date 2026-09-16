@@ -152,6 +152,8 @@ class TaskHandler(BaseHandler):
                         },
                         "comment": {"type": "string"},
                         "assignee": {"type": "string"},
+                        "commit": {"type": "string", "description": "Commit behind this move; kept on the task"},
+                        "evidence": {"type": "string", "description": "Test result or check; kept on the task"},
                     },
                     "required": ["new_status"],
                 },
@@ -532,6 +534,12 @@ class TaskHandler(BaseHandler):
         if params.get("assignee"):
             assignments += ", assignee = ?"
             values.append(params["assignee"])
+        # The commit and evidence behind the move stay on the task; a later move that omits them leaves them
+        # alone, so the record of why a task is Complete survives (roadmap R12).
+        for param, column in (("commit", "commit_ref"), ("evidence", "evidence")):
+            if params.get(param):
+                assignments += f", {column} = ?"
+                values.append(params[param])
         self.db.execute_query(f"UPDATE tasks SET {assignments} WHERE id = ?", [*values, task_id])
 
         # Add comment if provided
@@ -920,6 +928,10 @@ class TaskHandler(BaseHandler):
 
             if task["status"] == "Blocked":
                 task_info += f"\n- **Blocked Reason**: {task['blocked_reason'] or 'Not given'}"
+            if task["commit_ref"]:
+                task_info += f"\n- **Commit**: {task['commit_ref']}"
+            if task["evidence"]:
+                task_info += f"\n- **Evidence**: {task['evidence']}"
 
             if task["github_issue_number"]:
                 task_info += f"\n- **GitHub Issue**: #{task['github_issue_number']} - {task['github_issue_url']}"

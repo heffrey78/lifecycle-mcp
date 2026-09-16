@@ -4,7 +4,7 @@ import sqlite3
 
 from lifecycle_mcp.migrations import apply_all_migrations
 
-from .test_migrations import SEED, database_at
+from .test_migrations import LATEST, SEED, database_at
 from .test_next_tasks import move
 from .test_tool_results import call, mcp_server, populate, text_of  # noqa: F401 (mcp_server is a fixture)
 
@@ -78,7 +78,7 @@ def test_migration_16_recomputes_existing_counters_without_touching_status(tmp_p
         statuses = conn.execute("SELECT id, status FROM tasks ORDER BY id").fetchall()
     assert before == (2, 1)  # the parent and its subtask were both counted
 
-    assert apply_all_migrations(db) == 16
+    assert apply_all_migrations(db) == LATEST
 
     with sqlite3.connect(db) as conn:
         assert conn.execute(

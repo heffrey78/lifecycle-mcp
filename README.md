@@ -577,6 +577,14 @@ A requirement's short form keeps its type, because requirement numbers repeat ac
 - `LIFECYCLE_GITHUB`: Set to `on` to create and sync a GitHub issue for each task (default: off). Requires an authenticated `gh` CLI and a github.com `origin` remote in the server's working directory. When off, the server never runs `gh` or `git`, and the `sync_github_tasks` tool is not listed.
 - `LIFECYCLE_RULES`: How strictly risky status moves are treated - `off`, `warn` or `enforce` (default: `warn`). Anything else falls back to `warn`.
 
+### Writing Requirements
+
+The server offers an MCP prompt, `capture_requirement`, listed under `prompts/list`. It is a guide for writing a well-formed requirement that your own model fills in and then passes to `create_requirement` in a single call; it takes an optional `about` argument carrying what the person said in their own words. Nothing is kept on the server between calls.
+
+New records also say when they are thin for their kind: a requirement with no `acceptance_criteria`, an NFUNC requirement with no `validation_metrics`, a P0 or P1 task with no `test_plan`. These are workflow rules, so they warn by default, refuse under `LIFECYCLE_RULES=enforce`, and are silent under `off`.
+
+A requirement's details show when anyone last checked it against reality, and `get_project_status` lists the ones whose content changed after that. Commenting on a requirement or moving its status counts as checking it.
+
 ### Workflow Rules
 
 A status move can be risky without being wrong. `LIFECYCLE_RULES` decides what happens then:

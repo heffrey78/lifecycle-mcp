@@ -166,6 +166,14 @@ The server uses the `LIFECYCLE_DB` environment variable to specify the SQLite da
 - **Async Architecture**: All handler methods use async/await for MCP protocol compliance
 - **stdout is the protocol channel**: never `print()` in `src/` (ruff T20 enforces it); log to stderr. `scripts/mcp_handshake_smoke.py` verifies a server end to end
 - **GitHub is opt-in**: issues are only created or synced when `LIFECYCLE_GITHUB=on`. `tests/conftest.py` fails any test that spawns `gh` or `git`; tests needing a real repository are marked `github_live` and close their issues via `github_issue_cleanup`
+- **Prompts, not conversation tools**: the server serves `prompts/list` and `prompts/get` from `prompts.py`. A prompt
+  is text the client's model fills in and passes to a tool, so no session lives on the server, and prompts are a
+  separate MCP primitive that costs nothing against the tool budget (roadmap R11)
+- **Thin records and staleness**: `rules.thin_record_reasons` says which fields a new record of that kind usually
+  needs, through the same `_rule_warnings` helper as every other rule. `requirement_handler.verification` derives
+  when a requirement was last checked (a comment or a status move) and `stale_requirements` lists those changed
+  since; both read lifecycle events rather than a stored column, and use event ids because timestamps are
+  second-resolution (roadmap R11)
 - **Workflow rules are configurable**: `LIFECYCLE_RULES` is `off`, `warn` (the default) or `enforce`. A handler collects
   the reasons a status move is risky and passes them to `BaseHandler._rule_warnings`: warn returns them for the
   response text and `structuredContent`, enforce raises `StatusRefused` before anything is written, off checks

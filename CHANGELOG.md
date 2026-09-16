@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Fields that get filled, and requirements that stay fresh (roadmap R11)
+
+The interview tools R16 removed are not coming back. Measured in this project's own tracker, guided questioning was
+never the gap: every requirement had its core filled by calling `create_requirement` directly. What was missing sat
+one field-set down - `validation_metrics` set on 0 of 18 requirements, `business_rules` and
+`nonfunctional_requirements` likewise, `definition_of_done` on 0 of 69 tasks - and requirements drifted, six of them
+needing their current state re-checked against the code. The tool count stays 23.
+
+#### Added
+- `create_requirement` says when a requirement has no `acceptance_criteria`, and when an NFUNC requirement has no
+  `validation_metrics`; `create_task` says when a P0 or P1 task has no `test_plan`. These go through the R8
+  workflow rules, so `LIFECYCLE_RULES=enforce` refuses before anything is written and `off` says nothing.
+- The server answers `prompts/list` and `prompts/get`, which it never did before, and offers `capture_requirement`:
+  a guide the client's own model fills in and passes to `create_requirement` in one call. No session is kept on the
+  server, so nothing is lost on restart, and prompts are a separate MCP primitive, so this costs nothing against the
+  tool budget.
+- A requirement's details say when it was last checked against reality - Last Verified, Never verified, or Stale
+  since - and the dashboard lists the requirements whose content changed after anyone last looked. A comment or a
+  status move counts as checking it. Like Changed Since Last Review, this is derived rather than stored, but it
+  covers Draft requirements too.
+
+#### Removed
+- The LLM sampling code, 791 lines that could never run: nothing ever called `set_mcp_client`, so requirement
+  analysis, the clarification and decomposition responses and the ADR diagram suggestions all returned early.
+  `llm_decomposition_prompts.py`, which nothing imported, goes with them. `create_requirement` and
+  `create_architecture_decision` behave exactly as before.
+
 ### Evidence on tasks, and fuller exports (roadmap R12)
 
 Test results, commits and files had no structured home, so evidence went into free-text comments - "21 tests

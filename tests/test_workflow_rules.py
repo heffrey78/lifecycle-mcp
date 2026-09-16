@@ -131,3 +131,57 @@ async def test_enforce_refuses_a_skipped_completion_and_the_task_stays_put(mcp_s
     assert f"Task {ids['task']} [Not Started]" in text_of(
         await call(mcp_server, "get_details", {"entity_id": ids["task"]})
     )
+
+
+# --- the Implemented gate and ADR moves (TASK-0057) ------------------------------------------------------------
+
+
+async def move_requirement(server, requirement_id: str, new_status: str):
+    return await call(server, "update_requirement_status", {"requirement_id": requirement_id, "new_status": new_status})
+
+
+async def adr_warnings(server, architecture_id: str, new_status: str) -> list[str]:
+    result = await call(
+        server, "update_architecture_status", {"architecture_id": architecture_id, "new_status": new_status}
+    )
+    assert result.isError is False, text_of(result)
+    return result.structuredContent.get("warnings", [])
+
+
+async def test_reaching_implemented_with_open_tasks_warns_while_validated_stays_refused(mcp_server):  # noqa: F811
+    ids = await populate(mcp_server)
+
+    result = await move_requirement(mcp_server, ids["requirement"], "Implemented")
+
+    assert result.isError is False
+    assert result.structuredContent["warnings"] == [f"Tasks not Complete: {ids['task']} (Not Started)"]
+    validated = await move_requirement(mcp_server, ids["requirement"], "Validated")
+    assert validated.isError and "Cannot validate requirement with incomplete tasks" in text_of(validated)
+
+
+async def test_the_implemented_gate_obeys_the_mode_but_the_validated_gate_does_not(mcp_server, monkeypatch):  # noqa: F811
+    ids = await populate(mcp_server)
+    monkeypatch.setenv(RULES_ENV_FLAG, "enforce")
+
+    refused = await move_requirement(mcp_server, ids["requirement"], "Implemented")
+    assert refused.isError and "Tasks not Complete" in text_of(refused)
+
+    monkeypatch.setenv(RULES_ENV_FLAG, "off")
+    assert (await move_requirement(mcp_server, ids["requirement"], "Implemented")).isError is False
+    validated = await move_requirement(mcp_server, ids["requirement"], "Validated")
+    assert validated.isError and "Cannot validate requirement with incomplete tasks" in text_of(validated)
+
+
+async def test_an_unusual_decision_move_is_named_and_can_be_enforced(mcp_server, monkeypatch):  # noqa: F811
+    ids = await populate(mcp_server)
+
+    assert await adr_warnings(mcp_server, ids["adr"], "Accepted") == []
+    assert await adr_warnings(mcp_server, ids["adr"], "Proposed") == [
+        "Unusual move from Accepted to Proposed: a decision at Accepted usually goes to Deprecated, Superseded"
+    ]
+
+    monkeypatch.setenv(RULES_ENV_FLAG, "enforce")
+    refused = await call(
+        mcp_server, "update_architecture_status", {"architecture_id": ids["adr"], "new_status": "Implemented"}
+    )
+    assert refused.isError and "Unusual move from Proposed to Implemented" in text_of(refused)

@@ -59,6 +59,20 @@ ARCHITECTURE_JSON_FIELDS = (
     "deciders",
     *(column for column, _ in ARCHITECTURE_LIST_SECTIONS),
 )
+# Status -> the statuses a record usually moves to next: the ADR vocabulary, then the TDD and INTG chain. Superseded
+# also needs a supersedes link (R9), which is checked whatever the workflow rules say (roadmap R8).
+ARCHITECTURE_TRANSITIONS = {
+    "Proposed": ["Accepted", "Rejected", "Deprecated", "Superseded"],
+    "Accepted": ["Deprecated", "Superseded"],
+    "Rejected": ["Proposed"],
+    "Deprecated": [],
+    "Superseded": [],
+    "Draft": ["Under Review", "Deprecated"],
+    "Under Review": ["Draft", "Approved", "Deprecated"],
+    "Approved": ["Implemented", "Deprecated"],
+    "Implemented": ["Deprecated", "Superseded"],
+}
+
 # Curated create/update inputs (roadmap R6b), shared by both tool schemas.
 ARCHITECTURE_CURATED_PROPERTIES = {
     "deciders": {"type": "array", "items": {"type": "string"}},
@@ -345,6 +359,8 @@ class ArchitectureHandler(BaseHandler):
                 f"to {new_status}"
             )
 
+        warnings = self._rule_warnings(self._move_reasons(current_status, new_status))
+
         # Update status. CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
         self.db.execute_query(
             "UPDATE architecture SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -355,7 +371,18 @@ class ArchitectureHandler(BaseHandler):
         if params.get("comment"):
             self._add_review_comment("architecture", architecture_id, params["comment"])
 
-        return StatusChange(architecture_id, current_status, new_status)
+        return StatusChange(architecture_id, current_status, new_status, warnings=warnings)
+
+    @staticmethod
+    def _move_reasons(current_status: str, new_status: str) -> list[str]:
+        """Why this move is unusual: the decision's status vocabulary doesn't step that way (roadmap R8)"""
+        allowed = ARCHITECTURE_TRANSITIONS.get(current_status)
+        if allowed is None or new_status == current_status or new_status in allowed:
+            return []
+        return [
+            f"Unusual move from {current_status} to {new_status}: a decision at {current_status} usually goes to "
+            f"{', '.join(allowed) or 'nothing'}"
+        ]
 
     def _query_architecture_decisions(self, **params) -> list[TextContent]:
         """Query architecture decisions with filters"""

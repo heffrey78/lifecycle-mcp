@@ -178,6 +178,9 @@ The server uses the `LIFECYCLE_DB` environment variable to specify the SQLite da
 - **Requirement progress counts leaf tasks**: a task that something points at as its parent is counted through its
   subtasks, not again on its own. The counter triggers carry that rule and migration 16 recomputes existing rows
   (F-22, roadmap R14)
+- **Evidence rides on the status move**: `update_task_status` keeps `commit` and `evidence` on the task in
+  `commit_ref` and `evidence` (migration 17), as it keeps a Blocked comment in `blocked_reason`. Omitting them
+  leaves the stored values alone. Export carries them, and carries every record's comments (roadmap R12)
 - **Tool errors**: handlers return `_create_error_response(...)`; the server raises it as `ToolCallError` so clients receive `isError=true`
 - **Strict tool inputs**: `server.py` adds `additionalProperties: false` to every tool schema, so undeclared fields are refused by name. Declare every new parameter in the tool definition
 - **Editing records**: every update tool goes through `BaseHandler._apply_edit`. It bumps `revision` once, logs a `field_edit` event per changed field, honours `if_revision`, and takes a `check` hook for lifecycle rules (raise `EditRefused`) and a `relink` hook for link changes inside the same transaction. Rules:

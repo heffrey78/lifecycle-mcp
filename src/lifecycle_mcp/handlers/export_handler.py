@@ -227,6 +227,7 @@ class ExportHandler(BaseHandler):
 
                 content += self._format_sections(req, REQUIREMENT_LIST_SECTIONS, "**{title}**:\n{body}\n")
 
+                content += self._exported_comments("requirement", req["id"])
                 content += "---\n\n"
 
         with open(filepath, "w", encoding="utf-8") as f:
@@ -264,7 +265,13 @@ class ExportHandler(BaseHandler):
                 content += f"- **Effort**: {task['effort'] or 'Not specified'}\n"
                 content += f"- **Assignee**: {task['assignee'] or 'Unassigned'}\n"
                 content += f"- **Created**: {task['created_at']}\n"
-                content += f"- **Updated**: {task['updated_at']}\n\n"
+                content += f"- **Updated**: {task['updated_at']}\n"
+                # The commit and evidence behind the task's status travel with it (roadmap R12).
+                if task["commit_ref"]:
+                    content += f"- **Commit**: {task['commit_ref']}\n"
+                if task["evidence"]:
+                    content += f"- **Evidence**: {task['evidence']}\n"
+                content += "\n"
 
                 if task["user_story"]:
                     content += f"**User Story**: {task['user_story']}\n\n"
@@ -298,12 +305,33 @@ class ExportHandler(BaseHandler):
                         content += f"- {req['id']}: {req['title']}\n"
                     content += "\n"
 
+                content += self._exported_comments("task", task["id"])
                 content += "---\n\n"
 
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
         return [filename]
+
+    def _exported_comments(self, entity_type: str, entity_id: str) -> str:
+        """A record's comments for the exported documentation, oldest first; "" when it has none (roadmap R12).
+
+        Comments were the only home evidence had, and export left them out entirely (F-26, F-31).
+        """
+        rows = (
+            self.db.execute_query(
+                "SELECT reviewer, comment, created_at FROM reviews WHERE entity_type = ? AND entity_id = ? "
+                "ORDER BY created_at, id",
+                [entity_type, entity_id],
+                fetch_all=True,
+                row_factory=True,
+            )
+            or []
+        )
+        if not rows:
+            return ""
+        lines = "".join(f"- **{row['reviewer']}** ({row['created_at']}): {row['comment']}\n" for row in rows)
+        return f"**Comments**:\n{lines}\n"
 
     def _export_architecture(self, project_name: str, output_dir: str) -> list[str]:
         """Export architecture decisions to markdown file"""
@@ -387,6 +415,7 @@ class ExportHandler(BaseHandler):
                     content += f"- {req['id']}: {req['title']}\n"
                 content += "\n"
 
+            content += self._exported_comments("architecture", arch["id"])
             content += "---\n\n"
 
         with open(filepath, "w", encoding="utf-8") as f:

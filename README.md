@@ -366,6 +366,10 @@ Update task progress and assignment.
 - `new_status` (required): New status - "Not Started", "In Progress", "Blocked", "Complete", "Abandoned"
 - `comment` (optional): Status update comment. On a move to Blocked it is kept as the task's blocked reason until the task leaves Blocked; moving a Blocked task to Blocked again without a comment keeps the reason
 - `assignee` (optional): New assignee
+- `commit` (optional): The commit behind this move, kept on the task
+- `evidence` (optional): The test result or check behind this move, kept on the task
+
+`commit` and `evidence` stay on the task after the move: a later status change that omits them leaves them in place, and passing new values replaces them. Both appear in the task's details and in the exported task documentation, so the reasoning behind a completed task survives the hand-off.
 
 #### `query_tasks`
 Search and filter tasks by various criteria.
@@ -488,7 +492,7 @@ Export comprehensive project documentation in structured markdown format.
 
 **Generated Files:**
 - `{project_name}-requirements.md` - Complete requirements documentation grouped by type
-- `{project_name}-tasks.md` - Task documentation grouped by status with linked requirements
+- `{project_name}-tasks.md` - Task documentation grouped by status, with linked requirements, each task's commit and evidence, and its comments
 - `{project_name}-architecture.md` - Architecture decisions with context, decisions, and consequences
 
 **Example:**

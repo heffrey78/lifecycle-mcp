@@ -20,9 +20,9 @@ TABLES = {
     "architecture": ("create_architecture_decision", "update_architecture"),
 }
 
-# Columns the server maintains itself: IDs and numbering come from ID generation, status moves (and a task's
-# blocked_reason) go through the update_*_status tools, counters, completed_at and superseded_by (from supersedes
-# links) are kept by triggers, and GitHub fields by GitHub sync.
+# Columns the server maintains itself: IDs and numbering come from ID generation, status moves (with a task's
+# blocked_reason, commit_ref and evidence) go through the update_*_status tools, counters, completed_at and
+# superseded_by (from supersedes links) are kept by triggers, and GitHub fields by GitHub sync.
 SYSTEM_COLUMNS = {
     "requirements": {
         "id",
@@ -50,6 +50,8 @@ SYSTEM_COLUMNS = {
         "github_etag",
         "github_last_sync",
         "blocked_reason",
+        "commit_ref",
+        "evidence",
     },
     "architecture": {"id", "type", "status", "revision", "created_at", "updated_at", "superseded_by"},
 }

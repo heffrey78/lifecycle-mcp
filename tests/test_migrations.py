@@ -409,9 +409,9 @@ async def test_links_survive_a_restart_and_power_trace_blocked_items_and_diagram
     dependencies = await call(
         second, "create_architectural_diagrams", {"diagram_type": "dependencies", "output_path": str(tmp_path)}
     )
-    assert "TASK_0001_00_00 --> TASK_0002_00_00" in text_of(dependencies)
+    assert "TASK_0002_00_00 -->|depends on| TASK_0001_00_00" in text_of(dependencies)
     tasks = await call(second, "create_architectural_diagrams", {"diagram_type": "tasks", "output_path": str(tmp_path)})
-    assert "TASK_0001_00_00 --> TASK_0001_01_00" in text_of(tasks)
+    assert "TASK_0001_01_00 -->|subtask of| TASK_0001_00_00" in text_of(tasks)
 
     for task_id in ("TASK-0001-00-00", "TASK-0001-01-00", "TASK-0002-00-00"):
         await call(second, "update_task_status", {"task_id": task_id, "new_status": "Complete"})

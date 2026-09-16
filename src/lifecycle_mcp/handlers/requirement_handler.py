@@ -12,6 +12,7 @@ from typing import Any
 from mcp.types import TextContent
 
 from ..database_manager import DatabaseManager
+from ..rules import thin_record_reasons
 from .base_handler import (
     EDIT_OPTION_PROPERTIES,
     STATUS_ID_LIST_PROPERTY,
@@ -383,6 +384,12 @@ class RequirementHandler(BaseHandler):
         if error:
             return self._create_error_response(error)
 
+        # Thin for its kind? The workflow rules decide: warn and carry on, refuse, or say nothing (roadmap R11).
+        try:
+            warnings = self._rule_warnings(thin_record_reasons(params, "requirement"))
+        except StatusRefused as e:
+            return self._create_error_response(str(e))
+
         try:
             # Perform LLM analysis for requirement decomposition
             llm_analysis = await self._analyze_requirement_with_llm(params)
@@ -400,17 +407,17 @@ class RequirementHandler(BaseHandler):
             req_id = self._create_single_requirement(params)
 
             # One status line; the facts an agent needs next come back as structured data (roadmap R10).
-            return self._create_structured_response(
-                "SUCCESS",
-                f"Requirement {req_id} created",
-                {
-                    "id": req_id,
-                    "type": params["type"],
-                    "title": params["title"],
-                    "priority": params["priority"],
-                    "status": "Draft",
-                },
-            )
+            structured = {
+                "id": req_id,
+                "type": params["type"],
+                "title": params["title"],
+                "priority": params["priority"],
+                "status": "Draft",
+            }
+            if warnings:
+                structured["warnings"] = warnings
+            details = "\n".join(f"⚠️ {warning}" for warning in warnings)
+            return self._create_structured_response("SUCCESS", f"Requirement {req_id} created", structured, "", details)
 
         except Exception as e:
             return self._create_error_response("Failed to create requirement", e)

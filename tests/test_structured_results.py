@@ -98,7 +98,14 @@ async def structured(server, name: str, arguments: dict) -> dict:
 
 async def test_create_tools_return_the_new_records_id_and_status(mcp_server):  # noqa: F811
     ids = await populate(mcp_server)
-    task = {"requirement_ids": [ids["requirement"]], "title": "Rank results", "priority": "P1"}
+    # The test_plan keeps this about the result's shape: a thin P1 task would also carry warnings, which
+    # tests/test_thin_records.py covers (roadmap R11).
+    task = {
+        "requirement_ids": [ids["requirement"]],
+        "title": "Rank results",
+        "priority": "P1",
+        "test_plan": ["Rank 10k notes"],
+    }
     decision = {
         "requirement_ids": [ids["requirement"]],
         "title": "Use BM25",

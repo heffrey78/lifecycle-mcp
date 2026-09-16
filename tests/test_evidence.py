@@ -63,6 +63,59 @@ async def test_a_task_without_evidence_shows_neither_line(mcp_server):  # noqa: 
     assert "**Commit**" not in shown and "**Evidence**" not in shown
 
 
+# --- exported documentation (TASK-0068) -----------------------------------------------------------------------
+
+
+async def export(server, tmp_path) -> dict[str, str]:
+    """Export the project and return each file's text, keyed by the kind of record."""
+    result = await call(
+        server, "export_project_documentation", {"project_name": "evidence", "output_directory": str(tmp_path)}
+    )
+    assert not result.isError, text_of(result)
+    return {
+        kind: (tmp_path / f"evidence-{kind}.md").read_text(encoding="utf-8")
+        for kind in ("requirements", "tasks", "architecture")
+        if (tmp_path / f"evidence-{kind}.md").exists()
+    }
+
+
+async def test_the_exported_tasks_carry_their_commit_and_evidence(mcp_server, tmp_path):  # noqa: F811
+    ids = await populate(mcp_server)
+    await move(mcp_server, ids["task"], "In Progress")
+    await move(mcp_server, ids["task"], "Complete", commit="a1b2c3d", evidence="331 passed, coverage 72%")
+
+    exported = await export(mcp_server, tmp_path)
+
+    assert "- **Commit**: a1b2c3d" in exported["tasks"]
+    assert "- **Evidence**: 331 passed, coverage 72%" in exported["tasks"]
+
+
+async def test_the_exported_documentation_carries_comments(mcp_server, tmp_path):  # noqa: F811
+    ids = await populate(mcp_server)
+    for entity_id, note in (
+        (ids["requirement"], "Scope agreed with the owner"),
+        (ids["task"], "Benchmarked at 26 ms p95"),
+        (ids["adr"], "Revisit if FTS5 is unavailable"),
+    ):
+        added = await call(mcp_server, "add_comment", {"entity_id": entity_id, "comment": note, "author": "jeff"})
+        assert not added.isError, text_of(added)
+
+    exported = await export(mcp_server, tmp_path)
+
+    assert "**Comments**:" in exported["requirements"] and "Scope agreed with the owner" in exported["requirements"]
+    assert "Benchmarked at 26 ms p95" in exported["tasks"] and "jeff" in exported["tasks"]
+    assert "Revisit if FTS5 is unavailable" in exported["architecture"]
+
+
+async def test_records_without_evidence_or_comments_export_as_before(mcp_server, tmp_path):  # noqa: F811
+    await populate(mcp_server)
+
+    exported = await export(mcp_server, tmp_path)
+
+    assert "**Comments**:" not in exported["tasks"]
+    assert "**Commit**" not in exported["tasks"] and "**Evidence**" not in exported["tasks"]
+
+
 def test_migration_17_adds_the_columns_to_existing_tasks(tmp_path):
     db = database_at(tmp_path / "evidence.db", version=16)
     with sqlite3.connect(db) as conn:

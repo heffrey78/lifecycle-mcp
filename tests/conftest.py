@@ -77,6 +77,12 @@ def block_real_github(monkeypatch, request):
     monkeypatch.setattr(subprocess, "Popen", GuardedPopen)
 
 
+@pytest.fixture(autouse=True)
+def default_workflow_rules(monkeypatch):
+    """Every test sees the default workflow rules mode unless it sets LIFECYCLE_RULES itself (roadmap R8)."""
+    monkeypatch.delenv("LIFECYCLE_RULES", raising=False)
+
+
 @pytest.fixture
 def github_issue_cleanup():
     """Issue numbers appended here are closed as 'not planned' when the test ends, pass or fail."""

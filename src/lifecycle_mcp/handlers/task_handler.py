@@ -74,6 +74,21 @@ TASK_DEPENDENCIES_SQL = """
     WHERE source_type = 'task' AND target_type = 'task' AND relationship_type = 'blocks'
 """
 
+# The tasks a task waits on that are not Complete, for the workflow rules (roadmap R8).
+UNMET_DEPENDENCIES_SQL = f"""
+    SELECT d.id, d.status FROM ({TASK_DEPENDENCIES_SQL}) dep JOIN tasks d ON d.id = dep.dependency_id
+    WHERE dep.task_id = ? AND d.status != 'Complete'
+    ORDER BY d.id
+"""
+
+# A task's subtasks that are neither Complete nor Abandoned, for the workflow rules (roadmap R8).
+OPEN_SUBTASKS_SQL = """
+    SELECT t.id, t.status FROM tasks t JOIN relationships rel ON rel.source_id = t.id
+    WHERE rel.source_type = 'task' AND rel.target_type = 'task' AND rel.target_id = ?
+      AND rel.relationship_type = 'parent' AND t.status NOT IN ('Complete', 'Abandoned')
+    ORDER BY t.id
+"""
+
 # Records that depend on a task and therefore block deleting it. "blocks" links point blocker -> blocked.
 TASK_DELETE_BLOCKERS = [
     (
@@ -503,6 +518,8 @@ class TaskHandler(BaseHandler):
         current_task = dict(current_tasks[0])  # Convert Row to dict for .get() method
         current_status = current_task["status"]
         new_status = params["new_status"]
+        # Workflow rules run before anything is written, so enforce leaves the task where it was (roadmap R8).
+        warnings = self._rule_warnings(self._task_rule_reasons(task_id, current_status, new_status))
 
         # Update status and assignee. CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
         assignments, values = "status = ?, updated_at = CURRENT_TIMESTAMP", [new_status]
@@ -578,7 +595,40 @@ class TaskHandler(BaseHandler):
         elif github_error:
             github_info = f"⚠️ GitHub sync failed: {github_error}"
 
-        return StatusChange(task_id, current_status, new_status, note=github_info)
+        return StatusChange(task_id, current_status, new_status, note=github_info, warnings=warnings)
+
+    def _task_rule_reasons(self, task_id: str, current_status: str, new_status: str) -> list[str]:
+        """Why this move is risky: unfinished dependencies, open subtasks, or a skipped or reopened task (R8)"""
+        reasons = self._dependency_reasons(task_id, new_status)
+        if new_status == "Complete":
+            open_subtasks = self.db.execute_query(OPEN_SUBTASKS_SQL, [task_id], fetch_all=True, row_factory=True) or []
+            if open_subtasks:
+                listed = ", ".join(f"{row['id']} ({row['status']})" for row in open_subtasks)
+                reasons.append(f"Subtasks not finished: {listed}")
+            if current_status == "Not Started":
+                reasons.append("Completing a task that was never started")
+            elif current_status == "Blocked":
+                reasons.append("Completing a task that is still Blocked")
+        elif current_status == "Complete":
+            reasons.append(f"Reopening a Complete task as {new_status}")
+        return reasons
+
+    def _dependency_reasons(self, task_id: str, new_status: str) -> list[str]:
+        """Why starting or completing this task is risky: the tasks it waits on are not Complete (roadmap R8)"""
+        if new_status not in ("In Progress", "Complete"):
+            return []
+        rows = self.db.execute_query(UNMET_DEPENDENCIES_SQL, [task_id], fetch_all=True, row_factory=True) or []
+        unfinished = [f"{row['id']} ({row['status']})" for row in rows if row["status"] != "Abandoned"]
+        abandoned = [row["id"] for row in rows if row["status"] == "Abandoned"]
+        reasons = []
+        if unfinished:
+            reasons.append(f"Dependencies not finished: {', '.join(unfinished)}")
+        if abandoned:
+            reasons.append(
+                f"Dependencies abandoned: {', '.join(abandoned)}. Drop the link with delete_relationship, "
+                "or abandon this task too"
+            )
+        return reasons
 
     def _query_tasks(self, **params) -> list[TextContent]:
         """Query tasks with filters"""
@@ -965,6 +1015,24 @@ class TaskHandler(BaseHandler):
                 "ON dep.task_id = t.id WHERE dep.dependency_id = ? ORDER BY t.id",
                 task["id"],
             )
+
+            # An abandoned dependency will never finish, so say what to do about it (roadmap R8)
+            abandoned = (
+                self.db.execute_query(
+                    f"SELECT d.id FROM ({TASK_DEPENDENCIES_SQL}) dep JOIN tasks d ON d.id = dep.dependency_id "
+                    "WHERE dep.task_id = ? AND d.status = 'Abandoned' ORDER BY d.id",
+                    [task["id"]],
+                    fetch_all=True,
+                    row_factory=True,
+                )
+                or []
+            )
+            if abandoned:
+                listed = ", ".join(row["id"] for row in abandoned)
+                task_info += (
+                    f"\n⚠️ Abandoned dependencies: {listed}. Drop the link with delete_relationship, "
+                    "or abandon this task too.\n"
+                )
 
             # Architecture decisions this task implements (roadmap R9)
             task_info += self._format_linked(

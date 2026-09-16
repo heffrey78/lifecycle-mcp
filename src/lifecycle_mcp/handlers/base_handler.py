@@ -9,12 +9,13 @@ import logging
 import sqlite3
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from mcp.types import TextContent
 
 from ..database_manager import DatabaseManager
+from ..rules import ENFORCE, OFF, RULES_ENV_FLAG, rules_mode
 
 logger = logging.getLogger(__name__)
 
@@ -87,11 +88,14 @@ class StatusChange:
     to_status: str
     path: list[str] | None = None  # every status passed through, when a move takes more than one step
     note: str = ""  # further detail for the response, such as a GitHub sync
+    warnings: list[str] = field(default_factory=list)  # why the move is risky, in warn mode (roadmap R8)
 
     def data(self) -> dict[str, Any]:
         data = {"id": self.id, "from_status": self.from_status, "to_status": self.to_status}
         if self.path is not None:
             data["path"] = self.path
+        if self.warnings:
+            data["warnings"] = self.warnings
         return data
 
     def arrow(self) -> str:
@@ -216,9 +220,9 @@ class BaseHandler(ABC):
         records = []
         for row in rows:
             record = dict(row)
-            for field in json_fields:
-                if isinstance(record.get(field), str):
-                    record[field] = self._safe_json_loads(record[field])
+            for name in json_fields:
+                if isinstance(record.get(name), str):
+                    record[name] = self._safe_json_loads(record[name])
             records.append(record)
         return records
 
@@ -346,6 +350,20 @@ class BaseHandler(ABC):
             return EditResult([name for name, _, _ in edits], before["revision"] + 1, before)
 
     @staticmethod
+    def _rule_warnings(reasons: list[str]) -> list[str]:
+        """Turn the reasons a status move is risky into warnings, or into a refusal (roadmap R8, ADR-0004).
+
+        off checks nothing, warn reports the reasons and lets the move happen, enforce raises StatusRefused so
+        nothing is written. Rules that protect what the server maintains itself are always on and live elsewhere.
+        """
+        mode = rules_mode()
+        if not reasons or mode == OFF:
+            return []
+        if mode == ENFORCE:
+            raise StatusRefused(f"Refused by workflow rules ({RULES_ENV_FLAG}=enforce): " + "; ".join(reasons))
+        return reasons
+
+    @staticmethod
     def _describe_edit(result: EditResult) -> str:
         """Action line for an update tool's response"""
         if not result.changed:
@@ -381,8 +399,9 @@ class BaseHandler(ABC):
                 return self._create_error_response(str(e))
             except Exception as e:
                 return self._create_error_response(failure, e)
+            details = "\n".join([*(f"⚠️ {warning}" for warning in moved.warnings), moved.note]).strip()
             return self._create_structured_response(
-                "SUCCESS", f"{noun} {moved.id} updated", moved.data(), f"📈 {moved.arrow()}", moved.note
+                "SUCCESS", f"{noun} {moved.id} updated", moved.data(), f"📈 {moved.arrow()}", details
             )
 
         results: list[dict[str, Any]] = []
@@ -397,7 +416,8 @@ class BaseHandler(ABC):
                 self.logger.error(f"{reason} ({entity_id})")
             else:
                 results.append(moved.data())
-                lines.append(f"- {entity_id}: {moved.arrow()}" + (f" | {moved.note}" if moved.note else ""))
+                line = f"- {entity_id}: {moved.arrow()}" + (f" | {moved.note}" if moved.note else "")
+                lines.append(line + "".join(f"\n  ⚠️ {warning}" for warning in moved.warnings))
                 continue
             results.append({"id": entity_id, "error": reason})
             lines.append(f"- {entity_id}: refused: {reason}")

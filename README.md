@@ -556,6 +556,25 @@ The server maintains a comprehensive SQLite database with the following key enti
 
 - `LIFECYCLE_DB`: Path to SQLite database file (default: "./lifecycle.db")
 - `LIFECYCLE_GITHUB`: Set to `on` to create and sync a GitHub issue for each task (default: off). Requires an authenticated `gh` CLI and a github.com `origin` remote in the server's working directory. When off, the server never runs `gh` or `git`, and the `sync_github_tasks` tool is not listed.
+- `LIFECYCLE_RULES`: How strictly risky status moves are treated - `off`, `warn` or `enforce` (default: `warn`). Anything else falls back to `warn`.
+
+### Workflow Rules
+
+A status move can be risky without being wrong. `LIFECYCLE_RULES` decides what happens then:
+
+- **`warn` (default):** the move happens exactly as it does today, and the response says why it was risky, in the text and in `structuredContent` under `warnings` - per record for a list of IDs.
+- **`enforce`:** the move is refused before anything is written, naming what blocks it.
+- **`off`:** nothing is checked.
+
+The rules:
+
+- **Unfinished dependencies:** starting or completing a task whose dependencies are not all Complete names them. An abandoned dependency is named separately, with the two ways out: drop the link with `delete_relationship`, or abandon the waiting task too.
+- **Open subtasks:** completing a task while a subtask is neither Complete nor Abandoned names the open subtasks.
+- **Skips and reopens:** completing a task that was never started or is still Blocked, and reopening a Complete task, each say so.
+- **The Implemented gate:** a requirement reaching Implemented while the tasks implementing it are open names them.
+- **Decision moves:** an architecture decision moving outside its vocabulary says where that status usually goes. The ADR statuses and the TDD chain are separate sets.
+
+Three rules are always on, whatever the mode, because they protect what the server maintains itself: a requirement cannot be Validated while a linked task is open, Superseded needs a `supersedes` link, and a requirement's status still follows its transition map.
 - `LIFECYCLE_CALL_LOG`: Path to a file where the server appends one JSON line per tool call: tool name, argument names (not values), duration, whether it failed and response size. Off by default. `scripts/tool_usage_report.py` summarises these logs.
 
 ## Troubleshooting

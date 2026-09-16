@@ -87,6 +87,14 @@ REQUIREMENT_TRANSITIONS = {
     "Validated": ["Deprecated"],
     "Deprecated": [],
 }
+# The tasks implementing a requirement that are not Complete, for the Implemented gate (roadmap R8).
+OPEN_TASKS_SQL = """
+    SELECT t.id, t.status FROM tasks t JOIN relationships rel ON rel.target_id = t.id
+    WHERE rel.source_type = 'requirement' AND rel.source_id = ?
+      AND rel.target_type = 'task' AND rel.relationship_type = 'implements' AND t.status != 'Complete'
+    ORDER BY t.id
+"""
+
 # A multi-step move may end at these statuses but never pass through them: tasks and ADRs are planned against an
 # approved requirement, and validation is a deliberate step (ADR-0003).
 REQUIREMENT_STOP_STATUSES = ("Approved", "Validated")
@@ -746,6 +754,10 @@ Guidelines:
                     f"All tasks must have 'Complete' status before requirement validation."
                 )
 
+        # Reaching Implemented with open tasks is a workflow rule: warn or enforce, unlike the Validated gate
+        # above, which is always on (roadmap R8, ADR-0004).
+        warnings = self._rule_warnings(self._implemented_gate_reasons(requirement_id, path))
+
         # One UPDATE per step, so the status trigger logs each step; all of them or none (ADR-0003).
         # CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
         with self.db.transaction() as cur:
@@ -760,7 +772,19 @@ Guidelines:
                     [requirement_id, "MCP User", params["comment"]],
                 )
 
-        return StatusChange(requirement_id, current_status, new_status, path if len(path) > 2 else None)
+        return StatusChange(
+            requirement_id, current_status, new_status, path if len(path) > 2 else None, warnings=warnings
+        )
+
+    def _implemented_gate_reasons(self, requirement_id: str, path: list[str]) -> list[str]:
+        """Why reaching Implemented is risky: tasks implementing the requirement are still open (roadmap R8)"""
+        if "Implemented" not in path[1:]:
+            return []
+        rows = self.db.execute_query(OPEN_TASKS_SQL, [requirement_id], fetch_all=True, row_factory=True) or []
+        if not rows:
+            return []
+        listed = ", ".join(f"{row['id']} ({row['status']})" for row in rows)
+        return [f"Tasks not Complete: {listed}"]
 
     def _query_requirements(self, **params) -> list[TextContent]:
         """Query requirements with filters"""

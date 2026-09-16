@@ -152,7 +152,7 @@ The server exposes 23 tools (24 with `LIFECYCLE_GITHUB=on`) across 7 handler mod
 
 **Documentation Export (2 tools):**
 - `export_project_documentation` - Generate project docs
-- `create_architectural_diagrams` - Generate architecture diagrams
+- `create_architectural_diagrams` - Mermaid diagrams drawn from the stored links
 
 **Status Monitoring (1 tool):**
 - `get_project_status` - Project health dashboard with every blocked or waiting item, with metrics as structured data

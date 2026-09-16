@@ -506,7 +506,8 @@ Export comprehensive project documentation in structured markdown format.
 Generate Mermaid diagrams for project architecture and relationships visualization.
 
 **Parameters:**
-- `diagram_type` (optional): Type of diagram - "requirements", "tasks", "architecture", "full_project", "directory_structure", "dependencies" (default: "full_project")
+- `diagram_type` (optional): Type of diagram - "requirements", "tasks", "architecture", "full_project", "dependencies" (default: "full_project")
+- `limit` (optional): Cap each kind of record. The response says what was drawn and what the limit left out; without it nothing is capped
 - `requirement_ids` (optional): Array of specific requirement IDs to include
 - `include_relationships` (optional): Include relationship arrows in diagrams (default: true)
 - `output_format` (optional): Output format - "mermaid", "markdown_with_mermaid" (default: "mermaid")
@@ -514,12 +515,13 @@ Generate Mermaid diagrams for project architecture and relationships visualizati
 **Returns:** Mermaid diagram code or markdown-wrapped diagram.
 
 **Diagram Types:**
-- **requirements**: Flowchart showing requirement hierarchy by type with status colors
-- **tasks**: Task hierarchy with parent-child relationships and status indicators
-- **architecture**: Architecture decisions with status-based styling
-- **full_project**: High-level overview showing relationships between requirements, tasks, and architecture
-- **directory_structure**: Project directory structure visualization
-- **dependencies**: Task dependency graph showing blocking relationships
+- **requirements**: Requirements grouped by type, with parent and depends edges, in status colours
+- **tasks**: Tasks with subtask, dependency and blocks edges, in status colours
+- **architecture**: Decisions, what they supersede, and the requirements each one addresses
+- **full_project**: The whole graph - requirements, tasks and decisions with every link between them
+- **dependencies**: The tasks that wait on other tasks, named rather than bare IDs
+
+Every edge reads source to target with a label, so a dependency points at what it waits on. Deprecated requirements and decisions are left out, and the response says how many were. Each type writes one file, `{diagram_type}-diagram.mmd` or `.md`, overwritten on each render.
 
 **Status Colors:**
 - Requirements: Draft (red), Under Review (orange), Approved (blue), Ready (green), etc.

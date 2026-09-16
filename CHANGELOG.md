@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Diagrams that show structure (roadmap R13)
+
+Diagrams drew inventories: boxes hung off category nodes, at most 20 edges and only requirement-to-task ones, with
+the first 10 requirements, 10 tasks and 5 decisions kept and the rest dropped without a word (F-16). They now draw
+the graph that is actually in `relationships`. The tool count stays 23; definitions go from 12,512 to 12,580
+characters.
+
+**Breaking:**
+- Diagram files have stable names: `{diagram_type}-diagram.mmd` or `.md`, overwritten on each render. They used to
+  carry a timestamp and pile up in `exports/` (F-17). Anything matching the old names needs updating.
+- `directory_structure` is removed. It returned a hard-coded `src/docs/tests` stub unrelated to the project, and is
+  now refused like any other unknown diagram type.
+- Edges read source to target with a label, one rule across every diagram, so a dependency points at what it waits
+  on. The dependencies and tasks diagrams used to draw the reverse, unlabelled.
+
+#### Added
+- `full_project` draws requirement-implements-task, requirement-addresses-ADR, task-implements-ADR and
+  ADR-supersedes-ADR edges. The architecture diagram shows supersession and the requirements each decision serves;
+  the requirements diagram adds parent and depends edges; the tasks diagram adds subtask, dependency and blocks
+  edges; the dependencies diagram names tasks instead of bare IDs.
+- `limit` caps each kind of record. The response says what was drawn and what the limit left out, so nothing goes
+  missing quietly. Without it nothing is capped.
+- Deprecated requirements and decisions are left out by default and counted in the response.
+- Node labels keep 60 characters of the title and escape the quotes and brackets that used to break mermaid.
+
 ### Configurable workflow rules (roadmap R8, ADR-0004)
 
 `LIFECYCLE_RULES` chooses `off`, `warn` or `enforce`. **warn is the default**: every call keeps the outcome it has

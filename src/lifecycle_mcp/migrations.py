@@ -701,6 +701,119 @@ def add_blocked_reason(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE tasks ADD COLUMN blocked_reason TEXT")
 
 
+# --- migration 16 ------------------------------------------------------------------------------
+
+# A task that has a parent is counted through that parent, not again on its own: create_task links every task to
+# its requirements, subtasks included, so counting all implements links reported a split task twice (F-22, R14).
+_IS_LEAF = """NOT EXISTS (
+    SELECT 1 FROM relationships child
+    WHERE child.source_type = 'task' AND child.target_type = 'task'
+      AND child.target_id = rel.target_id AND child.relationship_type = 'parent'
+)"""
+_LEAF_TASK_COUNT = f"""(
+    SELECT COUNT(*) FROM relationships rel
+    WHERE rel.source_type = 'requirement' AND rel.source_id = {{req}}
+      AND rel.target_type = 'task' AND rel.relationship_type = 'implements' AND {_IS_LEAF}
+)"""
+_LEAF_TASKS_COMPLETED = f"""(
+    SELECT COUNT(*) FROM relationships rel JOIN tasks t ON t.id = rel.target_id
+    WHERE rel.source_type = 'requirement' AND rel.source_id = {{req}} AND rel.target_type = 'task'
+      AND rel.relationship_type = 'implements' AND t.status = 'Complete' AND {_IS_LEAF}
+)"""
+
+LEAF_COUNT_TRIGGER_SQL = [
+    f"""CREATE TRIGGER update_requirement_task_count_insert
+    AFTER INSERT ON relationships
+    WHEN {_REQUIREMENT_TASK_LINK.format(row="NEW")}
+    BEGIN
+        UPDATE requirements
+        SET task_count = {_LEAF_TASK_COUNT.format(req="NEW.source_id")},
+            tasks_completed = {_LEAF_TASKS_COMPLETED.format(req="NEW.source_id")}
+        WHERE id = NEW.source_id;
+    END""",
+    f"""CREATE TRIGGER update_requirement_task_count_delete
+    AFTER DELETE ON relationships
+    WHEN {_REQUIREMENT_TASK_LINK.format(row="OLD")}
+    BEGIN
+        UPDATE requirements
+        SET task_count = {_LEAF_TASK_COUNT.format(req="OLD.source_id")},
+            tasks_completed = {_LEAF_TASKS_COMPLETED.format(req="OLD.source_id")}
+        WHERE id = OLD.source_id;
+    END""",
+    f"""CREATE TRIGGER update_requirement_task_completion
+    AFTER UPDATE OF status ON tasks
+    WHEN NEW.status = 'Complete' OR OLD.status = 'Complete'
+    BEGIN
+        UPDATE requirements
+        SET tasks_completed = {_LEAF_TASKS_COMPLETED.format(req="requirements.id")}
+        WHERE id IN (
+            SELECT source_id FROM relationships
+            WHERE source_type = 'requirement' AND target_type = 'task'
+              AND target_id = NEW.id AND relationship_type = 'implements'
+        );
+    END""",
+]
+
+# A parent link changes which tasks are leaves, so the counters follow it too (roadmap R14).
+LEAF_PARENT_TRIGGER_SQL = [
+    f"""CREATE TRIGGER update_requirement_task_count_parent_insert
+    AFTER INSERT ON relationships
+    WHEN NEW.source_type = 'task' AND NEW.target_type = 'task' AND NEW.relationship_type = 'parent'
+    BEGIN
+        UPDATE requirements
+        SET task_count = {_LEAF_TASK_COUNT.format(req="requirements.id")},
+            tasks_completed = {_LEAF_TASKS_COMPLETED.format(req="requirements.id")}
+        WHERE id IN (
+            SELECT source_id FROM relationships
+            WHERE source_type = 'requirement' AND target_type = 'task' AND relationship_type = 'implements'
+              AND target_id IN (NEW.source_id, NEW.target_id)
+        );
+    END""",
+    f"""CREATE TRIGGER update_requirement_task_count_parent_delete
+    AFTER DELETE ON relationships
+    WHEN OLD.source_type = 'task' AND OLD.target_type = 'task' AND OLD.relationship_type = 'parent'
+    BEGIN
+        UPDATE requirements
+        SET task_count = {_LEAF_TASK_COUNT.format(req="requirements.id")},
+            tasks_completed = {_LEAF_TASKS_COMPLETED.format(req="requirements.id")}
+        WHERE id IN (
+            SELECT source_id FROM relationships
+            WHERE source_type = 'requirement' AND target_type = 'task' AND relationship_type = 'implements'
+              AND target_id IN (OLD.source_id, OLD.target_id)
+        );
+    END""",
+]
+
+
+def count_leaf_tasks_only(conn: sqlite3.Connection) -> None:
+    """Count a requirement's leaf tasks, not a parent and its subtasks both (roadmap R14, F-22).
+
+    Rebuilds the counter triggers and recomputes the stored counters. Only task_count and tasks_completed change:
+    no status is touched, and rows already correct are left alone so updated_at stays put.
+    """
+    for trigger in (
+        "update_requirement_task_count_insert",
+        "update_requirement_task_count_delete",
+        "update_requirement_task_completion",
+    ):
+        conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+    for statement in LEAF_COUNT_TRIGGER_SQL + LEAF_PARENT_TRIGGER_SQL:
+        conn.execute(statement)
+
+    conn.execute(f"""
+        UPDATE requirements
+        SET task_count = counts.total, tasks_completed = counts.done
+        FROM (
+            SELECT id,
+                   {_LEAF_TASK_COUNT.format(req="r.id")} AS total,
+                   {_LEAF_TASKS_COMPLETED.format(req="r.id")} AS done
+            FROM requirements r
+        ) AS counts
+        WHERE counts.id = requirements.id
+          AND (requirements.task_count IS NOT counts.total OR requirements.tasks_completed IS NOT counts.done)
+    """)
+
+
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "GitHub integration fields", add_github_integration_columns),
     (2, "GitHub sync metadata fields", add_github_sync_metadata_columns),
@@ -717,6 +830,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (13, "Repair architecture updated_at stored as the text CURRENT_TIMESTAMP", repair_literal_updated_at),
     (14, "Allow supersedes links and keep superseded_by in step", allow_supersedes_links),
     (15, "Keep the reason a task is blocked", add_blocked_reason),
+    (16, "Count leaf tasks only in requirement progress", count_leaf_tasks_only),
 ]
 
 

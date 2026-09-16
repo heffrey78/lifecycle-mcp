@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Evidence on tasks, and fuller exports (roadmap R12)
+
+Test results, commits and files had no structured home, so evidence went into free-text comments - "21 tests
+passing" in a comment was how the lab session recorded it - and `export_project_documentation` left comments out
+entirely, so a hand-off document lost the reasoning behind the work (F-26, F-31). The tool count stays 23;
+definitions go from 12,580 to 12,749 characters.
+
+#### Added
+- `update_task_status` takes an optional `commit` and an optional `evidence` summary and keeps them on the task,
+  the way the comment on a move to Blocked is kept as its reason. A later move that omits them leaves them in
+  place, so the record of why a task is Complete survives; passing new values replaces them. Both show in the
+  task's details. Migration 17 adds the two columns.
+- Exported task documentation carries a task's commit and evidence, and all three exported files carry the
+  comments stored against their records.
+
 ### Short IDs and honest progress (roadmap R14)
 
 #### Added

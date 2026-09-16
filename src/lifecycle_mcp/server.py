@@ -27,6 +27,7 @@ from .handlers import (
     TaskHandler,
 )
 from .handlers.base_handler import ErrorResult, StructuredResult
+from .short_ids import UnknownAlias, resolve_arguments
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +174,12 @@ class LifecycleMCPServer:
             raise ToolCallError(f"[ERROR] Unknown tool: {name}")
 
         logger.debug(f"Routing tool '{name}' to {handler.__class__.__name__}")
+        try:
+            # Short IDs are resolved here, so every tool takes them and no handler has to know (roadmap R14).
+            arguments = resolve_arguments(self.db_manager, arguments)
+        except UnknownAlias as e:
+            raise ToolCallError(f"[ERROR] {e}") from e
+
         try:
             result = await handler.handle_tool_call(name, arguments)
         except Exception as e:

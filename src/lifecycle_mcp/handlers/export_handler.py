@@ -109,17 +109,11 @@ class ExportHandler(BaseHandler):
                     "properties": {
                         "diagram_type": {
                             "type": "string",
-                            "enum": [
-                                "requirements",
-                                "tasks",
-                                "architecture",
-                                "full_project",
-                                "directory_structure",
-                                "dependencies",
-                            ],
+                            "enum": ["requirements", "tasks", "architecture", "full_project", "dependencies"],
                         },
                         "requirement_ids": {"type": "array", "items": {"type": "string"}},
                         "include_relationships": {"type": "boolean", "default": True},
+                        "limit": {"type": "integer", "description": "Cap each kind of record; the rest are reported"},
                         "output_format": {
                             "type": "string",
                             "enum": ["mermaid", "markdown_with_mermaid"],
@@ -409,40 +403,27 @@ class ExportHandler(BaseHandler):
             output_path = params.get("output_path", "exports")
 
             # Validate diagram type
-            valid_types = [
-                "requirements",
-                "tasks",
-                "architecture",
-                "full_project",
-                "directory_structure",
-                "dependencies",
-            ]
+            valid_types = ["requirements", "tasks", "architecture", "full_project", "dependencies"]
             if diagram_type not in valid_types:
                 return self._create_error_response(
                     f"Invalid diagram type: {diagram_type}. Valid types are: {', '.join(valid_types)}"
                 )
 
             mermaid_content = ""
-            diagram = None
             requirement_ids = params.get("requirement_ids", [])
+            limit = params.get("limit")
 
             if diagram_type == "requirements":
-                diagram = self._generate_requirements_diagram(requirement_ids)
-                mermaid_content = diagram.content
+                diagram = self._generate_requirements_diagram(requirement_ids, limit)
             elif diagram_type == "tasks":
-                diagram = self._generate_tasks_diagram(requirement_ids)
-                mermaid_content = diagram.content
+                diagram = self._generate_tasks_diagram(requirement_ids, limit)
             elif diagram_type == "architecture":
-                diagram = self._generate_architecture_diagram(requirement_ids)
-                mermaid_content = diagram.content
+                diagram = self._generate_architecture_diagram(requirement_ids, limit)
             elif diagram_type == "full_project":
-                diagram = self._generate_full_project_diagram(include_relationships, requirement_ids)
-                mermaid_content = diagram.content
-            elif diagram_type == "directory_structure":
-                mermaid_content = self._generate_directory_structure_diagram()
-            elif diagram_type == "dependencies":
-                diagram = self._generate_dependencies_diagram(requirement_ids)
-                mermaid_content = diagram.content
+                diagram = self._generate_full_project_diagram(include_relationships, requirement_ids, limit)
+            else:
+                diagram = self._generate_dependencies_diagram(requirement_ids, limit)
+            mermaid_content = diagram.content
 
             if not mermaid_content:
                 return self._create_above_fold_response(
@@ -483,7 +464,7 @@ class ExportHandler(BaseHandler):
             # Create above-the-fold response
             key_info = f"{diagram_type.replace('_', ' ').title()} diagram generated"
             # What the diagram drew and left out, so nothing disappears silently (roadmap R13).
-            action_info = diagram.summary() if diagram else f"📊 {output_format} format"
+            action_info = diagram.summary()
             if saved_file_path:
                 action_info += f" | Saved to {saved_file_path}"
 
@@ -492,9 +473,10 @@ class ExportHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to create architectural diagram", e)
 
-    def _generate_requirements_diagram(self, requirement_ids: list[str] = None) -> Diagram:
+    def _generate_requirements_diagram(self, requirement_ids: list[str] = None, limit: int | None = None) -> Diagram:
         """Requirements grouped by type, with the links between them (roadmap R13)"""
         requirements, left_out = self._diagram_requirements(requirement_ids)
+        requirements, over_limit = self._capped(requirements, limit)
         if not requirements:
             return Diagram("")
 
@@ -520,11 +502,12 @@ class ExportHandler(BaseHandler):
                     edge = (target, source) if link == "parent" else (source, target)
                     lines.append(f"    {node_id(edge[0])} -->|{label}| {node_id(edge[1])}")
 
-        return Diagram("\n".join(lines) + "\n", {"requirements": len(requirements)}, self._left_out(left_out, 0))
+        omitted = self._omitted(deprecated_requirements=left_out, requirements_over_the_limit=over_limit)
+        return Diagram("\n".join(lines) + "\n", {"requirements": len(requirements)}, omitted)
 
-    def _generate_tasks_diagram(self, requirement_ids: list[str] = None) -> Diagram:
+    def _generate_tasks_diagram(self, requirement_ids: list[str] = None, limit: int | None = None) -> Diagram:
         """Tasks with their subtasks and the tasks they wait on (roadmap R13)"""
-        tasks = self._diagram_tasks(requirement_ids)
+        tasks, over_limit = self._capped(self._diagram_tasks(requirement_ids), limit)
         if not tasks:
             return Diagram("")
 
@@ -541,11 +524,13 @@ class ExportHandler(BaseHandler):
                 if source in drawn and target in drawn:
                     lines.append(f"    {node_id(source)} -->|{label}| {node_id(target)}")
 
-        return Diagram("\n".join(lines) + "\n", {"tasks": len(tasks)})
+        omitted = self._omitted(tasks_over_the_limit=over_limit)
+        return Diagram("\n".join(lines) + "\n", {"tasks": len(tasks)}, omitted)
 
-    def _generate_architecture_diagram(self, requirement_ids: list[str] = None) -> Diagram:
+    def _generate_architecture_diagram(self, requirement_ids: list[str] = None, limit: int | None = None) -> Diagram:
         """Decisions, what they supersede, and the requirements they address (roadmap R13)"""
         decisions, left_out = self._diagram_decisions(requirement_ids)
+        decisions, over_limit = self._capped(decisions, limit)
         if not decisions:
             return Diagram("")
 
@@ -574,17 +559,22 @@ class ExportHandler(BaseHandler):
             lines.append(f"    {node_id(source)} -->|addresses| {node_id(target)}")
 
         counts = {"decisions": len(decisions), "requirements": len({source for source, _ in addressed})}
-        return Diagram("\n".join(lines) + "\n", counts, self._left_out(0, left_out))
+        omitted = self._omitted(deprecated_decisions=left_out, decisions_over_the_limit=over_limit)
+        return Diagram("\n".join(lines) + "\n", counts, omitted)
 
-    def _generate_full_project_diagram(self, include_relationships: bool, requirement_ids: list[str] = None) -> Diagram:
+    def _generate_full_project_diagram(
+        self, include_relationships: bool, requirement_ids: list[str] = None, limit: int | None = None
+    ) -> Diagram:
         """The project graph: every non-deprecated record, with the links between them (roadmap R13).
 
         Nothing is capped: the old version kept the first 10 requirements, 10 tasks and 5 decisions and drew at most
         20 edges, all silently. Edges come from relationships and are kept only when both ends are drawn.
         """
         requirements, requirements_left_out = self._diagram_requirements(requirement_ids)
-        tasks = self._diagram_tasks(requirement_ids)
+        requirements, requirements_over = self._capped(requirements, limit)
+        tasks, tasks_over = self._capped(self._diagram_tasks(requirement_ids), limit)
         decisions, decisions_left_out = self._diagram_decisions(requirement_ids)
+        decisions, decisions_over = self._capped(decisions, limit)
         if not (requirements or tasks or decisions):
             return Diagram("")
 
@@ -606,8 +596,14 @@ class ExportHandler(BaseHandler):
                         lines.append(f"    {node_id(source)} -->|{label}| {node_id(target)}")
 
         counts = {"requirements": len(requirements), "tasks": len(tasks), "decisions": len(decisions)}
-        left_out = {"deprecated requirements": requirements_left_out, "deprecated decisions": decisions_left_out}
-        return Diagram("\n".join(lines) + "\n", counts, {kind: n for kind, n in left_out.items() if n})
+        omitted = self._omitted(
+            deprecated_requirements=requirements_left_out,
+            deprecated_decisions=decisions_left_out,
+            requirements_over_the_limit=requirements_over,
+            tasks_over_the_limit=tasks_over,
+            decisions_over_the_limit=decisions_over,
+        )
+        return Diagram("\n".join(lines) + "\n", counts, omitted)
 
     def _diagram_requirements(self, requirement_ids: list[str] = None) -> tuple[list[Any], int]:
         """Requirements to draw, and how many deprecated ones were left out (roadmap R13)"""
@@ -663,10 +659,16 @@ class ExportHandler(BaseHandler):
         return kept, len(records) - len(kept)
 
     @staticmethod
-    def _left_out(requirements: int, decisions: int) -> dict[str, int]:
-        """The omitted counts a Diagram reports, without the zeroes"""
-        counts = {"deprecated requirements": requirements, "deprecated decisions": decisions}
-        return {kind: count for kind, count in counts.items() if count}
+    def _omitted(**counts: int) -> dict[str, int]:
+        """What a Diagram left out, without the zeroes: keyword names become the words in the response"""
+        return {kind.replace("_", " "): count for kind, count in counts.items() if count}
+
+    @staticmethod
+    def _capped(records: list[Any], limit: int | None) -> tuple[list[Any], int]:
+        """The records to draw and how many the limit cut; without a limit nothing is cut (roadmap R13)"""
+        if limit is None or limit < 0 or len(records) <= limit:
+            return records, 0
+        return records[:limit], len(records) - limit
 
     def _diagram_links(self, source_type: str, target_type: str, relationship_type: str) -> list[tuple[str, str]]:
         """Every link of one kind, as (source_id, target_id)"""
@@ -679,18 +681,7 @@ class ExportHandler(BaseHandler):
         )
         return [(row["source_id"], row["target_id"]) for row in rows or []]
 
-    def _generate_directory_structure_diagram(self) -> str:
-        """Generate directory structure diagram"""
-        return """flowchart TD
-    Root[Project Root]
-    Src[src/]
-    Docs[docs/]
-    Tests[tests/]
-    Root --> Src
-    Root --> Docs
-    Root --> Tests"""
-
-    def _generate_dependencies_diagram(self, requirement_ids: list[str] = None) -> Diagram:
+    def _generate_dependencies_diagram(self, requirement_ids: list[str] = None, limit: int | None = None) -> Diagram:
         """The tasks that wait on other tasks, with titles rather than bare IDs (roadmap R13)"""
         tasks = {task["id"]: task for task in self._diagram_tasks(requirement_ids)}
         edges = []
@@ -698,6 +689,7 @@ class ExportHandler(BaseHandler):
             edges += [(source, target, label) for source, target in self._diagram_links("task", "task", link)]
         edges += [(source, target, "blocks") for source, target in self._diagram_links("task", "task", "blocks")]
         edges = [edge for edge in edges if edge[0] in tasks and edge[1] in tasks]
+        edges, over_limit = self._capped(edges, limit)
 
         if not edges:
             return Diagram("flowchart TD\n    NoDeps[No task dependencies found]\n")
@@ -711,7 +703,8 @@ class ExportHandler(BaseHandler):
         for source, target, label in edges:
             lines.append(f"    {node_id(source)} -->|{label}| {node_id(target)}")
 
-        return Diagram("\n".join(lines) + "\n", {"tasks": len(drawn), "dependencies": len(edges)})
+        omitted = self._omitted(dependencies_over_the_limit=over_limit)
+        return Diagram("\n".join(lines) + "\n", {"tasks": len(drawn), "dependencies": len(edges)}, omitted)
 
     def _get_diagram_file_extension(self, output_format: str) -> str:
         """Get appropriate file extension based on output format"""
@@ -721,17 +714,8 @@ class ExportHandler(BaseHandler):
             return ".mmd"
 
     def _generate_diagram_filename(self, diagram_type: str, output_format: str) -> str:
-        """Generate structured filename for diagram files"""
-        # Clean diagram_type for safe filename
-        safe_diagram_type = diagram_type.replace("_", "-").lower()
-
-        # Generate timestamp
-        timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-
-        # Get file extension
-        extension = self._get_diagram_file_extension(output_format)
-
-        return f"{safe_diagram_type}-diagram-{timestamp}{extension}"
+        """One file per diagram type, overwritten on each render, so they stop piling up (roadmap R13, F-17)"""
+        return f"{diagram_type}-diagram{self._get_diagram_file_extension(output_format)}"
 
     def _validate_output_path(self, output_path: str) -> bool:
         """Validate output path for security (prevent path traversal)"""

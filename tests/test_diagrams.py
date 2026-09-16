@@ -132,3 +132,45 @@ async def test_labels_survive_quotes_and_brackets(mcp_server, tmp_path):  # noqa
     _, content = await diagram(mcp_server, tmp_path, diagram_type="requirements")
 
     assert f'{node(record_id)}["{record_id}<br/>Search #quot;notes#quot; (beta)"]' in content
+
+
+# --- files, limits and the removed type (TASK-0062) -----------------------------------------------------------
+
+
+async def test_rendering_the_same_type_twice_leaves_one_file(mcp_server, tmp_path):  # noqa: F811
+    await populate(mcp_server)
+
+    await diagram(mcp_server, tmp_path)
+    await diagram(mcp_server, tmp_path)
+
+    assert [path.name for path in sorted(tmp_path.iterdir())] == ["full_project-diagram.mmd"]
+
+
+async def test_a_limit_caps_each_kind_and_says_what_it_left_out(mcp_server, tmp_path):  # noqa: F811
+    ids = await populate(mcp_server)
+    for number in range(4):
+        await add_task(mcp_server, ids["requirement"], f"Task {number}", "P2")
+
+    result, content = await diagram(mcp_server, tmp_path, limit=2)
+
+    assert "2 tasks" in text_of(result) and "3 tasks over the limit" in text_of(result)
+    assert content.count('["TASK-') == 2
+
+
+async def test_without_a_limit_nothing_is_over_it(mcp_server, tmp_path):  # noqa: F811
+    await populate(mcp_server)
+
+    result, _ = await diagram(mcp_server, tmp_path)
+
+    assert "over the limit" not in text_of(result)
+
+
+async def test_directory_structure_is_no_longer_a_diagram_type(mcp_server, tmp_path):  # noqa: F811
+    result = await call(
+        mcp_server,
+        "create_architectural_diagrams",
+        {"diagram_type": "directory_structure", "output_path": str(tmp_path)},
+    )
+
+    assert result.isError is True
+    assert "directory_structure" in text_of(result) or "diagram_type" in text_of(result)

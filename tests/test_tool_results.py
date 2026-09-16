@@ -123,7 +123,7 @@ async def test_every_read_query_and_report_tool_succeeds_on_populated_db(mcp_ser
     ]
     calls += [
         ("create_architectural_diagrams", {"diagram_type": kind, "output_path": str(tmp_path / "diagrams")})
-        for kind in ("requirements", "tasks", "architecture", "full_project", "directory_structure", "dependencies")
+        for kind in ("requirements", "tasks", "architecture", "full_project", "dependencies")
     ]
 
     failures = []

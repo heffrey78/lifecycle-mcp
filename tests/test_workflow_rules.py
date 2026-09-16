@@ -78,3 +78,56 @@ async def test_a_list_move_warns_for_the_task_it_applies_to(mcp_server):  # noqa
     assert "warnings" not in result.structuredContent["results"][0]
     assert result.structuredContent["results"][1]["warnings"] == [f"Dependencies not finished: {schema} (In Progress)"]
     assert f"  ⚠️ Dependencies not finished: {schema} (In Progress)" in text_of(result)
+
+
+# --- parents, skips and reopens (TASK-0056) -------------------------------------------------------------------
+
+
+async def subtask_of(server, requirement_id: str, parent_id: str, title: str) -> str:
+    arguments = {"requirement_ids": [requirement_id], "title": title, "priority": "P2", "parent_task_id": parent_id}
+    result = await call(server, "create_task", arguments)
+    assert not result.isError, text_of(result)
+    return result.structuredContent["id"]
+
+
+async def warnings_for(server, task_id: str, new_status: str) -> list[str]:
+    result = await call(server, "update_task_status", {"task_id": task_id, "new_status": new_status})
+    assert result.isError is False, text_of(result)
+    return result.structuredContent.get("warnings", [])
+
+
+async def test_completing_a_parent_with_open_subtasks_names_them(mcp_server):  # noqa: F811
+    ids = await populate(mcp_server)
+    parent = ids["task"]
+    child = await subtask_of(mcp_server, ids["requirement"], parent, "Index writer")
+
+    assert await warnings_for(mcp_server, parent, "Complete") == [
+        f"Subtasks not finished: {child} (Not Started)",
+        "Completing a task that was never started",
+    ]
+
+    await move(mcp_server, child, "Complete")
+    await move(mcp_server, parent, "In Progress")
+    assert await warnings_for(mcp_server, parent, "Complete") == []
+
+
+async def test_skips_and_reopens_are_named(mcp_server):  # noqa: F811
+    ids = await populate(mcp_server)
+    task = ids["task"]
+
+    assert await warnings_for(mcp_server, task, "Complete") == ["Completing a task that was never started"]
+    assert await warnings_for(mcp_server, task, "In Progress") == ["Reopening a Complete task as In Progress"]
+    assert await warnings_for(mcp_server, task, "Blocked") == []
+    assert await warnings_for(mcp_server, task, "Complete") == ["Completing a task that is still Blocked"]
+
+
+async def test_enforce_refuses_a_skipped_completion_and_the_task_stays_put(mcp_server, monkeypatch):  # noqa: F811
+    ids = await populate(mcp_server)
+    monkeypatch.setenv(RULES_ENV_FLAG, "enforce")
+
+    result = await start(mcp_server, ids["task"], "Complete")
+
+    assert result.isError is True and "Completing a task that was never started" in text_of(result)
+    assert f"Task {ids['task']} [Not Started]" in text_of(
+        await call(mcp_server, "get_details", {"entity_id": ids["task"]})
+    )

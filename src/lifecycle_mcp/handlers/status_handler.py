@@ -20,11 +20,14 @@ BLOCKED_TASKS_SQL = f"""
         SELECT t.id, t.title, t.status, t.priority, t.blocked_reason,
                (SELECT GROUP_CONCAT(d.id, ', ') FROM ({TASK_DEPENDENCIES_SQL}) dep
                 JOIN tasks d ON d.id = dep.dependency_id
-                WHERE dep.task_id = t.id AND d.status != 'Complete') AS waiting_on
+                WHERE dep.task_id = t.id AND d.status NOT IN ('Complete', 'Abandoned')) AS waiting_on,
+               (SELECT GROUP_CONCAT(d.id, ', ') FROM ({TASK_DEPENDENCIES_SQL}) dep
+                JOIN tasks d ON d.id = dep.dependency_id
+                WHERE dep.task_id = t.id AND d.status = 'Abandoned') AS abandoned
         FROM tasks t
         WHERE t.status IN ('Blocked', 'Not Started')
     )
-    WHERE status = 'Blocked' OR waiting_on IS NOT NULL
+    WHERE status = 'Blocked' OR waiting_on IS NOT NULL OR abandoned IS NOT NULL
     ORDER BY priority, id
 """
 
@@ -124,6 +127,9 @@ class StatusHandler(BaseHandler):
                         report += f"  Reason: {item['reason'] or 'Not given'}\n"
                     if item["blocked_by"]:
                         report += f"  Waiting on: {', '.join(item['blocked_by'])}\n"
+                    if item.get("abandoned_dependencies"):
+                        listed = ", ".join(item["abandoned_dependencies"])
+                        report += f"  Abandoned dependencies: {listed} (drop the link, or abandon this task too)\n"
 
             changed = changes_since_review(self.db)
             if changed:
@@ -168,8 +174,9 @@ class StatusHandler(BaseHandler):
             )
             or []
         )
-        items = [
-            {
+        items = []
+        for row in tasks:
+            item = {
                 "type": "task",
                 "id": row["id"],
                 "title": row["title"],
@@ -177,8 +184,11 @@ class StatusHandler(BaseHandler):
                 "reason": row["blocked_reason"],
                 "blocked_by": row["waiting_on"].split(", ") if row["waiting_on"] else [],
             }
-            for row in tasks
-        ]
+            # An abandoned dependency is never going to finish, so it is called out rather than listed as a wait
+            # (roadmap R8).
+            if row["abandoned"]:
+                item["abandoned_dependencies"] = row["abandoned"].split(", ")
+            items.append(item)
         items += [
             {
                 "type": "requirement",

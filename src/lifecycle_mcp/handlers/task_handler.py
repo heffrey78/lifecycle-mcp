@@ -1016,6 +1016,24 @@ class TaskHandler(BaseHandler):
                 task["id"],
             )
 
+            # An abandoned dependency will never finish, so say what to do about it (roadmap R8)
+            abandoned = (
+                self.db.execute_query(
+                    f"SELECT d.id FROM ({TASK_DEPENDENCIES_SQL}) dep JOIN tasks d ON d.id = dep.dependency_id "
+                    "WHERE dep.task_id = ? AND d.status = 'Abandoned' ORDER BY d.id",
+                    [task["id"]],
+                    fetch_all=True,
+                    row_factory=True,
+                )
+                or []
+            )
+            if abandoned:
+                listed = ", ".join(row["id"] for row in abandoned)
+                task_info += (
+                    f"\n⚠️ Abandoned dependencies: {listed}. Drop the link with delete_relationship, "
+                    "or abandon this task too.\n"
+                )
+
             # Architecture decisions this task implements (roadmap R9)
             task_info += self._format_linked(
                 "Implements Decisions",

@@ -5,6 +5,7 @@ Handles export and diagram generation operations
 """
 
 import os
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -29,6 +30,44 @@ TASK_DEPENDENCY_EDGES = """
     JOIN tasks t1 ON e.task_id = t1.id
     JOIN tasks t2 ON e.depends_on_task_id = t2.id
 """
+
+
+# Statuses left out of diagrams by default: finished history rather than the shape of the project (roadmap R13).
+DIAGRAM_OMITTED_STATUSES = {"requirements": ("Deprecated",), "architecture": ("Deprecated",)}
+
+# How much of a title a node label keeps before it is cut (roadmap R13).
+LABEL_LENGTH = 60
+
+
+@dataclass
+class Diagram:
+    """A rendered diagram, with what it drew and what it left out (roadmap R13)."""
+
+    content: str
+    drawn: dict[str, int] = field(default_factory=dict)
+    omitted: dict[str, int] = field(default_factory=dict)
+
+    def summary(self) -> str:
+        """One line for the response: what was drawn, and what was not."""
+        drawn = ", ".join(f"{count} {kind}" for kind, count in self.drawn.items() if count)
+        line = f"📊 {drawn or 'nothing to draw'}"
+        if self.omitted:
+            left_out = ", ".join(f"{count} {kind}" for kind, count in self.omitted.items() if count)
+            if left_out:
+                line += f" | left out: {left_out}"
+        return line
+
+
+def mermaid_label(record_id: str, title: str) -> str:
+    """A node label mermaid can parse: the ID, the title clipped to LABEL_LENGTH, and no raw quotes or brackets."""
+    clipped = title if len(title) <= LABEL_LENGTH else title[: LABEL_LENGTH - 1] + "…"
+    safe = clipped.replace('"', "#quot;").replace("[", "(").replace("]", ")")
+    return f'{node_id(record_id)}["{record_id}<br/>{safe}"]'
+
+
+def node_id(record_id: str) -> str:
+    """Mermaid node identifiers cannot contain dashes."""
+    return record_id.replace("-", "_")
 
 
 class ExportHandler(BaseHandler):
@@ -373,6 +412,7 @@ class ExportHandler(BaseHandler):
                 )
 
             mermaid_content = ""
+            diagram = None
             requirement_ids = params.get("requirement_ids", [])
 
             if diagram_type == "requirements":
@@ -382,7 +422,8 @@ class ExportHandler(BaseHandler):
             elif diagram_type == "architecture":
                 mermaid_content = self._generate_architecture_diagram(requirement_ids)
             elif diagram_type == "full_project":
-                mermaid_content = self._generate_full_project_diagram(include_relationships, requirement_ids)
+                diagram = self._generate_full_project_diagram(include_relationships, requirement_ids)
+                mermaid_content = diagram.content
             elif diagram_type == "directory_structure":
                 mermaid_content = self._generate_directory_structure_diagram()
             elif diagram_type == "dependencies":
@@ -426,7 +467,8 @@ class ExportHandler(BaseHandler):
 
             # Create above-the-fold response
             key_info = f"{diagram_type.replace('_', ' ').title()} diagram generated"
-            action_info = f"📊 {output_format} format"
+            # What the diagram drew and left out, so nothing disappears silently (roadmap R13).
+            action_info = diagram.summary() if diagram else f"📊 {output_format} format"
             if saved_file_path:
                 action_info += f" | Saved to {saved_file_path}"
 
@@ -586,91 +628,102 @@ class ExportHandler(BaseHandler):
 
         return mermaid_content
 
-    def _generate_full_project_diagram(self, include_relationships: bool, requirement_ids: list[str] = None) -> str:
-        """Generate full project overview diagram"""
+    def _generate_full_project_diagram(self, include_relationships: bool, requirement_ids: list[str] = None) -> Diagram:
+        """The project graph: every non-deprecated record, with the links between them (roadmap R13).
+
+        Nothing is capped: the old version kept the first 10 requirements, 10 tasks and 5 decisions and drew at most
+        20 edges, all silently. Edges come from relationships and are kept only when both ends are drawn.
+        """
+        requirements, requirements_left_out = self._diagram_requirements(requirement_ids)
+        tasks = self._diagram_tasks(requirement_ids)
+        decisions, decisions_left_out = self._diagram_decisions(requirement_ids)
+        if not (requirements or tasks or decisions):
+            return Diagram("")
+
+        lines = ["flowchart TD"]
+        for record in (*requirements, *tasks, *decisions):
+            lines.append(f"    {mermaid_label(record['id'], record['title'])}")
+
+        if include_relationships:
+            drawn = {record["id"] for record in (*requirements, *tasks, *decisions)}
+            edges = [
+                ("requirement", "task", "implements", "implements"),
+                ("requirement", "architecture", "addresses", "addresses"),
+                ("task", "architecture", "implements", "implements"),
+                ("architecture", "architecture", "supersedes", "supersedes"),
+            ]
+            for source_type, target_type, link, label in edges:
+                for source, target in self._diagram_links(source_type, target_type, link):
+                    if source in drawn and target in drawn:
+                        lines.append(f"    {node_id(source)} -->|{label}| {node_id(target)}")
+
+        counts = {"requirements": len(requirements), "tasks": len(tasks), "decisions": len(decisions)}
+        left_out = {"deprecated requirements": requirements_left_out, "deprecated decisions": decisions_left_out}
+        return Diagram("\n".join(lines) + "\n", counts, {kind: n for kind, n in left_out.items() if n})
+
+    def _diagram_requirements(self, requirement_ids: list[str] = None) -> tuple[list[Any], int]:
+        """Requirements to draw, and how many deprecated ones were left out (roadmap R13)"""
+        records = self.db.get_records("requirements", "*", order_by="type, requirement_number")
         if requirement_ids:
-            # Filter to specific requirements
-            placeholders = ",".join(["?"] * len(requirement_ids))
-            requirements = self.db.execute_query(
-                f"SELECT * FROM requirements WHERE id IN ({placeholders}) ORDER BY type, requirement_number",
-                requirement_ids,
-                fetch_all=True,
-                row_factory=True,
-            )
-            tasks = self.db.execute_query(
+            records = [record for record in records if record["id"] in set(requirement_ids)]
+        kept = [record for record in records if record["status"] not in DIAGRAM_OMITTED_STATUSES["requirements"]]
+        return kept, len(records) - len(kept)
+
+    def _diagram_tasks(self, requirement_ids: list[str] = None) -> list[Any]:
+        """Tasks to draw: every task, or those implementing the requirements asked for"""
+        if not requirement_ids:
+            return self.db.get_records("tasks", "*", order_by="task_number, subtask_number")
+        placeholders = ",".join(["?"] * len(requirement_ids))
+        return (
+            self.db.execute_query(
                 f"""
                 SELECT DISTINCT t.* FROM tasks t
                 JOIN relationships rel ON rel.target_id = t.id
                 WHERE rel.source_type = 'requirement' AND rel.target_type = 'task'
                   AND rel.relationship_type = 'implements' AND rel.source_id IN ({placeholders})
                 ORDER BY t.task_number, t.subtask_number
-            """,
+                """,
                 requirement_ids,
                 fetch_all=True,
                 row_factory=True,
             )
-            architecture = self.db.execute_query(
-                f"""
-                SELECT DISTINCT a.* FROM architecture a
-                JOIN relationships rel ON rel.target_id = a.id
-                WHERE rel.source_type = 'requirement' AND rel.target_type = 'architecture'
-                  AND rel.relationship_type = 'addresses' AND rel.source_id IN ({placeholders})
-                ORDER BY a.created_at DESC
-            """,
-                requirement_ids,
-                fetch_all=True,
-                row_factory=True,
+            or []
+        )
+
+    def _diagram_decisions(self, requirement_ids: list[str] = None) -> tuple[list[Any], int]:
+        """Decisions to draw, and how many deprecated ones were left out (roadmap R13)"""
+        if requirement_ids:
+            placeholders = ",".join(["?"] * len(requirement_ids))
+            records = (
+                self.db.execute_query(
+                    f"""
+                    SELECT DISTINCT a.* FROM architecture a
+                    JOIN relationships rel ON rel.target_id = a.id
+                    WHERE rel.source_type = 'requirement' AND rel.target_type = 'architecture'
+                      AND rel.relationship_type = 'addresses' AND rel.source_id IN ({placeholders})
+                    ORDER BY a.created_at DESC
+                    """,
+                    requirement_ids,
+                    fetch_all=True,
+                    row_factory=True,
+                )
+                or []
             )
         else:
-            requirements = self.db.get_records("requirements", "*", order_by="type, requirement_number")
-            tasks = self.db.get_records("tasks", "*", order_by="task_number, subtask_number")
-            architecture = self.db.get_records("architecture", "*", order_by="created_at DESC")
+            records = self.db.get_records("architecture", "*", order_by="created_at DESC")
+        kept = [record for record in records if record["status"] not in DIAGRAM_OMITTED_STATUSES["architecture"]]
+        return kept, len(records) - len(kept)
 
-        mermaid_content = "flowchart TD\n"
-        mermaid_content += "    Requirements[Requirements]\n"
-        mermaid_content += "    Tasks[Tasks]\n"
-        mermaid_content += "    Architecture[Architecture]\n"
-
-        # Add requirements (limit to first 10)
-        for req in requirements[:10]:
-            node_id = req["id"].replace("-", "_")
-            title_short = req["title"][:20] + "..." if len(req["title"]) > 20 else req["title"]
-            mermaid_content += f'    {node_id}["{req["id"]}<br/>{title_short}"]\n'
-            mermaid_content += f"    Requirements --> {node_id}\n"
-
-        # Add tasks (limit to first 10)
-        for task in tasks[:10]:
-            node_id = task["id"].replace("-", "_")
-            title_short = task["title"][:20] + "..." if len(task["title"]) > 20 else task["title"]
-            mermaid_content += f'    {node_id}["{task["id"]}<br/>{title_short}"]\n'
-            mermaid_content += f"    Tasks --> {node_id}\n"
-
-        # Add architecture (limit to first 5)
-        for arch in architecture[:5]:
-            node_id = arch["id"].replace("-", "_")
-            title_short = arch["title"][:20] + "..." if len(arch["title"]) > 20 else arch["title"]
-            mermaid_content += f'    {node_id}["{arch["id"]}<br/>{title_short}"]\n'
-            mermaid_content += f"    Architecture --> {node_id}\n"
-
-        # Add relationships if requested
-        if include_relationships:
-            req_tasks = self.db.execute_query(
-                """
-                SELECT source_id AS requirement_id, target_id AS task_id
-                FROM relationships
-                WHERE source_type = 'requirement' AND target_type = 'task' AND relationship_type = 'implements'
-                LIMIT 20
-            """,
-                fetch_all=True,
-                row_factory=True,
-            )
-
-            for rt in req_tasks:
-                req_id = rt["requirement_id"].replace("-", "_")
-                task_id = rt["task_id"].replace("-", "_")
-                mermaid_content += f"    {req_id} -.-> {task_id}\n"
-
-        return mermaid_content
+    def _diagram_links(self, source_type: str, target_type: str, relationship_type: str) -> list[tuple[str, str]]:
+        """Every link of one kind, as (source_id, target_id)"""
+        rows = self.db.execute_query(
+            "SELECT source_id, target_id FROM relationships "
+            "WHERE source_type = ? AND target_type = ? AND relationship_type = ? ORDER BY source_id, target_id",
+            [source_type, target_type, relationship_type],
+            fetch_all=True,
+            row_factory=True,
+        )
+        return [(row["source_id"], row["target_id"]) for row in rows or []]
 
     def _generate_directory_structure_diagram(self) -> str:
         """Generate directory structure diagram"""

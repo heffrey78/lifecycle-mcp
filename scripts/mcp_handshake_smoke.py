@@ -26,8 +26,8 @@ class SmokeFailure(Exception):
     pass
 
 
-def run_session(command: list[str], env: dict[str, str], cwd: str) -> int:
-    """One server session; returns the number of tools listed."""
+def run_session(command: list[str], env: dict[str, str], cwd: str) -> tuple[int, int]:
+    """One server session; returns how many tools and prompts were listed."""
     proc = subprocess.Popen(
         command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=cwd, env=env
     )
@@ -71,6 +71,8 @@ def run_session(command: list[str], env: dict[str, str], cwd: str) -> int:
         send({"jsonrpc": "2.0", "method": "notifications/initialized"})
         send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         tools = await_response(2)["result"]["tools"]
+        send({"jsonrpc": "2.0", "id": 3, "method": "prompts/list"})
+        prompts = await_response(3)["result"]["prompts"]
     finally:
         if proc.stdin and not proc.stdin.closed:
             proc.stdin.close()
@@ -86,7 +88,9 @@ def run_session(command: list[str], env: dict[str, str], cwd: str) -> int:
         raise SmokeFailure(f"server logged an exception:\n{stderr}")
     if len(tools) < MIN_TOOLS:
         raise SmokeFailure(f"tools/list returned {len(tools)} tools, expected at least {MIN_TOOLS}")
-    return len(tools)
+    if not prompts:
+        raise SmokeFailure("prompts/list returned nothing, expected the capture prompt")
+    return len(tools), len(prompts)
 
 
 def main(argv: list[str]) -> int:
@@ -96,11 +100,11 @@ def main(argv: list[str]) -> int:
         env["LIFECYCLE_DB"] = os.path.join(tmp, "smoke.db")
         for label in ("fresh database", "restart"):
             try:
-                count = run_session(command, env, tmp)
+                tools, prompts = run_session(command, env, tmp)
             except SmokeFailure as failure:
                 sys.stderr.write(f"FAIL ({label}): {failure}\n")
                 return 1
-            sys.stderr.write(f"ok ({label}): handshake complete, {count} tools, clean stdout\n")
+            sys.stderr.write(f"ok ({label}): handshake complete, {tools} tools, {prompts} prompts, clean stdout\n")
     return 0
 
 

@@ -14,7 +14,7 @@ from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from mcp.types import GetPromptResult, Prompt, TextContent, Tool
 
 from .database_manager import DatabaseManager
 from .handlers import (
@@ -27,6 +27,7 @@ from .handlers import (
     TaskHandler,
 )
 from .handlers.base_handler import ErrorResult, StructuredResult
+from .prompts import prompt_definitions, render_prompt
 from .short_ids import UnknownAlias, resolve_arguments
 
 logger = logging.getLogger(__name__)
@@ -140,6 +141,16 @@ class LifecycleMCPServer:
 
             logger.info(f"Registered {len(tools)} MCP tools")
             return tools
+
+        @self.server.list_prompts()
+        async def list_prompts() -> list[Prompt]:
+            """Prompts are text the client's model fills in; they cost nothing against the tool budget (R11)."""
+            return prompt_definitions()
+
+        @self.server.get_prompt()
+        async def get_prompt(name: str, arguments: dict[str, str] | None = None) -> GetPromptResult:
+            """One prompt's text. No session is kept: the client's model fills it in and calls the tool."""
+            return render_prompt(name, arguments)
 
         @self.server.call_tool()
         async def call_tool(

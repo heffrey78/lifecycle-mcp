@@ -10,7 +10,7 @@ from typing import Any
 from mcp.types import TextContent
 
 from .base_handler import BaseHandler
-from .requirement_handler import changes_since_review
+from .requirement_handler import changes_since_review, stale_requirements
 from .task_handler import TASK_DEPENDENCIES_SQL
 
 # Every Blocked task with its reason, and every Not Started task still waiting on a dependency, each with the
@@ -137,6 +137,15 @@ class StatusHandler(BaseHandler):
                 for req_id, entry in changed.items():
                     report += f"- {req_id}: {entry['title']} [{entry['status']}] edited {', '.join(entry['fields'])}\n"
 
+            # Requirements nobody has checked since they were written drift away from the code (roadmap R11).
+            stale = stale_requirements(self.db)
+            if stale:
+                report += f"\n## ⚠️ Not Verified Since Last Change ({len(stale)})\n"
+                for req_id, entry in stale.items():
+                    checked = entry["verified_at"] or "never"
+                    report += f"- {req_id}: {entry['title']} [{entry['status']}] changed {entry['changed_at']}, "
+                    report += f"last checked {checked}\n"
+
             # Add summary metrics
             report += self._add_summary_metrics(req_stats, task_stats)
 
@@ -151,6 +160,8 @@ class StatusHandler(BaseHandler):
                 action_info += f" | ⚠️ {len(blocked)} blocked"
             if changed:
                 action_info += f" | ⚠️ {len(changed)} changed since review"
+            if stale:
+                action_info += f" | ⚠️ {len(stale)} not verified since changing"
 
             # The metrics get_project_metrics used to return come back as structured data (roadmap R10), with the
             # blocked items when they were asked for (roadmap R7)

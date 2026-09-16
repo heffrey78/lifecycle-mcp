@@ -11,6 +11,7 @@ from typing import Any
 from mcp.types import TextContent
 
 from ..github_utils import GitHubUtils
+from ..rules import thin_record_reasons
 from .base_handler import (
     EDIT_OPTION_PROPERTIES,
     STATUS_ID_LIST_PROPERTY,
@@ -375,6 +376,13 @@ class TaskHandler(BaseHandler):
         for req_id in params["requirement_ids"]:
             rows = self.db.get_records("requirements", "status", "id = ?", [req_id])
             statuses[req_id] = rows[0]["status"] if rows else None
+        # Thin for its kind? The workflow rules decide, after the approval gate and before anything is written
+        # (roadmap R11).
+        try:
+            warnings = self._rule_warnings(thin_record_reasons(params, "task"))
+        except StatusRefused as e:
+            return self._create_error_response(str(e))
+
         error = self._requirement_gate_error(statuses, "create tasks for")
         if error:
             return self._create_error_response(error)
@@ -488,7 +496,10 @@ class TaskHandler(BaseHandler):
                 "parent_task_id": params.get("parent_task_id"),
                 "github_issue_url": github_url,
             }
-            return self._create_structured_response("SUCCESS", key_info, structured, action_info, github_info)
+            if warnings:
+                structured["warnings"] = warnings
+            details = "\n".join([*(f"⚠️ {warning}" for warning in warnings), github_info]).strip()
+            return self._create_structured_response("SUCCESS", key_info, structured, action_info, details)
 
         except Exception as e:
             return self._create_error_response("Failed to create task", e)

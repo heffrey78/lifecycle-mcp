@@ -12,6 +12,7 @@ from typing import Any
 from mcp.types import TextContent
 
 from ..database_manager import DatabaseManager
+from ..rules import thin_record_reasons
 from .base_handler import (
     EDIT_OPTION_PROPERTIES,
     STATUS_ID_LIST_PROPERTY,
@@ -143,6 +144,70 @@ CHANGES_SINCE_REVIEW_SQL = """
 """
 
 
+# When a requirement was last checked against reality, and when its content last changed. Verification is a comment
+# or a status move: someone looked at it and said something. Both are derived from what is already recorded, the way
+# changes_since_review is, so there is no column to keep in step (roadmap R11).
+#
+# Unlike changes_since_review this covers every status, including Draft: a requirement written once and never
+# re-checked is exactly the case that goes stale, and six did in this project before anyone noticed.
+# Times here are second-resolution, so an edit and a check in the same second compare equal. Within lifecycle_events
+# the row id settles the order, the way changes_since_review already uses it; comments live in another table, so a
+# comment in the same second as an edit counts as checking it.
+LAST_VERIFIED_SQL = """
+    SELECT r.id, r.title, r.status,
+        (SELECT MAX(e.id) FROM lifecycle_events e
+         WHERE e.entity_type = 'requirement' AND e.entity_id = r.id AND e.event_type = 'status_change') AS moved_event,
+        (SELECT MAX(occurred_at) FROM lifecycle_events e
+         WHERE e.entity_type = 'requirement' AND e.entity_id = r.id AND e.event_type = 'status_change') AS moved_at,
+        (SELECT MAX(created_at) FROM reviews v
+         WHERE v.entity_type = 'requirement' AND v.entity_id = r.id) AS commented_at,
+        (SELECT MAX(e.id) FROM lifecycle_events e
+         WHERE e.entity_type = 'requirement' AND e.entity_id = r.id
+           AND e.event_type IN ('field_edit', 'created')) AS changed_event,
+        (SELECT MAX(occurred_at) FROM lifecycle_events e
+         WHERE e.entity_type = 'requirement' AND e.entity_id = r.id
+           AND e.event_type IN ('field_edit', 'created')) AS changed_at
+    FROM requirements r
+    WHERE r.status != 'Deprecated'
+"""
+
+
+def verification(db: DatabaseManager, requirement_id: str | None = None) -> dict[str, dict[str, Any]]:
+    """Each requirement's last verification and last content change: ID -> title, status, verified_at, changed_at.
+
+    verified_at is None when nobody has commented on it or moved it since it was written. A requirement is stale
+    when its content changed after that, which stale_requirements() reports.
+    """
+    sql, params = LAST_VERIFIED_SQL, []
+    if requirement_id:
+        sql, params = sql + " AND r.id = ?", [requirement_id]
+    records: dict[str, dict[str, Any]] = {}
+    for row in db.execute_query(sql, params, fetch_all=True, row_factory=True) or []:
+        verified_at = max(filter(None, (row["moved_at"], row["commented_at"])), default=None)
+        # Changed since it was checked? Against a status move the event ids settle it, even within one second.
+        # Against a comment only the times compare, and a comment in the same second counts as checking it.
+        moved_after = row["moved_event"] is not None and row["moved_event"] > (row["changed_event"] or 0)
+        commented_after = row["commented_at"] is not None and row["commented_at"] >= (row["changed_at"] or "")
+        records[row["id"]] = {
+            "title": row["title"],
+            "status": row["status"],
+            "verified_at": verified_at,
+            "changed_at": row["changed_at"],
+            "verified_since_change": bool(moved_after or commented_after),
+        }
+    return records
+
+
+def stale_requirements(db: DatabaseManager) -> dict[str, dict[str, Any]]:
+    """Requirements whose content changed after anyone last checked them, newest change first (roadmap R11)."""
+    stale = {
+        req_id: entry
+        for req_id, entry in verification(db).items()
+        if entry["changed_at"] and not entry["verified_since_change"]
+    }
+    return dict(sorted(stale.items(), key=lambda item: item[1]["changed_at"], reverse=True))
+
+
 def changes_since_review(db: DatabaseManager, requirement_id: str | None = None) -> dict[str, dict[str, Any]]:
     """Reviewed requirements edited since their latest status change: ID -> title, status and edited fields.
 
@@ -162,10 +227,9 @@ def changes_since_review(db: DatabaseManager, requirement_id: str | None = None)
 class RequirementHandler(BaseHandler):
     """Handler for requirement-related MCP tools"""
 
-    def __init__(self, db_manager, mcp_client=None):
-        """Initialize handler with database manager and optional MCP client"""
+    def __init__(self, db_manager):
+        """Initialize handler with database manager"""
         super().__init__(db_manager)
-        self.mcp_client = mcp_client
 
     def get_tool_definitions(self) -> list[dict[str, Any]]:
         """Return requirement tool definitions"""
@@ -366,6 +430,20 @@ class RequirementHandler(BaseHandler):
             "SUCCESS", f"Requirement {requirement_id} updated", structured, action_info
         )
 
+    def _last_verified_line(self, requirement_id: str) -> str:
+        """Report line saying when this requirement was last checked against reality (roadmap R11)"""
+        entry = verification(self.db, requirement_id).get(requirement_id)
+        if not entry:
+            return ""
+        if not entry["verified_at"]:
+            return "\n- **⚠️ Never verified**: nobody has commented on this or moved it since it was written"
+        stale = entry["changed_at"] and not entry["verified_since_change"]
+        marker = "⚠️ Stale since" if stale else "Last Verified"
+        line = f"\n- **{marker}**: {entry['verified_at']}"
+        if stale:
+            line += f" (content changed at {entry['changed_at']}; a comment or status change marks it checked)"
+        return line
+
     def _changed_since_review_line(self, requirement_id: str) -> str:
         """Report line flagging edits made since the latest status change, or "" when there are none"""
         entry = changes_since_review(self.db, requirement_id).get(requirement_id)
@@ -377,190 +455,36 @@ class RequirementHandler(BaseHandler):
         )
 
     async def _create_requirement(self, **params) -> list[TextContent]:
-        """Create a new requirement with LLM-enhanced analysis"""
+        """Create a new requirement"""
         # Validate required parameters
         error = self._validate_required_params(params, ["type", "title", "priority", "current_state", "desired_state"])
         if error:
             return self._create_error_response(error)
 
+        # Thin for its kind? The workflow rules decide: warn and carry on, refuse, or say nothing (roadmap R11).
         try:
-            # Perform LLM analysis for requirement decomposition
-            llm_analysis = await self._analyze_requirement_with_llm(params)
+            warnings = self._rule_warnings(thin_record_reasons(params, "requirement"))
+        except StatusRefused as e:
+            return self._create_error_response(str(e))
 
-            # Handle LLM analysis results
-            if llm_analysis:
-                if llm_analysis.get("recommendation") == "needs_clarification":
-                    # Return clarifying questions to user
-                    return self._create_clarification_response(llm_analysis)
-                elif llm_analysis.get("recommendation") == "decompose":
-                    # Automatically create decomposed requirements
-                    return await self._create_decomposed_requirements(llm_analysis, params)
-
-            # Standard requirement creation (single requirement)
+        try:
             req_id = self._create_single_requirement(params)
 
             # One status line; the facts an agent needs next come back as structured data (roadmap R10).
-            return self._create_structured_response(
-                "SUCCESS",
-                f"Requirement {req_id} created",
-                {
-                    "id": req_id,
-                    "type": params["type"],
-                    "title": params["title"],
-                    "priority": params["priority"],
-                    "status": "Draft",
-                },
-            )
+            structured = {
+                "id": req_id,
+                "type": params["type"],
+                "title": params["title"],
+                "priority": params["priority"],
+                "status": "Draft",
+            }
+            if warnings:
+                structured["warnings"] = warnings
+            details = "\n".join(f"⚠️ {warning}" for warning in warnings)
+            return self._create_structured_response("SUCCESS", f"Requirement {req_id} created", structured, "", details)
 
         except Exception as e:
             return self._create_error_response("Failed to create requirement", e)
-
-    async def _analyze_requirement_with_llm(self, params: dict[str, Any]) -> dict[str, Any] | None:
-        """Analyze requirement using LLM sampling for decomposition"""
-        # Skip LLM analysis in test environments
-        if hasattr(self, "_testing_mode") and self._testing_mode:
-            return None
-
-        if not self.mcp_client:
-            self.logger.info("No MCP client available for sampling - using fallback requirement creation")
-            return None
-
-        try:
-            # Build context for LLM analysis
-            requirement_context = self._build_requirement_context(params)
-
-            # Prepare LLM sampling request
-            sampling_request = {
-                "messages": [{"role": "user", "content": {"type": "text", "text": requirement_context}}],
-                "modelPreferences": {"intelligencePriority": 0.8, "speedPriority": 0.2, "costPriority": 0.1},
-                "systemPrompt": self._get_analysis_system_prompt(),
-                "includeContext": "thisServer",
-                "temperature": 0.1,
-                "maxTokens": 1000,
-                "stopSequences": ["```"],
-            }
-
-            # Check if the MCP client has sampling capability
-            if hasattr(self.mcp_client, "sample") and callable(self.mcp_client.sample):
-                try:
-                    # Make the actual MCP sampling request
-                    response = await self.mcp_client.sample(sampling_request)
-                    if response and hasattr(response, "content") and hasattr(response.content, "text"):
-                        return json.loads(response.content.text)
-                    else:
-                        self.logger.warning("MCP sampling returned invalid response format")
-                        return None
-                except Exception as sampling_error:
-                    self.logger.warning(f"MCP sampling failed: {sampling_error}")
-                    return None
-            else:
-                self.logger.info("MCP client does not support sampling - using fallback requirement creation")
-                return None
-
-        except Exception as e:
-            # Log error but don't fail requirement creation
-            self.logger.warning(f"LLM analysis failed: {e}")
-            return None
-
-    def _build_requirement_context(self, params: dict[str, Any]) -> str:
-        """Build context string for LLM analysis"""
-        context = f"""Analyze this requirement for decomposition and clarity:
-
-Title: {params["title"]}
-Type: {params["type"]}
-Priority: {params["priority"]}
-Current State: {params["current_state"]}
-Desired State: {params["desired_state"]}
-Business Value: {params.get("business_value", "Not specified")}
-
-Functional Requirements:
-{self._format_list(params.get("functional_requirements", []))}
-
-Acceptance Criteria:
-{self._format_list(params.get("acceptance_criteria", []))}
-
-Please analyze if this requirement should be:
-1. Created as a single requirement (good scope examples: "natural language search",
-   "unified navigation bar", "mobile friendly navigation")
-2. Decomposed into sub-requirements (if it covers multiple features, pages, or complex workflows)
-3. Needs clarification (missing critical details)
-
-Respond with valid JSON in this format:
-{{
-  "analysis": {{
-    "complexity_score": 1-10,
-    "needs_decomposition": boolean,
-    "scope_assessment": "single_feature|multiple_features|complex_workflow"
-  }},
-  "decomposition": {{
-    "suggested_sub_requirements": [
-      {{
-        "title": "string",
-        "type": "FUNC|NFUNC|TECH|BUS|INTF",
-        "rationale": "string"
-      }}
-    ]
-  }},
-  "clarifying_questions": [
-    {{
-      "question": "string",
-      "purpose": "scope|technical|business|acceptance"
-    }}
-  ],
-  "recommendation": "create_single|decompose|needs_clarification"
-}}"""
-        return context
-
-    def _get_analysis_system_prompt(self) -> str:
-        """Get system prompt for LLM analysis"""
-        return """You are an expert requirements analyst. Analyze requirements for proper scoping and decomposition.
-
-Guidelines:
-- Single requirements should be implementable as one cohesive feature
-- Requirements covering multiple features, pages, or workflows need decomposition
-- Ask 1-3 focused clarifying questions when requirements lack critical details
-- Provide clear rationale for decomposition suggestions
-- Always respond with valid JSON matching the specified format"""
-
-    def _format_list(self, items: list[str]) -> str:
-        """Format list items for context"""
-        if not items:
-            return "- None specified"
-        return "\n".join(f"- {item}" for item in items)
-
-    def _create_clarification_response(self, analysis: dict[str, Any]) -> list[TextContent]:
-        """Create response with clarifying questions"""
-        questions = analysis.get("clarifying_questions", [])[:3]  # Limit to 3 questions
-
-        response = "The requirement needs additional clarification. Please answer these questions:\n\n"
-        for i, q in enumerate(questions, 1):
-            response += f"{i}. {q['question']} (Purpose: {q['purpose']})\n"
-
-        response += "\nOnce you provide answers, I can create a properly scoped requirement."
-
-        # Create above-the-fold response for clarification
-        key_info = "Requirement needs clarification"
-        action_info = f"❓ {len(questions)} questions | Please provide details"
-        return self._create_above_fold_response("INFO", key_info, action_info, response)
-
-    def _create_decomposition_response(
-        self, analysis: dict[str, Any], original_params: dict[str, Any]
-    ) -> list[TextContent]:
-        """Create response with decomposition suggestions"""
-        suggestions = analysis.get("decomposition", {}).get("suggested_sub_requirements", [])
-
-        response = f"The requirement '{original_params['title']}' should be decomposed into smaller requirements:\n\n"
-
-        for i, suggestion in enumerate(suggestions, 1):
-            response += f"{i}. **{suggestion['title']}** ({suggestion['type']})\n"
-            response += f"   Rationale: {suggestion['rationale']}\n\n"
-
-        response += "Would you like me to create these individual requirements instead?"
-
-        # Create above-the-fold response for decomposition
-        key_info = "Requirement should be decomposed"
-        action_info = f"🔄 {len(suggestions)} sub-requirements suggested | Complex scope detected"
-        return self._create_above_fold_response("INFO", key_info, action_info, response)
 
     def _create_single_requirement(self, params: dict[str, Any]) -> str:
         """Create a single requirement (extracted from original logic)"""
@@ -597,111 +521,6 @@ Guidelines:
         self._log_operation("requirement", req_id, "created", params.get("author", "MCP User"))
 
         return req_id
-
-    async def _create_decomposed_requirements(
-        self, analysis: dict[str, Any], original_params: dict[str, Any]
-    ) -> list[TextContent]:
-        """Create decomposed sub-requirements automatically from LLM analysis"""
-        try:
-            suggestions = analysis.get("decomposition", {}).get("suggested_sub_requirements", [])
-
-            if not suggestions:
-                # Fallback to single requirement if no suggestions
-                req_id = self._create_single_requirement(original_params)
-                key_info = f"Requirement {req_id} created"
-                req_type = original_params["type"]
-                priority = original_params["priority"]
-                action_info = f"📄 {original_params['title']} | {req_type} | {priority}"
-                return self._create_above_fold_response("SUCCESS", key_info, action_info)
-
-            # Create parent requirement first
-            parent_req_id = self._create_single_requirement(
-                {
-                    **original_params,
-                    "title": f"{original_params['title']} (Parent)",
-                    "current_state": f"Parent requirement for: {original_params['current_state']}",
-                    "desired_state": (
-                        f"Decomposed into {len(suggestions)} sub-requirements: {original_params['desired_state']}"
-                    ),
-                }
-            )
-
-            # Create sub-requirements
-            sub_req_ids = []
-            for i, suggestion in enumerate(suggestions, 1):
-                # Create sub-requirement with decomposed content
-                sub_req_data = {
-                    "type": suggestion.get("type", original_params["type"]),
-                    "title": suggestion["title"],
-                    "priority": original_params["priority"],  # Inherit parent priority
-                    "current_state": (
-                        f"Sub-requirement {i} of {parent_req_id}: "
-                        f"{suggestion.get('current_state', original_params['current_state'])}"
-                    ),
-                    "desired_state": suggestion.get("desired_state", suggestion["title"]),
-                    "business_value": f"Supports {parent_req_id}: {suggestion.get('rationale', '')}",
-                    "author": original_params.get("author", "MCP User"),
-                    "risk_level": original_params.get("risk_level", "Medium"),
-                    "functional_requirements": original_params.get("functional_requirements", []),
-                    "acceptance_criteria": original_params.get("acceptance_criteria", []),
-                }
-
-                sub_req_id = self._create_single_requirement(sub_req_data)
-                sub_req_ids.append(sub_req_id)
-
-                # Create parent-child relationship
-                self._create_requirement_dependency(sub_req_id, parent_req_id, "parent")
-
-            # Build comprehensive response
-            response = f"""# Automatic Requirement Decomposition Complete
-
-## Parent Requirement Created
-- **{parent_req_id}**: {original_params["title"]} (Parent)
-
-## Sub-Requirements Created ({len(sub_req_ids)})
-"""
-            for i, (sub_req_id, suggestion) in enumerate(zip(sub_req_ids, suggestions, strict=False), 1):
-                req_type = suggestion.get("type", original_params["type"])
-                response += f"{i}. **{sub_req_id}**: {suggestion['title']} ({req_type})\n"
-                response += f"   - Rationale: {suggestion.get('rationale', 'N/A')}\n"
-
-            response += f"""
-## Decomposition Analysis
-- **Complexity Score**: {analysis.get("analysis", {}).get("complexity_score", "N/A")}/10
-- **Scope Assessment**: {analysis.get("analysis", {}).get("scope_assessment", "N/A")}
-- **Implementation Focus**: {analysis.get("analysis", {}).get("implementation_focus", "N/A")}
-
-## Next Steps
-- Use `trace_requirement` on {parent_req_id} to see full decomposition
-- Create tasks for individual sub-requirements
-- Each sub-requirement can be implemented independently
-"""
-
-            # Create above-the-fold response
-            key_info = f"Requirement decomposed into {len(sub_req_ids)} sub-requirements"
-            action_info = f"🔄 Parent: {parent_req_id} | {len(sub_req_ids)} children created"
-            return self._create_above_fold_response("SUCCESS", key_info, action_info, response)
-
-        except Exception as e:
-            # Fallback to single requirement creation if decomposition fails
-            self.logger.warning(f"Automatic decomposition failed, creating single requirement: {e}")
-            req_id = self._create_single_requirement(original_params)
-            key_info = f"Requirement {req_id} created"
-            action_info = f"📄 {original_params['title']} | Decomposition failed, created single requirement"
-            return self._create_above_fold_response("SUCCESS", key_info, action_info)
-
-    def _create_requirement_dependency(self, requirement_id: str, depends_on_id: str, dependency_type: str):
-        """Create a requirement dependency relationship"""
-        try:
-            self._link("requirement", requirement_id, "requirement", depends_on_id, dependency_type)
-            self._log_operation(
-                "requirement_dependency",
-                requirement_id,
-                f"created_{dependency_type}_relationship",
-                f"Linked to {depends_on_id}",
-            )
-        except Exception as e:
-            self.logger.error(f"Failed to create requirement dependency: {e}")
 
     async def _update_requirement_status(self, **params) -> list[TextContent]:
         """Move one requirement, or each of requirement_ids, to new_status (roadmap R9)"""
@@ -867,6 +686,7 @@ Guidelines:
 
             req = requirements[0]
             review_line = self._changed_since_review_line(req["id"])
+            verified_line = self._last_verified_line(req["id"])
 
             # Build detailed report
             report = f"""# Requirement Details: {req["id"]}
@@ -880,7 +700,7 @@ Guidelines:
 - **Author**: {req["author"]}
 - **Created**: {req["created_at"]}
 - **Updated**: {req["updated_at"]}
-- **Revision**: {req["revision"]}{review_line}
+- **Revision**: {req["revision"]}{verified_line}{review_line}
 
 ## Problem Definition
 **Current State**: {req["current_state"]}

@@ -4,7 +4,6 @@ Architecture Handler for MCP Lifecycle Management Server
 Handles all architecture decision-related operations
 """
 
-import json
 from typing import Any
 
 from mcp.types import TextContent
@@ -89,10 +88,9 @@ ARCHITECTURE_CURATED_PROPERTIES = {
 class ArchitectureHandler(BaseHandler):
     """Handler for architecture decision-related MCP tools"""
 
-    def __init__(self, db_manager, mcp_client=None):
-        """Initialize handler with database manager and optional MCP client"""
+    def __init__(self, db_manager):
+        """Initialize handler with database manager"""
         super().__init__(db_manager)
-        self.mcp_client = mcp_client
 
     def get_tool_definitions(self) -> list[dict[str, Any]]:
         """Return architecture tool definitions"""
@@ -305,22 +303,10 @@ class ArchitectureHandler(BaseHandler):
             for req_id in params["requirement_ids"]:
                 self._link("requirement", req_id, "architecture", adr_id, "addresses")
 
-            # Analyze ADR for diagram suggestions using LLM
-            diagram_suggestions = await self._analyze_adr_for_diagrams(arch_data)
             structured = {"id": adr_id, "status": "Proposed", "requirement_ids": params["requirement_ids"]}
-
-            if diagram_suggestions and diagram_suggestions.get("suggested_diagrams"):
-                # Format diagram suggestions for user
-                suggestions_text = self._format_diagram_suggestions(diagram_suggestions, adr_id)
-                key_info = f"Architecture decision {adr_id} created with diagram suggestions"
-                suggestions_count = len(diagram_suggestions["suggested_diagrams"])
-                action_info = f"📐 {params['title']} | {suggestions_count} diagram suggestions"
-                return self._create_structured_response("SUCCESS", key_info, structured, action_info, suggestions_text)
-            else:
-                # Standard response without suggestions
-                key_info = f"Architecture decision {adr_id} created"
-                action_info = f"📐 {params['title']} | {params.get('status', 'Proposed')} | ADR"
-                return self._create_structured_response("SUCCESS", key_info, structured, action_info)
+            key_info = f"Architecture decision {adr_id} created"
+            action_info = f"📐 {params['title']} | {params.get('status', 'Proposed')} | ADR"
+            return self._create_structured_response("SUCCESS", key_info, structured, action_info)
 
         except Exception as e:
             return self._create_error_response("Failed to create architecture decision", e)
@@ -577,176 +563,3 @@ class ArchitectureHandler(BaseHandler):
 
         except Exception as e:
             return self._create_error_response("Failed to get architecture details", e)
-
-    async def _analyze_adr_for_diagrams(self, adr_data: dict[str, Any]) -> dict[str, Any] | None:
-        """Analyze ADR context using LLM sampling to suggest relevant diagrams"""
-        if not self.mcp_client:
-            self.logger.info("No MCP client available for sampling - skipping diagram suggestions")
-            return None
-
-        try:
-            # Build context for LLM analysis
-            adr_context = self._build_adr_context(adr_data)
-
-            # Prepare LLM sampling request
-            sampling_request = {
-                "messages": [{"role": "user", "content": {"type": "text", "text": adr_context}}],
-                "modelPreferences": {"intelligencePriority": 0.8, "speedPriority": 0.2, "costPriority": 0.1},
-                "systemPrompt": self._get_diagram_analysis_system_prompt(),
-                "includeContext": "thisServer",
-                "temperature": 0.1,
-                "maxTokens": 800,
-                "stopSequences": ["```"],
-            }
-
-            # Check if the MCP client has sampling capability
-            if hasattr(self.mcp_client, "sample") and callable(self.mcp_client.sample):
-                try:
-                    # Make the actual MCP sampling request
-                    response = await self.mcp_client.sample(sampling_request)
-                    if response and hasattr(response, "content") and hasattr(response.content, "text"):
-                        return json.loads(response.content.text)
-                    else:
-                        self.logger.warning("MCP sampling returned invalid response format")
-                        return None
-                except Exception as sampling_error:
-                    self.logger.warning(f"MCP sampling failed: {sampling_error}")
-                    return None
-            else:
-                self.logger.info("MCP client does not support sampling - skipping diagram suggestions")
-                return None
-
-        except Exception as e:
-            # Log error but don't fail ADR creation
-            self.logger.warning(f"LLM diagram analysis failed: {e}")
-            return None
-
-    def _build_adr_context(self, adr_data: dict[str, Any]) -> str:
-        """Build context string for ADR diagram analysis"""
-        decision_drivers = self._safe_json_loads(adr_data.get("decision_drivers", "[]"))
-        considered_options = self._safe_json_loads(adr_data.get("considered_options", "[]"))
-        consequences = self._safe_json_loads(adr_data.get("consequences", "{}"))
-
-        context = (
-            f"Analyze this Architecture Decision Record (ADR) to suggest helpful "
-            f"diagrams for implementation and understanding:\n\n"
-            f"**ADR Title**: {adr_data['title']}\n\n"
-            f"**Context**: {adr_data['context']}\n\n"
-            f"**Decision**: {adr_data['decision_outcome']}\n\n"
-            f"**Decision Drivers**:\n"
-            f"{self._format_list_items(decision_drivers)}\n\n"
-            f"**Considered Options**:\n"
-            f"{self._format_list_items(considered_options)}\n\n"
-            f"**Consequences**:\n"
-            f"{self._format_consequences(consequences)}\n\n"
-            f"Please analyze this ADR and suggest 2-4 diagrams that would:\n"
-            f"1. Help developers implement this decision effectively\n"
-            f"2. Enhance stakeholder understanding of the architecture\n"
-            f"3. Document key relationships and dependencies\n"
-            f"4. Support future maintenance and evolution\n\n"
-            f"Focus on practical diagrams that provide real implementation value.\n\n"
-            f"Respond with valid JSON in this format:\n"
-            f"{{\n"
-            f'  "analysis": {{\n'
-            f'    "architectural_scope": "component|system|integration|deployment",\n'
-            f'    "complexity_level": 1-5,\n'
-            f'    "implementation_focus": "string describing main implementation challenges"\n'
-            f"  }},\n"
-            f'  "suggested_diagrams": [\n'
-            f"    {{\n"
-            f'      "type": "requirements|tasks|architecture|full_project|dependencies",\n'
-            f'      "title": "Descriptive diagram title",\n'
-            f'      "purpose": "implementation|understanding|documentation|maintenance",\n'
-            f'      "rationale": "Why this diagram helps with the ADR implementation",\n'
-            f'      "priority": "high|medium|low"\n'
-            f"    }}\n"
-            f"  ],\n"
-            f'  "implementation_notes": "Additional context for using these diagrams during implementation"\n'
-            f"}}"
-        )
-        return context
-
-    def _format_list_items(self, items: list[str]) -> str:
-        """Format list items for context"""
-        if not items:
-            return "- None specified"
-        return "\n".join(f"- {item}" for item in items)
-
-    def _format_consequences(self, consequences: dict[str, Any]) -> str:
-        """Format consequences object for context"""
-        if not consequences:
-            return "- None specified"
-
-        formatted = []
-        if isinstance(consequences, dict):
-            for key, value in consequences.items():
-                if isinstance(value, list):
-                    formatted.append(f"**{key.title()}**:")
-                    formatted.extend(f"  - {item}" for item in value)
-                else:
-                    formatted.append(f"**{key.title()}**: {value}")
-        else:
-            formatted.append(str(consequences))
-
-        return "\n".join(formatted) if formatted else "- None specified"
-
-    def _get_diagram_analysis_system_prompt(self) -> str:
-        """Get system prompt for ADR diagram analysis"""
-        return (
-            "You are an expert software architect analyzing Architecture Decision Records "
-            "(ADRs) to suggest helpful diagrams.\n\n"
-            "Your goal is to recommend diagrams that provide practical value for:\n"
-            "- Implementation teams who need to understand how to build the solution\n"
-            "- Stakeholders who need to understand the architectural impact\n"
-            "- Future maintainers who need to understand the system structure\n\n"
-            "Guidelines:\n"
-            "- Prioritize diagrams that directly support implementation activities\n"
-            "- Consider both technical and communication needs\n"
-            "- Focus on diagrams that show relationships, dependencies, and data flows\n"
-            "- Avoid suggesting diagrams that would be too simple or too complex for the context\n"
-            "- Always provide clear rationale for each suggestion\n"
-            "- Limit suggestions to 2-4 most valuable diagrams\n"
-            "- Always respond with valid JSON matching the specified format"
-        )
-
-    def _format_diagram_suggestions(self, suggestions: dict[str, Any], adr_id: str) -> str:
-        """Format diagram suggestions for user response"""
-        suggested_diagrams = suggestions.get("suggested_diagrams", [])
-        implementation_notes = suggestions.get("implementation_notes", "")
-
-        response = f"""# Diagram Suggestions for {adr_id}
-
-Based on your ADR content, I recommend the following diagrams to support implementation and understanding:
-
-"""
-
-        for i, diagram in enumerate(suggested_diagrams, 1):
-            priority_emoji = {"high": "🔥", "medium": "⭐", "low": "💡"}.get(diagram.get("priority", "medium"), "⭐")
-            purpose_emoji = {
-                "implementation": "🔧",
-                "understanding": "📖",
-                "documentation": "📋",
-                "maintenance": "🔍",
-            }.get(diagram.get("purpose", "implementation"), "🔧")
-
-            response += f"""{i}. {priority_emoji} **{diagram["title"]}** {purpose_emoji}
-   - **Type**: {diagram["type"]}
-   - **Purpose**: {diagram["purpose"].title()}
-   - **Rationale**: {diagram["rationale"]}
-
-"""
-
-        if implementation_notes:
-            response += f"""## Implementation Notes
-{implementation_notes}
-
-"""
-
-        response += """## Next Steps
-To generate these diagrams, use the `create_architectural_diagrams` tool:
-- Specify the `diagram_type` (e.g., "requirements", "architecture")
-
-Example: `create_architectural_diagrams(diagram_type="architecture", output_format="markdown_with_mermaid")`
-"""
-
-        return response

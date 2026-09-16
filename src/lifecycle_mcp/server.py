@@ -48,13 +48,10 @@ class LifecycleMCPServer:
         # Initialize database manager
         self.db_manager = DatabaseManager()
 
-        # MCP client will be set after server creation for LLM analysis features
-        self.mcp_client = None
-
         # Initialize handlers
-        self.requirement_handler = RequirementHandler(self.db_manager, self.mcp_client)
+        self.requirement_handler = RequirementHandler(self.db_manager)
         self.task_handler = TaskHandler(self.db_manager)
-        self.architecture_handler = ArchitectureHandler(self.db_manager, self.mcp_client)
+        self.architecture_handler = ArchitectureHandler(self.db_manager)
         self.relationship_handler = RelationshipHandler(self.db_manager)
         self.record_handler = RecordHandler(
             self.db_manager, self.requirement_handler, self.task_handler, self.architecture_handler
@@ -100,12 +97,6 @@ class LifecycleMCPServer:
         # Create MCP server instance
         self.server = Server("lifecycle-management")
         self._register_handlers()
-
-    def set_mcp_client(self, client):
-        """Set MCP client for LLM analysis features"""
-        self.mcp_client = client
-        self.requirement_handler.mcp_client = client
-        self.architecture_handler.mcp_client = client
 
     def _register_handlers(self):
         """Register MCP server handlers"""

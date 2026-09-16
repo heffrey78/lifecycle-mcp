@@ -100,7 +100,10 @@ This is a Model Context Protocol (MCP) server for software lifecycle management.
 ### Database Structure
 
 - **Requirements**: Central entity with comprehensive metadata including functional requirements, acceptance criteria, business value
-- **Tasks**: Implementation work items linked to requirements with effort estimation and assignee tracking
+- **Tasks**: Implementation work items linked to requirements with effort estimation and assignee tracking, and a
+  `blocked_reason` that only `update_task_status` writes (migration 15). A task waits on the tasks it depends on or
+  requires and on the tasks that block it: `TASK_DEPENDENCIES_SQL` in `task_handler.py` feeds the ready filter,
+  task details and the dashboard
 - **Architecture**: ADRs and technical design documents with decision drivers and consequences
 - **Relationships**: the `relationships` table is the only place links are stored (migration 8 removed the old
   `requirement_tasks`, `requirement_architecture`, `task_dependencies`, `requirement_dependencies` tables and
@@ -127,8 +130,8 @@ The server exposes 23 tools (24 with `LIFECYCLE_GITHUB=on`) across 7 handler mod
 **Task Management (4 tools, plus 1 when GitHub is on):**
 - `create_task` - Create tasks linked to requirements
 - `update_task` - Edit content, move to another parent, replace requirement links
-- `update_task_status` - Update progress of one or many tasks
-- `query_tasks` - Search and filter tasks (text list plus structured records)
+- `update_task_status` - Update progress of one or many tasks; a Blocked comment is kept as the reason
+- `query_tasks` - Search and filter tasks, or list those ready to start (text list plus structured records)
 - `sync_github_tasks` - Sync one task or every linked task from GitHub issues (listed only when `LIFECYCLE_GITHUB=on`)
 
 **Architecture Management (4 tools):**
@@ -152,7 +155,7 @@ The server exposes 23 tools (24 with `LIFECYCLE_GITHUB=on`) across 7 handler mod
 - `create_architectural_diagrams` - Generate architecture diagrams
 
 **Status Monitoring (1 tool):**
-- `get_project_status` - Project health dashboard, with metrics as structured data
+- `get_project_status` - Project health dashboard with every blocked or waiting item, with metrics as structured data
 
 ### Database Environment
 

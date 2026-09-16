@@ -153,8 +153,8 @@ Results are text for the model to read. Most tools also return the same facts as
 **Tasks**
 - `create_task` - Create implementation tasks from requirements
 - `update_task` - Edit a task's content, move it to another parent or change its requirements
-- `update_task_status` - Update the progress of one or many tasks
-- `query_tasks` - Search and filter tasks; the matching records also come back as structured data
+- `update_task_status` - Update the progress of one or many tasks; the comment on a move to Blocked is kept as the reason
+- `query_tasks` - Search and filter tasks, including the ones ready to start; the matching records also come back as structured data
 - `sync_github_tasks` - Sync one task, or every linked task, from GitHub issues (listed only when `LIFECYCLE_GITHUB=on`)
 
 **Architecture decisions**
@@ -205,7 +205,7 @@ Full details of a requirement, task or architecture decision. The ID prefix (`RE
 **Parameters:**
 - `entity_id` (required): Requirement, task or architecture decision ID
 
-**Returns:** The record's fields, revision, links (linked tasks, subtasks and parent, linked requirements, the tasks implementing a decision, the decisions a task implements, and the decisions a decision supersedes or is superseded by) and comments. A reviewed requirement edited since its last status change is flagged *Changed Since Last Review*.
+**Returns:** The record's fields, revision, links (linked tasks, subtasks and parent, linked requirements, the tasks implementing a decision, the decisions a task implements, the decisions a decision supersedes or is superseded by, and the tasks a task depends on or blocks) and comments. A Blocked task shows its blocked reason. A reviewed requirement edited since its last status change is flagged *Changed Since Last Review*.
 
 #### `delete_record`
 Delete a record created by mistake.
@@ -364,7 +364,7 @@ Update task progress and assignment.
 - `task_id`: Task ID (e.g., "TASK-0001-00-00")
 - `task_ids`: Instead of `task_id`, a list of task IDs to move to the same status, with a result per ID as in `update_requirement_status`
 - `new_status` (required): New status - "Not Started", "In Progress", "Blocked", "Complete", "Abandoned"
-- `comment` (optional): Status update comment
+- `comment` (optional): Status update comment. On a move to Blocked it is kept as the task's blocked reason until the task leaves Blocked; moving a Blocked task to Blocked again without a comment keeps the reason
 - `assignee` (optional): New assignee
 
 #### `query_tasks`
@@ -375,6 +375,9 @@ Search and filter tasks by various criteria.
 - `priority` (optional): Filter by priority level
 - `assignee` (optional): Filter by assignee
 - `requirement_id` (optional): Filter by linked requirement
+- `ready` (optional): `true` for Not Started tasks whose dependencies are all Complete, highest priority first. A task waits on the tasks it depends on or requires, and on the tasks that block it
+
+Filters combine.
 
 #### `sync_github_tasks`
 Sync tasks from their linked GitHub issues, with conflict detection. Listed only when `LIFECYCLE_GITHUB=on`.
@@ -467,7 +470,7 @@ Get comprehensive project health metrics and dashboards.
 **Parameters:**
 - `include_blocked` (optional): Include blocked items analysis (default: true)
 
-**Returns:** Dashboard with requirement overview, task statistics, completion percentages, and blocked items analysis.
+**Returns:** Dashboard with requirement overview, task statistics, completion percentages, and blocked items: every Blocked task with its reason, and every task or requirement still waiting on a dependency with what it waits on. `structuredContent` holds the metrics and, when `include_blocked` is on, the same items under `blocked`.
 
 ### Documentation Export Tools
 

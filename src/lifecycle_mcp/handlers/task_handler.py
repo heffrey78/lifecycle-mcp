@@ -64,6 +64,16 @@ TASK_ANCESTOR_SQL = """
     SELECT 1 FROM ancestors WHERE id = ?
 """
 
+# Each task and a task it waits on: depends and requires links point dependent -> dependency, blocks links point
+# blocker -> blocked (roadmap R7).
+TASK_DEPENDENCIES_SQL = """
+    SELECT source_id AS task_id, target_id AS dependency_id FROM relationships
+    WHERE source_type = 'task' AND target_type = 'task' AND relationship_type IN ('depends', 'requires')
+    UNION
+    SELECT target_id, source_id FROM relationships
+    WHERE source_type = 'task' AND target_type = 'task' AND relationship_type = 'blocks'
+"""
+
 # Records that depend on a task and therefore block deleting it. "blocks" links point blocker -> blocked.
 TASK_DELETE_BLOCKERS = [
     (
@@ -115,7 +125,7 @@ class TaskHandler(BaseHandler):
             },
             {
                 "name": "update_task_status",
-                "description": "Update task progress",
+                "description": "Update task progress; the comment on a move to Blocked is kept as the reason",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -141,6 +151,10 @@ class TaskHandler(BaseHandler):
                         "priority": {"type": "string"},
                         "assignee": {"type": "string"},
                         "requirement_id": {"type": "string"},
+                        "ready": {
+                            "type": "boolean",
+                            "description": "Only Not Started tasks whose dependencies are all Complete, by priority",
+                        },
                     },
                 },
             },
@@ -492,6 +506,12 @@ class TaskHandler(BaseHandler):
 
         # Update status and assignee. CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
         assignments, values = "status = ?, updated_at = CURRENT_TIMESTAMP", [new_status]
+        # The comment given with a move to Blocked is why it's blocked; leaving Blocked clears it (roadmap R7).
+        if new_status != "Blocked":
+            assignments += ", blocked_reason = NULL"
+        elif params.get("comment") or current_status != "Blocked":
+            assignments += ", blocked_reason = ?"
+            values.append(params.get("comment"))
         if params.get("assignee"):
             assignments += ", assignee = ?"
             values.append(params["assignee"])
@@ -566,37 +586,34 @@ class TaskHandler(BaseHandler):
             where_clauses = []
             where_params = []
 
-            # Handle requirement_id filter specially (requires join)
             if params.get("requirement_id"):
-                tasks = self.db.execute_query(
-                    """
-                    SELECT t.* FROM tasks t
-                    JOIN relationships rel ON rel.target_id = t.id
-                    WHERE rel.source_type = 'requirement' AND rel.source_id = ?
-                      AND rel.target_type = 'task' AND rel.relationship_type = 'implements'
-                    ORDER BY t.priority, t.created_at DESC
-                """,
-                    [params["requirement_id"]],
-                    fetch_all=True,
-                    row_factory=True,
+                where_clauses.append(
+                    "t.id IN (SELECT target_id FROM relationships WHERE source_type = 'requirement' AND source_id = ? "
+                    "AND target_type = 'task' AND relationship_type = 'implements')"
                 )
-            else:
-                # Build standard filters
-                if params.get("status"):
-                    where_clauses.append("status = ?")
-                    where_params.append(params["status"])
+                where_params.append(params["requirement_id"])
 
-                if params.get("priority"):
-                    where_clauses.append("priority = ?")
-                    where_params.append(params["priority"])
+            for column in ("status", "priority", "assignee"):
+                if params.get(column):
+                    where_clauses.append(f"t.{column} = ?")
+                    where_params.append(params[column])
 
-                if params.get("assignee"):
-                    where_clauses.append("assignee = ?")
-                    where_params.append(params["assignee"])
+            order_by = "t.priority, t.created_at DESC"
+            if params.get("ready"):
+                # Ready to start: Not Started, and every task it waits on is Complete (roadmap R7)
+                where_clauses.append(
+                    f"t.status = 'Not Started' AND NOT EXISTS (SELECT 1 FROM ({TASK_DEPENDENCIES_SQL}) dep "
+                    "JOIN tasks d ON d.id = dep.dependency_id WHERE dep.task_id = t.id AND d.status != 'Complete')"
+                )
+                order_by = "t.priority, t.task_number, t.subtask_number"
 
-                where_clause = " AND ".join(where_clauses) if where_clauses else ""
-
-                tasks = self.db.get_records("tasks", "*", where_clause, where_params, "priority, created_at DESC")
+            where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+            tasks = self.db.execute_query(
+                f"SELECT t.* FROM tasks t {where} ORDER BY {order_by}",
+                where_params,
+                fetch_all=True,
+                row_factory=True,
+            )
 
             # The full records, JSON fields parsed, as structured data next to the list (roadmap R10)
             structured = {"tasks": self._record_dicts(tasks, TASK_JSON_FIELDS), "count": len(tasks)}
@@ -614,6 +631,10 @@ class TaskHandler(BaseHandler):
                 filters.append(f"priority: {params['priority']}")
             if params.get("assignee"):
                 filters.append(f"assignee: {params['assignee']}")
+            if params.get("requirement_id"):
+                filters.append(f"requirement: {params['requirement_id']}")
+            if params.get("ready"):
+                filters.append("ready to start")
             filter_desc = " | ".join(filters) if filters else "all tasks"
 
             # Build detailed list
@@ -847,6 +868,9 @@ class TaskHandler(BaseHandler):
 - **Updated**: {task["updated_at"]}
 - **Revision**: {task["revision"]}"""
 
+            if task["status"] == "Blocked":
+                task_info += f"\n- **Blocked Reason**: {task['blocked_reason'] or 'Not given'}"
+
             if task["github_issue_number"]:
                 task_info += f"\n- **GitHub Issue**: #{task['github_issue_number']} - {task['github_issue_url']}"
 
@@ -927,6 +951,20 @@ class TaskHandler(BaseHandler):
                     parent = dict(parent_tasks[0])  # Convert Row to dict for consistency
                     task_info += "\n## Parent Task\n"
                     task_info += f"- {parent['id']}: {parent['title']} [{parent['status']}]\n"
+
+            # Tasks this task waits on, and tasks waiting on it (roadmap R7)
+            task_info += self._format_linked(
+                "Depends On",
+                f"SELECT t.id, t.title, t.status FROM tasks t JOIN ({TASK_DEPENDENCIES_SQL}) dep "
+                "ON dep.dependency_id = t.id WHERE dep.task_id = ? ORDER BY t.id",
+                task["id"],
+            )
+            task_info += self._format_linked(
+                "Blocks",
+                f"SELECT t.id, t.title, t.status FROM tasks t JOIN ({TASK_DEPENDENCIES_SQL}) dep "
+                "ON dep.task_id = t.id WHERE dep.dependency_id = ? ORDER BY t.id",
+                task["id"],
+            )
 
             # Architecture decisions this task implements (roadmap R9)
             task_info += self._format_linked(

@@ -171,6 +171,13 @@ The server uses the `LIFECYCLE_DB` environment variable to specify the SQLite da
   response text and `structuredContent`, enforce raises `StatusRefused` before anything is written, off checks
   nothing. The always-on rules are deliberately outside it: the Validated gate, R9's Superseded link and the
   requirement transition map (roadmap R8, ADR-0004)
+- **Short IDs**: `short_ids.resolve_arguments` runs in `server._route_tool_call`, so every tool takes `REQ-12-FUNC`,
+  `TASK-12`, `TASK-12-1` or `ADR-4` and no handler knows about aliases. A complete stored ID is never treated as an
+  alias: it reaches the handler untouched even when no such record exists, so "not found" messages, per-ID results
+  from list calls and empty query results stay the handler's to give (roadmap R14)
+- **Requirement progress counts leaf tasks**: a task that something points at as its parent is counted through its
+  subtasks, not again on its own. The counter triggers carry that rule and migration 16 recomputes existing rows
+  (F-22, roadmap R14)
 - **Tool errors**: handlers return `_create_error_response(...)`; the server raises it as `ToolCallError` so clients receive `isError=true`
 - **Strict tool inputs**: `server.py` adds `additionalProperties: false` to every tool schema, so undeclared fields are refused by name. Declare every new parameter in the tool definition
 - **Editing records**: every update tool goes through `BaseHandler._apply_edit`. It bumps `revision` once, logs a `field_edit` event per changed field, honours `if_revision`, and takes a `check` hook for lifecycle rules (raise `EditRefused`) and a `relink` hook for link changes inside the same transaction. Rules:

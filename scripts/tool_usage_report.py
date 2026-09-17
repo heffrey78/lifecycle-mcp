@@ -8,6 +8,9 @@ the tools this checkout lists today.
 
 - retry: a call to the same tool within the window after that tool returned an error
 - repeat: the same tool with the same argument names called again straight after, within the window
+- refused: a call the server turned away before any handler ran - its schema refused it, or no such tool exists.
+  Logs written before R18 hold none of these: those calls were never logged at all, so their error counts are
+  handler errors only and their call totals undercount the session (roadmap R18)
 """
 
 import argparse
@@ -21,19 +24,26 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
+# Kinds of failure the server refused before a handler ran, as it records them in error_kind.
+REFUSED_BEFORE_HANDLER = {"validation", "unknown_tool"}
+
 
 def load(path: Path) -> list[dict]:
-    """Records in one log, normalised to tool, arg_names, error, ms and ts (server and lab driver formats)."""
+    """Records in one log, normalised to tool, arg_names, error, kind, ms and ts (server and lab driver formats)."""
     records = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         raw = json.loads(line)
+        error = bool(raw.get("isError") or raw.get("in_band_error"))
         records.append(
             {
                 "tool": raw["tool"],
                 "arg_names": tuple(raw.get("arg_names") or sorted(raw.get("args") or {})),
-                "error": bool(raw.get("isError") or raw.get("in_band_error")),
+                "error": error,
+                # A log without error_kind predates R18, when only handlers logged and every logged error was
+                # therefore a handler error.
+                "kind": raw.get("error_kind") or ("handler" if error else ""),
                 "ms": raw.get("ms", 0),
                 "ts": datetime.fromisoformat(raw["ts"]),
             }
@@ -42,7 +52,15 @@ def load(path: Path) -> list[dict]:
 
 
 def analyse(records: list[dict], window: float) -> dict[str, Counter]:
-    stats = {"calls": Counter(), "errors": Counter(), "retries": Counter(), "repeats": Counter(), "ms": Counter()}
+    stats = {
+        "calls": Counter(),
+        "errors": Counter(),
+        "rejections": Counter(),
+        "handler_errors": Counter(),
+        "retries": Counter(),
+        "repeats": Counter(),
+        "ms": Counter(),
+    }
     last_error_at: dict[str, datetime] = {}
     previous = None
     for record in records:
@@ -53,6 +71,7 @@ def analyse(records: list[dict], window: float) -> dict[str, Counter]:
             stats["retries"][tool] += 1
         if record["error"]:
             stats["errors"][tool] += 1
+            stats["rejections" if record["kind"] in REFUSED_BEFORE_HANDLER else "handler_errors"][tool] += 1
             last_error_at[tool] = ts
         if (
             previous
@@ -84,13 +103,20 @@ def report(name: str, records: list[dict], tools: dict[str, str], window: float)
     stats = analyse(records, window)
     used = set(stats["calls"])
     print(f"\n## {name}: {len(records)} calls, {len(used)} tools used")
-    print(f"{'tool':38} {'calls':>5} {'errors':>6} {'retries':>7} {'repeats':>7} {'avg ms':>6}")
+    print(f"{'tool':38} {'calls':>5} {'errors':>6} {'refused':>7} {'retries':>7} {'repeats':>7} {'avg ms':>6}")
     for tool, calls in stats["calls"].most_common():
         marker = "" if tool in tools else "  (no longer listed)"
         print(
-            f"{tool:38} {calls:5} {stats['errors'][tool]:6} {stats['retries'][tool]:7} {stats['repeats'][tool]:7} "
-            f"{stats['ms'][tool] // calls:6}{marker}"
+            f"{tool:38} {calls:5} {stats['errors'][tool]:6} {stats['rejections'][tool]:7} "
+            f"{stats['retries'][tool]:7} {stats['repeats'][tool]:7} {stats['ms'][tool] // calls:6}{marker}"
         )
+    print(
+        f"errors: {stats['errors'].total()} = {stats['rejections'].total()} refused before a handler ran "
+        f"+ {stats['handler_errors'].total()} handler"
+    )
+    if stats["rejections"].total():
+        refused = ", ".join(f"{tool} {count}" for tool, count in stats["rejections"].most_common())
+        print(f"refused by tool: {refused}")
     never = sorted(set(tools) - used, key=lambda tool: (tools[tool], tool))
     print(f"never called ({len(never)} of {len(tools)} listed): " + ", ".join(never))
     return used

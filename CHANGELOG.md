@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Amending an accepted decision (roadmap R20)
+
+Observed in the linkcheck dogfooding run: that project's ADR-0001 recorded that the thread pool defaults "to
+something modest like 16", the benchmark the same ADR called for measured 32, and the shipped code said 32 - an
+accepted decision contradicting the system it described, which is the failure mode decision records exist to
+prevent (F-51). The remedies were a comment, which renders below the decision where a reader scanning it will miss
+it, or a whole superseding ADR, which is heavy machinery for correcting one number. Nothing in between existed. The
+tool count stays 23; definitions go from 12,873 to 13,003 characters.
+
+#### Added
+- `update_architecture` takes an `amendment`: a dated, attributed correction, carrying its reason, recorded against
+  an Accepted decision. It is stored as a lifecycle event rather than as a column, so no `UPDATE` touches the
+  decision at all - its text, revision and `updated_at` are exactly as they were, and R6a's immutability rule is
+  untouched rather than relaxed.
+- `get_details` and `export_project_documentation` render amendments directly beneath the decision they correct,
+  marked as later corrections, so a reader of the exported hand-off sees the correction without following a link or
+  scrolling to the comments.
+- `get_entity_history` shows an amendment as its own kind of entry, distinct from a field edit and from a comment.
+
+#### Changed
+- Editing a decided ADR is still refused, and the refusal now names both ways out: amend it in place, or supersede
+  it with a new decision. Amending a Proposed decision is refused the other way, pointing at the edit it should be.
+
 ### Signals worth trusting on the dashboard (roadmap R17)
 
 Two shipped signals reported the wrong thing at the moment that mattered most, both measured in the linkcheck

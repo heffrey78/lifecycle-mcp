@@ -136,7 +136,7 @@ The server exposes 23 tools (24 with `LIFECYCLE_GITHUB=on`) across 7 handler mod
 
 **Architecture Management (4 tools):**
 - `create_architecture_decision` - Record ADRs
-- `update_architecture` - Edit content while Proposed
+- `update_architecture` - Edit content while Proposed, or record a dated amendment against an Accepted decision
 - `update_architecture_status` - Update status of one or many ADRs; Superseded needs a supersedes link
 - `query_architecture_decisions` - Search architecture decisions (text list plus structured records)
 
@@ -199,7 +199,10 @@ The server uses the `LIFECYCLE_DB` environment variable to specify the SQLite da
 - **Strict tool inputs**: `server.py` adds `additionalProperties: false` to every tool schema, so undeclared fields are refused by name. Declare every new parameter in the tool definition. The server validates calls itself, in `_route_tool_call` under `@server.call_tool(validate_input=False)`: the MCP layer would otherwise refuse them before any of our code ran, leaving the refusal unlogged and its message unimprovable. A type error whose parameter has a close-named sibling that accepts the value names that sibling (`requirement_id` → `requirement_ids`), read from the tool's own schema rather than a list of pairs (roadmap R19)
 - **Editing records**: every update tool goes through `BaseHandler._apply_edit`. It bumps `revision` once, logs a `field_edit` event per changed field, honours `if_revision`, and takes a `check` hook for lifecycle rules (raise `EditRefused`) and a `relink` hook for link changes inside the same transaction. Rules:
   - requirement edits at Approved or later need a reason
-  - ADRs are editable only while Proposed
+  - ADRs are editable only while Proposed. An Accepted one takes a dated `amendment` instead (roadmap R20): it is a
+    `lifecycle_events` row of its own kind, never an `UPDATE` on `architecture`, so the decision's text, revision and
+    `updated_at` are untouched and "the original is never altered" holds of the stored row rather than the rendering.
+    `amendments()` and `format_amendments()` in `architecture_handler.py` render it for both details and export
   - deletes (`BaseHandler._delete_entity`) only remove early-stage records nothing depends on
 - **Status tools**: each `_update_*_status` passes a per-record `_change_*_status` to `BaseHandler._change_statuses`,
   which runs it for the single ID or for each ID of the list form (`*_ids`) and builds the response; a per-record

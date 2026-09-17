@@ -63,7 +63,9 @@ PENDING_COLUMNS = {
     "architecture": {},
 }
 
-# Tool properties that are not columns: record IDs, links stored in relationships, and edit options.
+# Tool properties that are not columns: record IDs, links stored in relationships, edit options, and amendment,
+# which is recorded as a lifecycle event against a decision rather than written to any architecture column, so that
+# an accepted decision's own row is never touched (roadmap R20).
 NON_COLUMN_PROPERTIES = {
     "requirement_id",
     "task_id",
@@ -73,6 +75,7 @@ NON_COLUMN_PROPERTIES = {
     "reason",
     "actor",
     "if_revision",
+    "amendment",
 }
 
 # Tool properties stored under a different column name.

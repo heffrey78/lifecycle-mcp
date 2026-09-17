@@ -159,7 +159,7 @@ Results are text for the model to read. Most tools also return the same facts as
 
 **Architecture decisions**
 - `create_architecture_decision` - Record architecture decisions (ADRs)
-- `update_architecture` - Edit a Proposed architecture decision
+- `update_architecture` - Edit a Proposed architecture decision, or record a dated amendment against an Accepted one
 - `update_architecture_status` - Update the status of one or many architecture decisions; Superseded comes from a supersedes link
 - `query_architecture_decisions` - Search and filter architecture decisions; the matching records also come back as structured data
 
@@ -188,7 +188,7 @@ These rules apply to `update_requirement`, `update_task`, `update_architecture` 
 - **Revisions guard against lost updates.** Each record has a revision, shown in its details, that goes up by one with every update that changes something. Pass `if_revision` to have the update refused, with nothing written, when the record has changed since you read it.
 - **Approved requirements need a reason.** Editing a requirement at Approved or later requires `reason`. The requirement then shows as *Changed Since Last Review* in `get_details`, `trace_requirement` and `get_project_status`, listing the edited fields.
 - **The next status change is the acknowledgement.** There is no separate acknowledgement step: the requirement's next status transition clears the flag, and that transition's comment records the review.
-- **Decided architecture is not rewritten.** Architecture decisions can be edited only while Proposed. To change a decided one, record a new decision with `create_architecture_decision` and link it with `create_relationship` (`supersedes`, newer to older), which moves the old one to Superseded.
+- **Decided architecture is not rewritten.** Architecture decisions can be edited only while Proposed. To change a decided one, record a new decision with `create_architecture_decision` and link it with `create_relationship` (`supersedes`, newer to older), which moves the old one to Superseded. To correct an accepted decision without changing direction - a number the work later measured differently, say - pass `amendment` to `update_architecture`. It records a dated, attributed note beside the decision and never touches the decision's own text, so this is an addition to the rule rather than an exception to it.
 - **Deleting is for mistakes.** Only Draft requirements, Not Started tasks and Proposed architecture decisions can be deleted, and only when nothing depends on them. Refusals name the blocking records. A deleted record's own links go with it, and its history remains.
 
 #### `get_entity_history`
@@ -464,10 +464,13 @@ Search and filter architecture decisions by various criteria.
 #### `update_architecture`
 Edit an architecture decision's content while it is Proposed. Decisions in any other status are refused: record a new decision with `create_architecture_decision` and link it to the old one with a `supersedes` relationship, which moves the old one to Superseded.
 
+An Accepted decision can instead be **amended**: `amendment` records a dated, attributed correction, carrying its `reason`, against the decision. Nothing about the decision is edited - its text, revision and timestamp are left exactly as they were - and the amendment is stored as a lifecycle event, so `get_entity_history` shows it as its own kind of entry. Amendments render directly beneath the decision they correct in `get_details` and in the exported architecture documentation, marked as later corrections, so a reader cannot take in the outdated text without seeing them. Pass `amendment` on its own; amending a Proposed decision is refused, pointing at the edit it should be.
+
 **Parameters:**
 - `architecture_id` (required): Architecture ID
-- `title`, `context`, `decision`, `consequences`, `decision_drivers`, `considered_options`, `authors`, `deciders`, `implementation_notes`, `validation_criteria`, `risk_assessment` (at least one): New values, with the same types as in `create_architecture_decision`
-- `reason`, `actor`, `if_revision` (optional): As in `update_requirement`
+- `title`, `context`, `decision`, `consequences`, `decision_drivers`, `considered_options`, `authors`, `deciders`, `implementation_notes`, `validation_criteria`, `risk_assessment` (at least one, when editing): New values, with the same types as in `create_architecture_decision`
+- `amendment` (instead of the fields above): A dated correction to an Accepted decision
+- `reason`, `actor`, `if_revision` (optional): As in `update_requirement`. `reason` is carried on the amendment
 
 ### Project Monitoring
 

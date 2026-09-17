@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### Errors that explain themselves, and a call log that sees them (roadmap R18, R19)
+
+Both findings came out of the linkcheck dogfooding run, and both had one cause. Schema validation ran in the MCP
+layer, before any of this server's code, so a call it refused left no trace in `LIFECYCLE_CALL_LOG` and its message
+could not be improved. That run ended with 9 errors in the server log against 11 in the client's, and the two the
+server could not see were the two where the client got the interface wrong - the most informative signal the log
+could carry (F-53). One of them cost about 5% of the run's total tool traffic: a list passed to `requirement_id` was
+refused with `['REQ-1-FUNC', ...] is not of type 'string'`, which names the value and never mentions that
+`requirement_ids` sits one character away, and sent the run writing up a defect that did not exist (F-54).
+
+#### Added
+- A type error on a parameter whose schema has a near neighbour accepting the value names that neighbour: passing a
+  list to `requirement_id` now answers that `requirement_id` takes a string and `requirement_ids` takes an array and
+  accepts what you passed. The neighbour is read from the tool's own schema rather than a list of known pairs, so a
+  new singular/plural pair is covered the day it is declared. A type error with no such neighbour is unchanged.
+- Every call the server receives reaches the call log, including one its schema refused and one naming a tool that
+  does not exist. Those carry `error_kind` (`validation`, `unknown_tool` or `handler`) and `rejected`, the rule and
+  parameter the refusal names - never the value, because jsonschema quotes it in the message and the log has never
+  held argument values.
+- `scripts/tool_usage_report.py` counts calls refused before a handler ran apart from handler errors, names the
+  tools attracting them, and prints both totals so they can be seen to add up.
+
+#### Changed
+- The server validates tool input itself, in `_route_tool_call` under `@server.call_tool(validate_input=False)`,
+  against the same schemas `tools/list` serves and in the same order as before: after the tool is resolved, before
+  short IDs are.
+- `docs/tool-surface/usage-evidence.md` records that every figure on it undercounts refused calls. Both sessions it
+  covers predate this change, and the logs that would re-derive them cannot be recovered.
+
 ### Fields that get filled, and requirements that stay fresh (roadmap R11)
 
 The interview tools R16 removed are not coming back. Measured in this project's own tracker, guided questioning was

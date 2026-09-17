@@ -649,6 +649,39 @@ class TaskHandler(BaseHandler):
             )
         return reasons
 
+    def _nothing_ready(self, clauses: list[str], where_params: list[Any]) -> str:
+        """Why nothing is ready to start: no work left, everything waiting, or it is already under way (R17).
+
+        clauses and where_params are the query's filters without "ready", so the count covers the same tasks.
+        """
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        row = self.db.execute_query(
+            "SELECT COALESCE(SUM(t.status = 'In Progress'), 0) AS in_progress, "
+            "COALESCE(SUM(t.status = 'Blocked'), 0) AS blocked, "
+            "COALESCE(SUM(t.status = 'Not Started'), 0) AS waiting, "
+            "COALESCE(SUM(t.status NOT IN ('Complete', 'Abandoned')), 0) AS open_tasks "
+            f"FROM tasks t {where}",
+            where_params,
+            fetch_one=True,
+            row_factory=True,
+        )
+        if row is None or not row["open_tasks"]:
+            return "🏁 No tasks remain: every task is Complete or Abandoned"
+        waiting = [
+            f"{count} {label}"
+            for count, label in ((row["blocked"], "Blocked"), (row["waiting"], "waiting on dependencies"))
+            if count
+        ]
+        if waiting:
+            under_way = f"; {row['in_progress']} already In Progress" if row["in_progress"] else ""
+            return (
+                f"⏳ Every remaining task is waiting: {', '.join(waiting)}{under_way} "
+                "(get_project_status says what each one waits on)"
+            )
+        if row["in_progress"]:
+            return f"🚧 Nothing new to start: {row['in_progress']} task(s) already In Progress"
+        return "Try adjusting search criteria"
+
     def _query_tasks(self, **params) -> list[TextContent]:
         """Query tasks with filters"""
         try:
@@ -666,6 +699,9 @@ class TaskHandler(BaseHandler):
                 if params.get(column):
                     where_clauses.append(f"t.{column} = ?")
                     where_params.append(params[column])
+
+            # The filters without "ready", so an empty ready result can count what is left (roadmap R17)
+            other_clauses, other_params = list(where_clauses), list(where_params)
 
             order_by = "t.priority, t.created_at DESC"
             if params.get("ready"):
@@ -688,6 +724,11 @@ class TaskHandler(BaseHandler):
             structured = {"tasks": self._record_dicts(tasks, TASK_JSON_FIELDS), "count": len(tasks)}
 
             if not tasks:
+                if params.get("ready"):
+                    # Nothing ready has three quite different causes, and which one it is is the answer (roadmap R17)
+                    return self._create_structured_response(
+                        "INFO", "No tasks ready to start", structured, self._nothing_ready(other_clauses, other_params)
+                    )
                 return self._create_structured_response(
                     "INFO", "No tasks found", structured, "Try adjusting search criteria"
                 )

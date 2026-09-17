@@ -147,7 +147,7 @@ Results are text for the model to read. Most tools also return the same facts as
 - `create_requirement` - Create new requirements
 - `update_requirement` - Edit a requirement's content (a reason is required at Approved or later)
 - `update_requirement_status` - Move one or many requirements through lifecycle states, stepping through the allowed path
-- `query_requirements` - Search and filter requirements; the matching records also come back as structured data
+- `query_requirements` - Search and filter requirements, including the ones whose work is done and only the decision is missing; the matching records also come back as structured data
 - `trace_requirement` - Trace requirement through implementation
 
 **Tasks**
@@ -297,6 +297,7 @@ Search and filter requirements by various criteria.
 - `priority` (optional): Filter by priority level
 - `type` (optional): Filter by requirement type
 - `search_text` (optional): Text search in title and desired state
+- `work_complete` (optional): `true` for the requirements whose linked tasks are all Complete but that have not reached Implemented - the work is done and only the decision is missing
 
 #### `trace_requirement`
 Trace a requirement through its complete implementation lifecycle.
@@ -382,6 +383,8 @@ Search and filter tasks by various criteria.
 - `ready` (optional): `true` for Not Started tasks whose dependencies are all Complete, highest priority first. A task waits on the tasks it depends on or requires, and on the tasks that block it
 
 Filters combine.
+
+When `ready` finds nothing, the answer says which case it is rather than that no tasks were found: no tasks remain, every remaining task is waiting (with how many are Blocked and how many wait on dependencies), or the only startable work is already In Progress.
 
 #### `sync_github_tasks`
 Sync tasks from their linked GitHub issues, with conflict detection. Listed only when `LIFECYCLE_GITHUB=on`.
@@ -582,6 +585,7 @@ Refused calls reach the call log like any other when `LIFECYCLE_CALL_LOG` is set
 - `LIFECYCLE_DB`: Path to SQLite database file (default: "./lifecycle.db")
 - `LIFECYCLE_GITHUB`: Set to `on` to create and sync a GitHub issue for each task (default: off). Requires an authenticated `gh` CLI and a github.com `origin` remote in the server's working directory. When off, the server never runs `gh` or `git`, and the `sync_github_tasks` tool is not listed.
 - `LIFECYCLE_RULES`: How strictly risky status moves are treated - `off`, `warn` or `enforce` (default: `warn`). Anything else falls back to `warn`.
+- `LIFECYCLE_STALE_AFTER`: How many days a requirement may go unchecked before `get_project_status` chases it (default: 14). `0` chases every requirement as soon as it is written. Anything that is not a number of days falls back to the default.
 - `LIFECYCLE_CALL_LOG`: Path to a file where the server appends one JSON line per tool call: tool name, argument names (not values), duration, whether it failed and response size. Off by default. Every call the server receives is logged, including one its schema refused and one naming a tool that does not exist: those carry `error_kind` (`validation`, `unknown_tool`) and the rule and parameter they were refused by, so a session's totals cover the calls a client got wrong. `scripts/tool_usage_report.py` summarises these logs.
 
 ### Writing Requirements
@@ -590,7 +594,9 @@ The server offers an MCP prompt, `capture_requirement`, listed under `prompts/li
 
 New records also say when they are thin for their kind: a requirement with no `acceptance_criteria`, an NFUNC requirement with no `validation_metrics`, a P0 or P1 task with no `test_plan`. These are workflow rules, so they warn by default, refuse under `LIFECYCLE_RULES=enforce`, and are silent under `off`.
 
-A requirement's details show when anyone last checked it against reality, and `get_project_status` lists the ones whose content changed after that. Commenting on a requirement or moving its status counts as checking it.
+A requirement's details show when anyone last checked it against reality, and `get_project_status` lists the ones worth re-reading under Needs Verification: those whose content changed after the last check, and those nobody has checked for longer than `LIFECYCLE_STALE_AFTER` days. Writing a requirement counts as the first check, and after that commenting on it or moving its status does, so nothing is chased on the day it was written. The line states the two times it holds - when the content changed, and when it was last checked - and never claims to know the moment the requirement went stale.
+
+When every task implementing a requirement is Complete but the requirement has not reached Implemented, the work is done and only the decision is missing. `get_project_status` names those requirements under Work Complete, Decision Pending, and `query_requirements` finds them with `work_complete`. Nothing moves on its own: the tracker prompts and the person decides.
 
 ### Workflow Rules
 

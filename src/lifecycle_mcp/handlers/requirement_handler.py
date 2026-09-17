@@ -7,12 +7,13 @@ Handles all requirement-related operations
 import json
 from collections import deque
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from typing import Any
 
 from mcp.types import TextContent
 
 from ..database_manager import DatabaseManager
-from ..rules import thin_record_reasons
+from ..rules import stale_after_days, thin_record_reasons
 from .base_handler import (
     EDIT_OPTION_PROPERTIES,
     STATUS_ID_LIST_PROPERTY,
@@ -100,6 +101,13 @@ OPEN_TASKS_SQL = """
 # approved requirement, and validation is a deliberate step (ADR-0003).
 REQUIREMENT_STOP_STATUSES = ("Approved", "Validated")
 
+# Requirements whose implementing tasks are all Complete but that have not reached Implemented: the work is done and
+# only the decision is missing. The counters are kept by triggers and count leaf tasks (F-22), and the tracker knew
+# both facts all along without ever putting them together (roadmap R17, F-52).
+WORK_COMPLETE_WHERE = (
+    "task_count > 0 AND tasks_completed >= task_count AND status NOT IN ('Implemented', 'Validated', 'Deprecated')"
+)
+
 
 def requirement_path(current: str, target: str, stops: Iterable[str] = REQUIREMENT_STOP_STATUSES) -> list[str] | None:
     """The shortest allowed sequence of statuses from current to target that passes through none of stops"""
@@ -133,7 +141,7 @@ def refused_move_reason(current: str, target: str) -> str:
 # Content edits to reviewed requirements made after their latest status change. The marker is derived rather than
 # stored: the next status transition clears it, and that transition's comment serves as the acknowledgement.
 CHANGES_SINCE_REVIEW_SQL = """
-    SELECT e.entity_id, r.title, r.status, e.field FROM lifecycle_events e
+    SELECT e.entity_id, r.title, r.status, e.field, e.occurred_at FROM lifecycle_events e
     JOIN requirements r ON r.id = e.entity_id
     WHERE e.entity_type = 'requirement' AND e.event_type = 'field_edit'
       AND r.status IN (SELECT value FROM json_each(?))
@@ -144,9 +152,10 @@ CHANGES_SINCE_REVIEW_SQL = """
 """
 
 
-# When a requirement was last checked against reality, and when its content last changed. Verification is a comment
-# or a status move: someone looked at it and said something. Both are derived from what is already recorded, the way
-# changes_since_review is, so there is no column to keep in step (roadmap R11).
+# When a requirement was last checked against reality, and when its content last changed. Writing it counts as the
+# first check, and after that a comment or a status move does: someone looked at it and said something. All of it is
+# derived from what is already recorded, the way changes_since_review is, so there is no column to keep in step
+# (roadmap R11, R17).
 #
 # Unlike changes_since_review this covers every status, including Draft: a requirement written once and never
 # re-checked is exactly the case that goes stale, and six did in this project before anyone noticed.
@@ -154,11 +163,13 @@ CHANGES_SINCE_REVIEW_SQL = """
 # the row id settles the order, the way changes_since_review already uses it; comments live in another table, so a
 # comment in the same second as an edit counts as checking it.
 LAST_VERIFIED_SQL = """
-    SELECT r.id, r.title, r.status,
+    SELECT r.id, r.title, r.status, r.created_at,
         (SELECT MAX(e.id) FROM lifecycle_events e
-         WHERE e.entity_type = 'requirement' AND e.entity_id = r.id AND e.event_type = 'status_change') AS moved_event,
+         WHERE e.entity_type = 'requirement' AND e.entity_id = r.id
+           AND e.event_type IN ('status_change', 'created')) AS checked_event,
         (SELECT MAX(occurred_at) FROM lifecycle_events e
-         WHERE e.entity_type = 'requirement' AND e.entity_id = r.id AND e.event_type = 'status_change') AS moved_at,
+         WHERE e.entity_type = 'requirement' AND e.entity_id = r.id
+           AND e.event_type IN ('status_change', 'created')) AS checked_at,
         (SELECT MAX(created_at) FROM reviews v
          WHERE v.entity_type = 'requirement' AND v.entity_id = r.id) AS commented_at,
         (SELECT MAX(e.id) FROM lifecycle_events e
@@ -171,41 +182,78 @@ LAST_VERIFIED_SQL = """
     WHERE r.status != 'Deprecated'
 """
 
+# Stored times are UTC to the second, as SQLite's CURRENT_TIMESTAMP writes them.
+TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+def days_since(stamp: str | None, now: datetime | None = None) -> float | None:
+    """Days between a stored timestamp and now; None when there is no readable time"""
+    try:
+        written = datetime.strptime(stamp, TIMESTAMP_FORMAT).replace(tzinfo=timezone.utc)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return max(((now or datetime.now(timezone.utc)) - written).total_seconds() / 86400, 0.0)
+
+
+def describe_age(days: float | None) -> str:
+    """How long ago that was, for a report line"""
+    if days is None:
+        return "at an unknown time"
+    whole = int(days)
+    if whole == 0:
+        # Not "today": a check at 16:39 yesterday is under a day old and saying today contradicts the date beside it.
+        return "less than a day ago"
+    return f"{whole} day{'s' if whole != 1 else ''} ago"
+
 
 def verification(db: DatabaseManager, requirement_id: str | None = None) -> dict[str, dict[str, Any]]:
-    """Each requirement's last verification and last content change: ID -> title, status, verified_at, changed_at.
+    """Each requirement's last check and last content change: ID -> title, status, verified_at, changed_at and why
+    it needs re-reading.
 
-    verified_at is None when nobody has commented on it or moved it since it was written. A requirement is stale
-    when its content changed after that, which stale_requirements() reports.
+    Writing a requirement starts its verification clock, so verified_at is always a time and nothing is reported as
+    never verified on the day it is written (roadmap R17, F-43). stale_reason says why it is worth re-reading:
+    "changed" when the content changed after the last check, "aged" when nobody has checked it for
+    stale_after_days(), and None when it is fresh.
     """
+    threshold = stale_after_days()
     sql, params = LAST_VERIFIED_SQL, []
     if requirement_id:
         sql, params = sql + " AND r.id = ?", [requirement_id]
     records: dict[str, dict[str, Any]] = {}
     for row in db.execute_query(sql, params, fetch_all=True, row_factory=True) or []:
-        verified_at = max(filter(None, (row["moved_at"], row["commented_at"])), default=None)
-        # Changed since it was checked? Against a status move the event ids settle it, even within one second.
-        # Against a comment only the times compare, and a comment in the same second counts as checking it.
-        moved_after = row["moved_event"] is not None and row["moved_event"] > (row["changed_event"] or 0)
+        verified_at = max(filter(None, (row["checked_at"], row["commented_at"], row["created_at"])), default=None)
+        # Checked since it last changed? Against an event the ids settle it, even within one second, and creation
+        # is both the first change and the first check, so those compare equal. Against a comment only the times
+        # compare, and a comment in the same second as an edit counts as checking it.
+        checked_after = row["checked_event"] is not None and row["checked_event"] >= (row["changed_event"] or 0)
         commented_after = row["commented_at"] is not None and row["commented_at"] >= (row["changed_at"] or "")
+        verified_since_change = bool(checked_after or commented_after)
+        age_days = days_since(verified_at)
+        if row["changed_at"] and not verified_since_change:
+            stale_reason = "changed"
+        elif age_days is not None and age_days >= threshold:
+            stale_reason = "aged"
+        else:
+            stale_reason = None
         records[row["id"]] = {
             "title": row["title"],
             "status": row["status"],
             "verified_at": verified_at,
             "changed_at": row["changed_at"],
-            "verified_since_change": bool(moved_after or commented_after),
+            "verified_since_change": verified_since_change,
+            "age_days": age_days,
+            "stale_reason": stale_reason,
         }
     return records
 
 
 def stale_requirements(db: DatabaseManager) -> dict[str, dict[str, Any]]:
-    """Requirements whose content changed after anyone last checked them, newest change first (roadmap R11)."""
-    stale = {
-        req_id: entry
-        for req_id, entry in verification(db).items()
-        if entry["changed_at"] and not entry["verified_since_change"]
-    }
-    return dict(sorted(stale.items(), key=lambda item: item[1]["changed_at"], reverse=True))
+    """Requirements worth re-reading, least recently checked first (roadmap R11, R17).
+
+    Either their content changed after the last check, or nobody has checked them for stale_after_days().
+    """
+    stale = {req_id: entry for req_id, entry in verification(db).items() if entry["stale_reason"]}
+    return dict(sorted(stale.items(), key=lambda item: item[1]["verified_at"] or ""))
 
 
 def changes_since_review(db: DatabaseManager, requirement_id: str | None = None) -> dict[str, dict[str, Any]]:
@@ -218,9 +266,12 @@ def changes_since_review(db: DatabaseManager, requirement_id: str | None = None)
         sql, params = sql + " AND e.entity_id = ?", [*params, requirement_id]
     changed: dict[str, dict[str, Any]] = {}
     for row in db.execute_query(sql + " ORDER BY e.id", params, fetch_all=True, row_factory=True) or []:
-        entry = changed.setdefault(row["entity_id"], {"title": row["title"], "status": row["status"], "fields": []})
+        entry = changed.setdefault(
+            row["entity_id"], {"title": row["title"], "status": row["status"], "fields": [], "edited_at": None}
+        )
         if row["field"] not in entry["fields"]:
             entry["fields"].append(row["field"])
+        entry["edited_at"] = row["occurred_at"]  # ordered by event id, so the latest edit wins
     return changed
 
 
@@ -298,6 +349,10 @@ class RequirementHandler(BaseHandler):
                         "priority": {"type": "string"},
                         "type": {"type": "string"},
                         "search_text": {"type": "string"},
+                        "work_complete": {
+                            "type": "boolean",
+                            "description": "Only those whose tasks are all Complete but that are not yet Implemented",
+                        },
                     },
                 },
             },
@@ -431,18 +486,24 @@ class RequirementHandler(BaseHandler):
         )
 
     def _last_verified_line(self, requirement_id: str) -> str:
-        """Report line saying when this requirement was last checked against reality (roadmap R11)"""
+        """Report line saying when this requirement was last checked against reality (roadmap R11, R17).
+
+        It states only the two times it holds - when the content changed, and when someone last checked it - and
+        never labels the last check as the moment the requirement went stale, which is the one thing it cannot know.
+        """
         entry = verification(self.db, requirement_id).get(requirement_id)
         if not entry:
             return ""
-        if not entry["verified_at"]:
-            return "\n- **⚠️ Never verified**: nobody has commented on this or moved it since it was written"
-        stale = entry["changed_at"] and not entry["verified_since_change"]
-        marker = "⚠️ Stale since" if stale else "Last Verified"
-        line = f"\n- **{marker}**: {entry['verified_at']}"
-        if stale:
-            line += f" (content changed at {entry['changed_at']}; a comment or status change marks it checked)"
-        return line
+        checked = f"{entry['verified_at']} ({describe_age(entry['age_days'])})"
+        marks_it = "a comment or status change marks it checked"
+        if entry["stale_reason"] == "changed":
+            return (
+                f"\n- **⚠️ Not Verified Since It Changed**: content changed {entry['changed_at']}, "
+                f"last checked {checked} ({marks_it})"
+            )
+        if entry["stale_reason"] == "aged":
+            return f"\n- **⚠️ Not Verified Recently**: last checked {checked}, unchanged since ({marks_it})"
+        return f"\n- **Last Verified**: {checked}"
 
     def _changed_since_review_line(self, requirement_id: str) -> str:
         """Report line flagging edits made since the latest status change, or "" when there are none"""
@@ -450,7 +511,8 @@ class RequirementHandler(BaseHandler):
         if not entry:
             return ""
         return (
-            f"\n- **⚠️ Changed Since Last Review**: {', '.join(entry['fields'])} edited at {entry['status']} "
+            f"\n- **⚠️ Changed Since Last Review**: {', '.join(entry['fields'])} edited {entry['edited_at']} "
+            f"while {entry['status']} "
             "(get_entity_history shows before, after and reason; the next status change clears this)"
         )
 
@@ -628,6 +690,10 @@ class RequirementHandler(BaseHandler):
                 search = f"%{params['search_text']}%"
                 where_params.extend([search, search])
 
+            if params.get("work_complete"):
+                # Work done, decision pending: the same requirements the dashboard names (roadmap R17)
+                where_clauses.append(WORK_COMPLETE_WHERE)
+
             where_clause = " AND ".join(where_clauses) if where_clauses else ""
 
             requirements = self.db.get_records(
@@ -654,6 +720,8 @@ class RequirementHandler(BaseHandler):
                 filters.append(f"type: {params['type']}")
             if params.get("search_text"):
                 filters.append(f"search: {params['search_text']}")
+            if params.get("work_complete"):
+                filters.append("work complete, decision pending")
             filter_desc = " | ".join(filters) if filters else "all requirements"
 
             # Build detailed list

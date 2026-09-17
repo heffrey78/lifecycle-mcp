@@ -10,7 +10,7 @@ from typing import Any
 from mcp.types import TextContent
 
 from .base_handler import BaseHandler
-from .requirement_handler import changes_since_review, stale_requirements
+from .requirement_handler import WORK_COMPLETE_WHERE, changes_since_review, describe_age, stale_requirements
 from .task_handler import TASK_DEPENDENCIES_SQL
 
 # Every Blocked task with its reason, and every Not Started task still waiting on a dependency, each with the
@@ -131,20 +131,40 @@ class StatusHandler(BaseHandler):
                         listed = ", ".join(item["abandoned_dependencies"])
                         report += f"  Abandoned dependencies: {listed} (drop the link, or abandon this task too)\n"
 
+            # Work finished, nobody told the requirement. The counters and the status were both here all along
+            # (roadmap R17, F-52).
+            awaiting = self._work_complete_requirements()
+            if awaiting:
+                report += f"\n## 🏁 Work Complete, Decision Pending ({len(awaiting)})\n"
+                for row in awaiting:
+                    tasks_done = f"{row['task_count']} task{'s' if row['task_count'] != 1 else ''} complete"
+                    report += (
+                        f"- {row['id']}: {row['title']} [{row['status']}] {tasks_done} "
+                        "- move it to Implemented, or say what is still missing\n"
+                    )
+
             changed = changes_since_review(self.db)
             if changed:
                 report += f"\n## ⚠️ Changed Since Last Review ({len(changed)})\n"
                 for req_id, entry in changed.items():
-                    report += f"- {req_id}: {entry['title']} [{entry['status']}] edited {', '.join(entry['fields'])}\n"
+                    report += (
+                        f"- {req_id}: {entry['title']} [{entry['status']}] edited {', '.join(entry['fields'])} "
+                        f"at {entry['edited_at']}\n"
+                    )
 
-            # Requirements nobody has checked since they were written drift away from the code (roadmap R11).
+            # Requirements nobody has checked since they changed, or for longer than the threshold, drift away from
+            # the code (roadmap R11, R17).
             stale = stale_requirements(self.db)
             if stale:
-                report += f"\n## ⚠️ Not Verified Since Last Change ({len(stale)})\n"
+                report += f"\n## ⚠️ Needs Verification ({len(stale)})\n"
                 for req_id, entry in stale.items():
-                    checked = entry["verified_at"] or "never"
-                    report += f"- {req_id}: {entry['title']} [{entry['status']}] changed {entry['changed_at']}, "
-                    report += f"last checked {checked}\n"
+                    checked = f"last checked {entry['verified_at']} ({describe_age(entry['age_days'])})"
+                    since = (
+                        f"content changed {entry['changed_at']}, "
+                        if entry["stale_reason"] == "changed"
+                        else "unchanged since, "
+                    )
+                    report += f"- {req_id}: {entry['title']} [{entry['status']}] {since}{checked}\n"
 
             # Add summary metrics
             report += self._add_summary_metrics(req_stats, task_stats)
@@ -158,20 +178,35 @@ class StatusHandler(BaseHandler):
             action_info = f"📈 {total_reqs} requirements | {completed_tasks}/{total_tasks} tasks complete"
             if blocked:
                 action_info += f" | ⚠️ {len(blocked)} blocked"
+            if awaiting:
+                action_info += f" | 🏁 {len(awaiting)} awaiting a decision"
             if changed:
                 action_info += f" | ⚠️ {len(changed)} changed since review"
             if stale:
-                action_info += f" | ⚠️ {len(stale)} not verified since changing"
+                action_info += f" | ⚠️ {len(stale)} needing verification"
 
             # The metrics get_project_metrics used to return come back as structured data (roadmap R10), with the
             # blocked items when they were asked for (roadmap R7)
             metrics = self._project_metrics()
+            metrics["requirements"]["work_complete"] = [row["id"] for row in awaiting]
             if include_blocked:
                 metrics["blocked"] = blocked
             return self._create_structured_response("INFO", key_info, metrics, action_info, report)
 
         except Exception as e:
             return self._create_error_response("Failed to get project status", e)
+
+    def _work_complete_requirements(self) -> list[Any]:
+        """Requirements whose tasks are all Complete but that have not reached Implemented (roadmap R17)"""
+        return (
+            self.db.execute_query(
+                f"SELECT id, title, status, task_count FROM requirements WHERE {WORK_COMPLETE_WHERE} "
+                "ORDER BY priority, id",
+                fetch_all=True,
+                row_factory=True,
+            )
+            or []
+        )
 
     def _blocked_items(self) -> list[dict[str, Any]]:
         """Blocked tasks with their reasons, tasks waiting on dependencies and requirements waiting on requirements"""

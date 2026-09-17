@@ -124,7 +124,7 @@ The server exposes 23 tools (24 with `LIFECYCLE_GITHUB=on`) across 7 handler mod
 - `create_requirement` - Create new requirements with validation
 - `update_requirement` - Edit content in place; reason required at Approved or later
 - `update_requirement_status` - Move one or many requirements; walks the allowed path, never through Approved or Validated
-- `query_requirements` - Search and filter requirements (text list plus structured records)
+- `query_requirements` - Search and filter requirements, or list those whose work is done and only the decision is missing (text list plus structured records)
 - `trace_requirement` - Full lifecycle traceability
 
 **Task Management (4 tools, plus 1 when GitHub is on):**
@@ -155,7 +155,7 @@ The server exposes 23 tools (24 with `LIFECYCLE_GITHUB=on`) across 7 handler mod
 - `create_architectural_diagrams` - Mermaid diagrams drawn from the stored links
 
 **Status Monitoring (1 tool):**
-- `get_project_status` - Project health dashboard with every blocked or waiting item, with metrics as structured data
+- `get_project_status` - Project health dashboard with every blocked or waiting item, the requirements whose work is done and those needing verification, with metrics as structured data
 
 ### Database Environment
 
@@ -171,9 +171,15 @@ The server uses the `LIFECYCLE_DB` environment variable to specify the SQLite da
   separate MCP primitive that costs nothing against the tool budget (roadmap R11)
 - **Thin records and staleness**: `rules.thin_record_reasons` says which fields a new record of that kind usually
   needs, through the same `_rule_warnings` helper as every other rule. `requirement_handler.verification` derives
-  when a requirement was last checked (a comment or a status move) and `stale_requirements` lists those changed
-  since; both read lifecycle events rather than a stored column, and use event ids because timestamps are
-  second-resolution (roadmap R11)
+  when a requirement was last checked (writing it, then a comment or a status move) and `stale_requirements` lists
+  those changed since or unchecked for longer than `rules.stale_after_days()` (`LIFECYCLE_STALE_AFTER`, default 14);
+  both read lifecycle events rather than a stored column, and use event ids because timestamps are second-resolution
+  (roadmap R11, R17)
+- **A signal that always fires teaches the reader to ignore it** (roadmap R17): creating a record starts its
+  verification clock rather than tripping the alarm, the staleness line states only the two times it holds (content
+  changed, last checked) and never invents a "stale since", and an empty ready-to-start result says which case it
+  is. `WORK_COMPLETE_WHERE` in `requirement_handler.py` is the one definition behind the dashboard's Work Complete,
+  Decision Pending section and `query_requirements(work_complete=True)`; neither moves a requirement
 - **Workflow rules are configurable**: `LIFECYCLE_RULES` is `off`, `warn` (the default) or `enforce`. A handler collects
   the reasons a status move is risky and passes them to `BaseHandler._rule_warnings`: warn returns them for the
   response text and `structuredContent`, enforce raises `StatusRefused` before anything is written, off checks

@@ -1,6 +1,10 @@
-"""A requirement shows when it was last checked against reality (roadmap R11, TASK-0072)."""
+"""A requirement shows when it was last checked against reality (roadmap R11, TASK-0072).
 
-import time
+Writing a requirement starts its verification clock, so a record nobody has touched since is fresh rather than
+suspect; it goes stale when its content changes after the last check, or when it ages past the threshold (R17).
+"""
+
+import asyncio
 
 from .test_tool_results import REQUIREMENT, call, mcp_server, text_of  # noqa: F401 (mcp_server is a fixture)
 
@@ -23,17 +27,22 @@ async def new_requirement(server, **overrides) -> str:
     return result.structuredContent["id"]
 
 
-async def test_a_requirement_nobody_has_touched_says_it_was_never_verified(mcp_server):  # noqa: F811
+async def test_writing_a_requirement_counts_as_checking_it(mcp_server):  # noqa: F811
     requirement = await new_requirement(mcp_server)
 
-    assert "**⚠️ Never verified**" in await details(mcp_server, requirement)
-    listed = await dashboard(mcp_server)
-    assert "Not Verified Since Last Change (1)" in listed
-    assert f"{requirement}" in listed and "last checked never" in listed
+    shown = await details(mcp_server, requirement)
+    assert "**Last Verified**" in shown and "less than a day ago" in shown
+    assert "Never verified" not in shown
+    assert "Needs Verification" not in await dashboard(mcp_server)
 
 
-async def test_a_comment_marks_it_checked(mcp_server):  # noqa: F811
+async def test_a_comment_marks_a_changed_requirement_checked_again(mcp_server):  # noqa: F811
     requirement = await new_requirement(mcp_server)
+    edited = await call(
+        mcp_server, "update_requirement", {"requirement_id": requirement, "current_state": "The index is rebuilt"}
+    )
+    assert not edited.isError, text_of(edited)
+    assert "**⚠️ Not Verified Since It Changed**" in await details(mcp_server, requirement)
 
     added = await call(
         mcp_server, "add_comment", {"entity_id": requirement, "comment": "Still matches the code", "author": "jeff"}
@@ -41,12 +50,13 @@ async def test_a_comment_marks_it_checked(mcp_server):  # noqa: F811
     assert not added.isError, text_of(added)
 
     shown = await details(mcp_server, requirement)
-    assert "**Last Verified**" in shown and "Never verified" not in shown
-    assert "Not Verified Since Last Change" not in await dashboard(mcp_server)
+    assert "**Last Verified**" in shown and "Not Verified" not in shown
+    assert "Needs Verification" not in await dashboard(mcp_server)
 
 
 async def test_a_status_move_marks_it_checked_too(mcp_server):  # noqa: F811
     requirement = await new_requirement(mcp_server)
+    await call(mcp_server, "update_requirement", {"requirement_id": requirement, "current_state": "Rebuilt on save"})
 
     moved = await call(
         mcp_server, "update_requirement_status", {"requirement_id": requirement, "new_status": "Under Review"}
@@ -60,7 +70,7 @@ async def test_changing_the_content_afterwards_makes_it_stale_again(mcp_server):
     requirement = await new_requirement(mcp_server)
     await call(mcp_server, "add_comment", {"entity_id": requirement, "comment": "Checked against the code"})
     # Comment times are second-resolution, so the edit has to land in a later second to be unambiguously after it.
-    time.sleep(1.1)
+    await asyncio.sleep(1.1)
 
     edited = await call(
         mcp_server,
@@ -70,14 +80,15 @@ async def test_changing_the_content_afterwards_makes_it_stale_again(mcp_server):
     assert not edited.isError, text_of(edited)
 
     shown = await details(mcp_server, requirement)
-    assert "**⚠️ Stale since**" in shown
+    assert "**⚠️ Not Verified Since It Changed**" in shown
     assert "a comment or status change marks it checked" in shown
     listed = await dashboard(mcp_server)
-    assert "Not Verified Since Last Change (1)" in listed and "⚠️ 1 not verified since changing" in listed
+    assert "Needs Verification (1)" in listed and "⚠️ 1 needing verification" in listed
 
 
 async def test_a_deprecated_requirement_is_not_chased(mcp_server):  # noqa: F811
     requirement = await new_requirement(mcp_server)
+    await call(mcp_server, "update_requirement", {"requirement_id": requirement, "current_state": "Rebuilt on save"})
     await call(mcp_server, "update_requirement_status", {"requirement_id": requirement, "new_status": "Deprecated"})
 
-    assert "Not Verified Since Last Change" not in await dashboard(mcp_server)
+    assert "Needs Verification" not in await dashboard(mcp_server)

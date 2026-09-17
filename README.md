@@ -565,6 +565,12 @@ Anywhere a tool takes a record ID, the zero padding and the trailing version can
 
 A requirement's short form keeps its type, because requirement numbers repeat across types: `REQ-12` on its own can mean four different records. Full stored IDs always work. An alias that matches nothing is refused as unknown, and one that matches several is refused naming the candidates, so a tool never acts on a guess. Stored IDs never change; this is only an input form.
 
+### Refused Calls
+
+A call whose arguments do not match the tool's schema is refused before anything is written, naming the field at fault. When the refused parameter has a near neighbour in the same schema that would have taken the value, the message names it: passing a list to `requirement_id` answers that `requirement_ids` takes an array and accepts what you passed. The suggestion is read from the tool's own schema, so a new singular/plural pair is covered the day it is declared.
+
+Refused calls reach the call log like any other when `LIFECYCLE_CALL_LOG` is set, so a session's totals cover the calls a client got wrong rather than only the ones that reached a handler.
+
 ## Entity ID Formats
 
 - **Requirements**: `REQ-XXXX-TYPE-VV` (e.g., REQ-0001-FUNC-00)
@@ -576,6 +582,7 @@ A requirement's short form keeps its type, because requirement numbers repeat ac
 - `LIFECYCLE_DB`: Path to SQLite database file (default: "./lifecycle.db")
 - `LIFECYCLE_GITHUB`: Set to `on` to create and sync a GitHub issue for each task (default: off). Requires an authenticated `gh` CLI and a github.com `origin` remote in the server's working directory. When off, the server never runs `gh` or `git`, and the `sync_github_tasks` tool is not listed.
 - `LIFECYCLE_RULES`: How strictly risky status moves are treated - `off`, `warn` or `enforce` (default: `warn`). Anything else falls back to `warn`.
+- `LIFECYCLE_CALL_LOG`: Path to a file where the server appends one JSON line per tool call: tool name, argument names (not values), duration, whether it failed and response size. Off by default. Every call the server receives is logged, including one its schema refused and one naming a tool that does not exist: those carry `error_kind` (`validation`, `unknown_tool`) and the rule and parameter they were refused by, so a session's totals cover the calls a client got wrong. `scripts/tool_usage_report.py` summarises these logs.
 
 ### Writing Requirements
 
@@ -602,7 +609,6 @@ The rules:
 - **Decision moves:** an architecture decision moving outside its vocabulary says where that status usually goes. The ADR statuses and the TDD chain are separate sets.
 
 Three rules are always on, whatever the mode, because they protect what the server maintains itself: a requirement cannot be Validated while a linked task is open, Superseded needs a `supersedes` link, and a requirement's status still follows its transition map.
-- `LIFECYCLE_CALL_LOG`: Path to a file where the server appends one JSON line per tool call: tool name, argument names (not values), duration, whether it failed and response size. Off by default. `scripts/tool_usage_report.py` summarises these logs.
 
 ## Troubleshooting
 

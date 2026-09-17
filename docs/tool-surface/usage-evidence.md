@@ -40,7 +40,13 @@ names.
 - The re-run is a scripted replay by the agent that wrote the edit tools, not an independent agent discovering the
   tools. It shows what a complete lifecycle needs; it says little about how easily a newcomer picks the right tool.
   Its zero error count is not evidence of discoverability.
-- Calls the MCP layer rejects before routing (for example an undeclared field) are not in the server log.
+- **Every figure on this page undercounts refused calls.** Both sessions predate R18: the MCP layer rejected a
+  call before routing (an undeclared field, or the wrong type for a parameter) and only handlers wrote to the
+  log, so those calls left no trace server-side. The re-run's "0 error results" and the original's 11 are
+  counts of what the log could see, not of what the sessions did. The linkcheck run later measured the gap
+  directly - 9 errors server-side against 11 client-side (F-53). Validation now happens in the server's own
+  routing path and every call is logged, with `error_kind` telling a refusal from a handler error; these two
+  sessions are not re-derived, because the logs that would explain them cannot be recovered.
 - Implementation was not redone: the build phase reports progress against code that already existed.
 - GitHub integration was off in both sessions, so the two sync tools could not be used.
 

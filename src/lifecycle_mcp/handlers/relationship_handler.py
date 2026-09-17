@@ -159,6 +159,10 @@ class RelationshipHandler(BaseHandler):
             return text + (f" (reason: {self._clip(row['reason'])})" if row["reason"] else "")
         if row["event_type"] == "status_change":
             return f"status {row['from_value']} → {row['to_value']}{by}"
+        if row["event_type"] == "amendment":
+            # Its own kind of entry: not an edit of the decision, and not a comment about it (roadmap R20)
+            text = f"amended {row['field']}{by}: {self._clip(row['to_value'])}"
+            return text + (f" (reason: {self._clip(row['reason'])})" if row["reason"] else "")
         return f"{row['event_type']}{by}"
 
     async def _create_relationship(self, args: dict[str, Any]) -> list[TextContent]:

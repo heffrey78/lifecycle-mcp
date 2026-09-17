@@ -8,6 +8,7 @@ from typing import Any
 
 from mcp.types import TextContent
 
+from ..database_manager import DatabaseManager
 from .base_handler import (
     EDIT_OPTION_PROPERTIES,
     STATUS_ID_LIST_PROPERTY,
@@ -84,6 +85,38 @@ ARCHITECTURE_CURATED_PROPERTIES = {
     },
 }
 
+# An amendment is a dated, attributed correction recorded against an accepted decision. It is not an edit: the
+# decision's own columns are never touched, so "the original is never altered" is true of the stored row and not
+# merely of the rendering. It lives as a lifecycle event because that is what it is - something that happened at a
+# time, by someone, for a reason - which also gives get_entity_history its own entry for free (roadmap R20, F-51).
+AMENDMENTS_SQL = """
+    SELECT occurred_at, to_value, actor, reason FROM lifecycle_events
+    WHERE entity_type = 'architecture' AND entity_id = ? AND event_type = 'amendment'
+    ORDER BY id
+"""
+
+
+def amendments(db: DatabaseManager, architecture_id: str) -> list[Any]:
+    """Every amendment recorded against a decision, oldest first (roadmap R20)"""
+    return db.execute_query(AMENDMENTS_SQL, [architecture_id], fetch_all=True, row_factory=True) or []
+
+
+def format_amendments(rows: list[Any], heading: str = "## Amendments") -> str:
+    """Amendments rendered to sit with the decision they correct; "" when there are none.
+
+    They are marked as later corrections and never merged into the decision text above them, so a reader can see
+    both what was decided and what was later found to be wrong about it.
+    """
+    if not rows:
+        return ""
+    lines = ""
+    for row in rows:
+        by = f" by {row['actor']}" if row["actor"] else ""
+        lines += f"- **{row['occurred_at']}**{by}: {row['to_value']}\n"
+        if row["reason"]:
+            lines += f"  Reason: {row['reason']}\n"
+    return f"\n{heading} ({len(rows)})\nLater corrections; the decision above stands as it was written.\n{lines}"
+
 
 class ArchitectureHandler(BaseHandler):
     """Handler for architecture decision-related MCP tools"""
@@ -156,7 +189,7 @@ class ArchitectureHandler(BaseHandler):
             },
             {
                 "name": "update_architecture",
-                "description": "Edit while Proposed. Otherwise record a new decision that supersedes it.",
+                "description": ("Edit while Proposed; correct an Accepted one with amendment. Otherwise supersede it."),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -170,6 +203,10 @@ class ArchitectureHandler(BaseHandler):
                         "authors": {"type": "array", "items": {"type": "string"}},
                         **ARCHITECTURE_CURATED_PROPERTIES,
                         **EDIT_OPTION_PROPERTIES,
+                        "amendment": {
+                            "type": "string",
+                            "description": "Dated correction to an Accepted decision; its own text stays as written",
+                        },
                     },
                     "required": ["architecture_id"],
                 },
@@ -219,17 +256,22 @@ class ArchitectureHandler(BaseHandler):
             return self._create_error_response(error)
         architecture_id = params["architecture_id"]
         changes = {column: params[name] for name, column in ARCHITECTURE_EDIT_COLUMNS.items() if name in params}
+        amendment = (params.get("amendment") or "").strip()
+        if amendment:
+            return self._amend_architecture(architecture_id, amendment, changes, params)
         if not changes:
             return self._create_error_response(
-                f"Nothing to update: pass at least one of {', '.join(ARCHITECTURE_EDIT_COLUMNS)}"
+                f"Nothing to update: pass at least one of {', '.join(ARCHITECTURE_EDIT_COLUMNS)}, or amendment"
             )
 
         def only_while_proposed(before: dict[str, Any]) -> None:
             if before["status"] != "Proposed":
                 raise EditRefused(
                     f"Architecture decision {architecture_id} is {before['status']}; only Proposed decisions can be "
-                    "edited. Record the change as a new decision with create_architecture_decision, then link it "
-                    "with create_relationship (relationship_type supersedes), which moves this one to Superseded."
+                    "edited. Correct it with amendment, which records a dated note beside the decision and leaves "
+                    "its text as written, or record the change as a new decision with create_architecture_decision "
+                    "and link it with create_relationship (relationship_type supersedes), which moves this one to "
+                    "Superseded."
                 )
 
         try:
@@ -252,6 +294,59 @@ class ArchitectureHandler(BaseHandler):
             f"Architecture decision {architecture_id} updated",
             {"id": architecture_id, "changed": result.changed, "revision": result.revision},
             self._describe_edit(result),
+        )
+
+    def _amend_architecture(
+        self, architecture_id: str, amendment: str, changes: dict[str, Any], params: dict[str, Any]
+    ) -> list[TextContent]:
+        """Record a dated correction against an Accepted decision, leaving its own text as written (roadmap R20)"""
+        if changes:
+            return self._create_error_response(
+                "Pass amendment on its own: it is recorded beside the decision rather than editing "
+                f"{', '.join(sorted(changes))}. Amend the decision, or supersede it with a new one."
+            )
+        rows = self.db.get_records("architecture", "status", "id = ?", [architecture_id])
+        if not rows:
+            return self._create_error_response(f"Architecture decision {architecture_id} not found")
+
+        status = rows[0]["status"]
+        if status != "Accepted":
+            return self._create_error_response(self._cannot_amend(architecture_id, status))
+
+        # No UPDATE on architecture: the decision's columns and revision are left exactly as they were.
+        self.db.insert_record(
+            "lifecycle_events",
+            {
+                "entity_type": "architecture",
+                "entity_id": architecture_id,
+                "event_type": "amendment",
+                "field": "decision_outcome",
+                "to_value": amendment,
+                "actor": params.get("actor") or "MCP User",
+                "reason": params.get("reason"),
+            },
+        )
+
+        recorded = amendments(self.db, architecture_id)
+        structured = {"id": architecture_id, "status": status, "amendments": len(recorded)}
+        return self._create_structured_response(
+            "SUCCESS",
+            f"Architecture decision {architecture_id} amended",
+            structured,
+            f"📝 {len(recorded)} amendment(s) | the decision's own text is unchanged",
+        )
+
+    @staticmethod
+    def _cannot_amend(architecture_id: str, status: str) -> str:
+        """Why this decision can't be amended, naming the operation that fits its status instead"""
+        if status == "Proposed":
+            return (
+                f"Architecture decision {architecture_id} is Proposed; edit it instead, by passing the fields to "
+                "change. An amendment corrects a decision that has already been accepted."
+            )
+        return (
+            f"Architecture decision {architecture_id} is {status}; only an Accepted decision can be amended. "
+            "A decision that was never accepted has nothing to correct."
         )
 
     async def _create_architecture_decision(self, **params) -> list[TextContent]:
@@ -491,6 +586,8 @@ class ArchitectureHandler(BaseHandler):
 ## Decision
 {arch["decision_outcome"]}
 """
+            # With the decision, never merged into it: the reader sees what was decided and what was corrected.
+            report += format_amendments(amendments(self.db, arch["id"]))
 
             if arch["decision_drivers"]:
                 drivers = self._safe_json_loads(arch["decision_drivers"])

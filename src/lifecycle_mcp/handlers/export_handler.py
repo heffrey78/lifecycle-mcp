@@ -11,7 +11,7 @@ from typing import Any
 
 from mcp.types import TextContent
 
-from .architecture_handler import ARCHITECTURE_LIST_SECTIONS
+from .architecture_handler import ARCHITECTURE_LIST_SECTIONS, amendments, format_amendments
 from .base_handler import BaseHandler
 from .requirement_handler import REQUIREMENT_LIST_SECTIONS
 from .task_handler import TASK_LIST_SECTIONS
@@ -364,6 +364,9 @@ class ExportHandler(BaseHandler):
 
             content += f"### Context\n{arch['context']}\n\n"
             content += f"### Decision\n{arch['decision_outcome']}\n\n"
+            # A hand-off document has to carry the correction with the decision, not leave it in the comments (R20)
+            amended = format_amendments(amendments(self.db, arch["id"]), heading="### Amendments")
+            content += f"{amended}\n" if amended else ""
 
             if arch["decision_drivers"]:
                 drivers = self._safe_json_loads(arch["decision_drivers"])

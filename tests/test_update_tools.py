@@ -104,8 +104,9 @@ async def test_approved_edit_is_flagged_as_changed_until_the_next_status_change(
     )
 
     assert "changed since last review (Approved)" in updated
-    flag = f"{REVIEW_FLAG}**: acceptance_criteria edited at Approved"
-    assert flag in await requirement_details(mcp_server)
+    flag = f"{REVIEW_FLAG}**: acceptance_criteria edited "  # the time of the edit follows it (R17)
+    shown = await requirement_details(mcp_server)
+    assert flag in shown and "while Approved" in shown
     traced = await trace(mcp_server)
     assert flag in traced and "⚠️ changed since last review" in traced
     status = await ok(mcp_server, "get_project_status", {})

@@ -41,7 +41,7 @@ async def test_1_criteria_edit_on_an_approved_requirement_is_visible_and_flagged
 
     details = await ok(mcp_server, "get_details", {"entity_id": REQ})
     assert "- Ranks results by relevance" in details
-    assert f"{FLAG}**: acceptance_criteria edited at Approved" in details
+    assert f"{FLAG}**: acceptance_criteria edited " in details and "while Approved" in details
     assert f"{FLAG}**: acceptance_criteria" in await ok(mcp_server, "trace_requirement", {"requirement_id": REQ})
     assert f"{FLAG} (1)" in await ok(mcp_server, "get_project_status", {})
     export = {"project_name": "r6a", "output_directory": str(tmp_path), "include_tasks": False}

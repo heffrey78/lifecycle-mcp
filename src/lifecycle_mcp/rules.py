@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Workflow rules: how strictly the server treats risky status moves (roadmap R8, ADR-0004).
+"""Workflow rules: how strictly the server treats risky status moves, and the thresholds they read (roadmap R8,
+ADR-0004).
 
 LIFECYCLE_RULES picks the mode. In warn, the default, every call keeps the outcome it has today and a risky move
 only gains an explanation. In enforce the move is refused. In off nothing is checked.
@@ -16,6 +17,12 @@ logger = logging.getLogger(__name__)
 RULES_ENV_FLAG = "LIFECYCLE_RULES"
 OFF, WARN, ENFORCE = "off", "warn", "enforce"
 MODES = (OFF, WARN, ENFORCE)
+
+# How long a requirement may go unchecked before the dashboard chases it, in days. Creation counts as the first
+# check, so this is the age at which a requirement nobody has looked at since is worth re-reading, not a signal
+# that fires the moment a record is written (roadmap R17, F-43). 0 chases every requirement immediately.
+STALE_AFTER_ENV_FLAG = "LIFECYCLE_STALE_AFTER"
+STALE_AFTER_DEFAULT_DAYS = 14.0
 
 
 # Fields a new record usually needs, by kind. Measured in this project's own tracker on 2026-09-16: the curated
@@ -40,6 +47,21 @@ def thin_record_reasons(params: dict, kind: str) -> list[str]:
     elif kind == "task" and params.get("priority") in THIN_TASK_PRIORITIES and not params.get("test_plan"):
         reasons.append(f"No test_plan: a {params['priority']} task needs one to show when it is done")
     return reasons
+
+
+def stale_after_days() -> float:
+    """Days a requirement may go unchecked before it is chased; LIFECYCLE_STALE_AFTER overrides the default."""
+    value = os.environ.get(STALE_AFTER_ENV_FLAG, "").strip()
+    if not value:
+        return STALE_AFTER_DEFAULT_DAYS
+    try:
+        days = float(value)
+    except ValueError:
+        days = -1.0
+    if days < 0:
+        logger.warning(f"{STALE_AFTER_ENV_FLAG}={value!r} is not a number of days; using {STALE_AFTER_DEFAULT_DAYS}")
+        return STALE_AFTER_DEFAULT_DAYS
+    return days
 
 
 def rules_mode() -> str:

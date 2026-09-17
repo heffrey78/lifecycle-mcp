@@ -87,8 +87,9 @@ async def test_5_a_requirement_changed_after_its_last_check_shows_as_stale(mcp_s
     )
     assert not edited.isError, text_of(edited)
 
-    assert "**⚠️ Stale since**" in await details(mcp_server, requirement)
-    assert "Not Verified Since Last Change (1)" in await dashboard(mcp_server)
+    # R17 changed the wording of both signals; the criterion they answer is unchanged.
+    assert "**⚠️ Not Verified Since It Changed**" in await details(mcp_server, requirement)
+    assert "Needs Verification (1)" in await dashboard(mcp_server)
 
 
 def test_6_no_handler_references_mcp_client_or_sampling():

@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### Signals worth trusting on the dashboard (roadmap R17)
+
+Two shipped signals reported the wrong thing at the moment that mattered most, both measured in the linkcheck
+dogfooding run. A requirement written seconds earlier already carried "Never verified: nobody has commented on this
+or moved it since it was written", so a fresh project wore the badge on every record from day one, which teaches the
+reader to stop reading it (F-43). At the other end, the instant the last task of a project completed, the dashboard
+reported "Tasks Overview: Complete 8 (100.0%)" and "Requirements Overview: Approved 6 (100.0%)" directly above
+"Requirements Completion: 0.0% (0/6)", because a requirement counts as complete only at Implemented and nothing had
+moved them. The tracker knew each requirement's tasks were all Complete and that the requirement was still Approved,
+and never put the two facts together (F-52). The tool count stays 23; definitions go from 12,749 to 12,873
+characters.
+
+#### Added
+- `get_project_status` names the requirements whose tasks are all Complete but that have not reached Implemented,
+  under Work Complete, Decision Pending, and `query_requirements` takes `work_complete` for the same ones. Neither
+  moves a requirement: the tracker prompts and the person decides.
+- A requirement can go stale by age as well as by change. `LIFECYCLE_STALE_AFTER` sets how many days it may go
+  unchecked before it is chased (default 14), and every entry says how long it has been.
+- An empty ready-to-start result says which case it is: no tasks remain, every remaining task is waiting (with how
+  many are Blocked and how many wait on dependencies), or the only startable work is already In Progress.
+
+#### Changed
+- Writing a requirement starts its verification clock, so nothing is reported as never verified on the day it was
+  written. The "Never verified" line is gone.
+- A requirement's staleness line in `get_details` states the two times it holds - when the content changed, and when
+  it was last checked - and no longer labels the last check as the moment the requirement went stale, which is the
+  one thing it cannot know. The dashboard section is now "Needs Verification", because it carries both the changed
+  and the aged case.
+- The changed-since-review line carries the time of the edit it reports, in details and on the dashboard.
+
 ### Errors that explain themselves, and a call log that sees them (roadmap R18, R19)
 
 Both findings came out of the linkcheck dogfooding run, and both had one cause. Schema validation ran in the MCP

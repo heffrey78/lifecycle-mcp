@@ -858,11 +858,13 @@ class RequirementHandler(BaseHandler):
         rows = (
             self.db.execute_query(
                 """
-                SELECT r.id AS id, r.title AS title, r.status AS status, rel.relationship_type AS link, '\u2192' AS arrow
+                SELECT r.id AS id, r.title AS title, r.status AS status,
+                       rel.relationship_type AS link, '\u2192' AS arrow
                 FROM requirements r JOIN relationships rel ON rel.target_id = r.id
                 WHERE rel.source_type = 'requirement' AND rel.source_id = ? AND rel.target_type = 'requirement'
                 UNION ALL
-                SELECT r.id AS id, r.title AS title, r.status AS status, rel.relationship_type AS link, '\u2190' AS arrow
+                SELECT r.id AS id, r.title AS title, r.status AS status,
+                       rel.relationship_type AS link, '\u2190' AS arrow
                 FROM requirements r JOIN relationships rel ON rel.source_id = r.id
                 WHERE rel.target_type = 'requirement' AND rel.target_id = ? AND rel.source_type = 'requirement'
                 ORDER BY id

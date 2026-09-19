@@ -63,6 +63,18 @@ async def test_1_the_prompt_says_to_read_the_stored_set_before_classifying_anyth
         assert bucket in text, bucket
 
 
+async def test_1b_the_prompt_searches_per_candidate_instead_of_listing_everything(mcp_server):  # noqa: F811
+    """The first real run asked for 25 requirements and got 72,858 characters back, which the client refused."""
+    text = (await get_prompt(mcp_server, RECONCILE_REQUIREMENTS)).messages[0].content.text
+
+    assert "search_text" in text
+    assert text.index("search_text") < text.index("Ask for it whole"), "search before listing"
+    assert "Do not open by listing the whole set" in text
+    # Making the set fit by dropping Validated requirements is the tempting wrong answer: the ones most likely to
+    # cover a candidate are the ones already built.
+    assert "Do not filter by status to make it fit" in text
+
+
 async def test_2_an_amendment_lands_through_update_rather_than_a_second_record(mcp_server):  # noqa: F811
     text = (await get_prompt(mcp_server, RECONCILE_REQUIREMENTS)).messages[0].content.text
 

@@ -825,6 +825,18 @@ def add_task_evidence(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
 
 
+def add_requirement_origin(conn: sqlite3.Connection) -> None:
+    """Where a requirement came from: stated by a person, or derived from a source (roadmap R21).
+
+    Every existing row is stated, which is what they all are: until now the only way in was someone writing one.
+    Provenance is a column rather than a status on purpose - the transition map and its stop statuses are always-on
+    rules (ADR-0004), and a derived requirement that arrived already approved would cost the tracker the one property
+    that makes it worth keeping, that it can disagree with the code.
+    """
+    if "origin" not in _columns(conn, "requirements"):
+        conn.execute("ALTER TABLE requirements ADD COLUMN origin TEXT NOT NULL DEFAULT 'stated'")
+
+
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "GitHub integration fields", add_github_integration_columns),
     (2, "GitHub sync metadata fields", add_github_sync_metadata_columns),
@@ -843,6 +855,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (15, "Keep the reason a task is blocked", add_blocked_reason),
     (16, "Count leaf tasks only in requirement progress", count_leaf_tasks_only),
     (17, "Keep the commit and evidence behind a task's status", add_task_evidence),
+    (18, "Record where a requirement came from", add_requirement_origin),
 ]
 
 

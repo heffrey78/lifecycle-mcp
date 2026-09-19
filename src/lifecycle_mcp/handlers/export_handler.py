@@ -200,6 +200,8 @@ class ExportHandler(BaseHandler):
                 content += f"- **Priority**: {req['priority']}\n"
                 content += f"- **Risk Level**: {req['risk_level']}\n"
                 content += f"- **Author**: {req['author']}\n"
+                if req["origin"] != "stated":
+                    content += f"- **Origin**: {req['origin']}\n"
                 content += f"- **Created**: {req['created_at']}\n"
                 content += f"- **Updated**: {req['updated_at']}\n\n"
 
@@ -384,16 +386,9 @@ class ExportHandler(BaseHandler):
                         content += f"- {option}\n"
                     content += "\n"
 
-            if arch["consequences"]:
-                consequences = self._safe_json_loads(arch["consequences"])
-                if consequences:
-                    content += "### Consequences\n"
-                    if isinstance(consequences, dict):
-                        for key, value in consequences.items():
-                            content += f"**{key.title()}**: {value}\n"
-                    else:
-                        content += f"{consequences}\n"
-                    content += "\n"
+            consequences = self._format_consequences(arch["consequences"], "### Consequences")
+            if consequences:
+                content += consequences + "\n"
 
             if arch["implementation_notes"]:
                 content += f"### Implementation Notes\n{arch['implementation_notes']}\n\n"

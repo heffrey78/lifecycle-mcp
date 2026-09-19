@@ -3,7 +3,7 @@
 import pytest
 from mcp import types
 
-from lifecycle_mcp.prompts import CAPTURE_REQUIREMENT, render_prompt
+from lifecycle_mcp.prompts import CAPTURE_REQUIREMENT, RECONCILE_REQUIREMENTS, render_prompt
 
 from .test_tool_results import call, mcp_server, text_of  # noqa: F401 (mcp_server is a fixture)
 
@@ -25,7 +25,7 @@ async def get_prompt(server, name: str, arguments: dict | None = None) -> types.
 async def test_the_server_offers_the_capture_prompt(mcp_server):  # noqa: F811
     prompts = await list_prompts(mcp_server)
 
-    assert [prompt.name for prompt in prompts] == [CAPTURE_REQUIREMENT]
+    assert [prompt.name for prompt in prompts] == [CAPTURE_REQUIREMENT, RECONCILE_REQUIREMENTS]
     assert prompts[0].description
     assert [argument.name for argument in prompts[0].arguments] == ["about"]
 

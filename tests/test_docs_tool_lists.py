@@ -1,7 +1,11 @@
-"""README and CLAUDE.md list exactly the tools the server lists (roadmap R16, TASK-0039).
+"""README lists exactly the tools the server lists (roadmap R16, TASK-0039).
 
-The docs' tool lists have gone stale before (CLAUDE.md said 22 tools while the server listed 32). This compares them
-with the live tools/list, with GitHub integration off and on, so a change to the tool surface must update the docs.
+The tool list has gone stale before (the docs said 22 tools while the server listed 32). This compares README with the
+live tools/list, with GitHub integration off and on, so a change to the tool surface must update it.
+
+README is the only copy. CLAUDE.md carried a second one until the same argument that governs the tool surface was
+turned on it: a definition costs client context on every request, and CLAUDE.md is loaded on every request too, so a
+paraphrase of every tool description was being sent twice and could only ever drift from the descriptions themselves.
 """
 
 import re
@@ -17,11 +21,6 @@ ROOT = Path(__file__).resolve().parent.parent
 # doc -> (heading that starts its tool list, heading after it, pattern for its "N tools (M with GitHub on)" statements)
 DOCS = {
     "README.md": ("### Tool List", "### Editing, Deleting and History", r"exposes (\d+) MCP tools \((\d+) with"),
-    "CLAUDE.md": (
-        "### MCP Tools Available",
-        "### Database Environment",
-        r"(\d+) tools \((\d+) with `LIFECYCLE_GITHUB=on`\)",
-    ),
 }
 
 

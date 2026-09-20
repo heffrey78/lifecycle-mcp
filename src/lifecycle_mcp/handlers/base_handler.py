@@ -205,6 +205,25 @@ class BaseHandler(ABC):
             return "".join(f"- {item}\n" for item in value)
         return f"{value}\n" if value else ""
 
+    def _format_consequences(self, stored: str | None, heading: str) -> str:
+        """Markdown for a decision's consequences under heading; "" when there are none.
+
+        The stored object is free-form, so a value is as likely to be a list of consequences as one sentence. Both
+        render as text: interpolating a list gave a Python repr in details and in export alike (roadmap R23).
+        """
+        consequences = self._safe_json_loads(stored)
+        if not consequences:
+            return ""
+        text = f"{heading}\n"
+        if not isinstance(consequences, dict):
+            return text + f"{consequences}\n"
+        for key, value in consequences.items():
+            if isinstance(value, list):
+                text += f"**{key.title()}**:\n" + "".join(f"- {item}\n" for item in value)
+            else:
+                text += f"**{key.title()}**: {value}\n"
+        return text
+
     def _format_sections(self, record: Any, sections: Iterable[tuple[str, str]], template: str) -> str:
         """Render each non-empty (column, title) JSON list field of a record with template ({title}, {body})"""
         text = ""

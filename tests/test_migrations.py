@@ -448,3 +448,19 @@ async def test_reverse_direction_requirement_links_are_stored_one_way(tmp_path, 
         await call(server, "trace_requirement", {"requirement_id": "REQ-0002-FUNC-00"})
     )
     server.db_manager.close()
+
+
+# --- where a requirement came from (roadmap R21) ------------------------------------------------
+
+
+def test_existing_requirements_are_stated_when_the_origin_column_arrives(tmp_path):
+    db = database_at(tmp_path / "origin.db", version=17)
+    with sqlite3.connect(db) as conn:
+        conn.executescript(SEED)
+
+    assert apply_all_migrations(db) == LATEST
+
+    with sqlite3.connect(db) as conn:
+        assert "origin" in {row[1] for row in conn.execute("PRAGMA table_info(requirements)")}
+        # Until now the only way in was a person writing one, so every row that predates the column is stated.
+        assert {row[0] for row in conn.execute("SELECT origin FROM requirements")} == {"stated"}

@@ -565,6 +565,7 @@ class ArchitectureHandler(BaseHandler):
 
             arch = arch_decisions[0]
             deciders = ", ".join(self._safe_json_loads(arch["deciders"])) or "Not specified"
+            authors = ", ".join(self._safe_json_loads(arch["authors"])) or "Not specified"
             superseded = f"\n- **Superseded By**: {arch['superseded_by']}" if arch["superseded_by"] else ""
 
             # Build detailed report
@@ -577,7 +578,7 @@ class ArchitectureHandler(BaseHandler):
 - **Created**: {arch["created_at"]}
 - **Updated**: {arch["updated_at"]}
 - **Revision**: {arch["revision"]}
-- **Authors**: {arch["authors"] or "Not specified"}
+- **Authors**: {authors}
 - **Deciders**: {deciders}{superseded}
 
 ## Context
@@ -603,15 +604,7 @@ class ArchitectureHandler(BaseHandler):
                     for option in options:
                         report += f"- {option}\n"
 
-            if arch["consequences"]:
-                consequences = self._safe_json_loads(arch["consequences"])
-                if consequences:
-                    report += "\n## Consequences\n"
-                    if isinstance(consequences, dict):
-                        for key, value in consequences.items():
-                            report += f"**{key.title()}**: {value}\n"
-                    else:
-                        report += f"{consequences}\n"
+            report += self._format_consequences(arch["consequences"], "\n## Consequences")
 
             if arch["implementation_notes"]:
                 report += f"\n## Implementation Notes\n{arch['implementation_notes']}\n"

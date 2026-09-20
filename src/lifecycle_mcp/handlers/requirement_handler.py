@@ -60,7 +60,12 @@ REQUIREMENT_EDITABLE = (
     "business_rules",
     "validation_metrics",
     "out_of_scope",
+    "origin",
 )
+# Where a requirement came from (roadmap R21). Everything written by hand is stated; a model reading a transcript or
+# a codebase produces the other two, and a derived requirement is created in Draft for a person to approve.
+REQUIREMENT_ORIGINS = ("stated", "derived-from-code", "derived-from-transcript")
+
 # Curated list fields (roadmap R6b), shown after the acceptance criteria in details and export: (column, title).
 REQUIREMENT_LIST_SECTIONS = (
     ("nonfunctional_requirements", "Non-Functional Requirements"),
@@ -306,6 +311,7 @@ class RequirementHandler(BaseHandler):
                         "business_rules": {"type": "array", "items": {"type": "string"}},
                         "validation_metrics": {"type": "array", "items": {"type": "string"}},
                         "out_of_scope": {"type": "array", "items": {"type": "string"}},
+                        "origin": {"type": "string", "enum": list(REQUIREMENT_ORIGINS)},
                     },
                     "required": ["type", "title", "priority", "current_state", "desired_state"],
                 },
@@ -388,6 +394,7 @@ class RequirementHandler(BaseHandler):
                         "business_rules": {"type": "array", "items": {"type": "string"}},
                         "validation_metrics": {"type": "array", "items": {"type": "string"}},
                         "out_of_scope": {"type": "array", "items": {"type": "string"}},
+                        "origin": {"type": "string", "enum": list(REQUIREMENT_ORIGINS)},
                         **EDIT_OPTION_PROPERTIES,
                         "reason": {"type": "string", "description": "Required at Approved or later"},
                     },
@@ -569,6 +576,7 @@ class RequirementHandler(BaseHandler):
             "author": params.get("author", "MCP User"),
             "business_value": params.get("business_value", ""),
             "risk_level": params.get("risk_level", "Medium"),
+            "origin": params.get("origin", "stated"),
             **{
                 column: self._safe_json_dumps(params[column])
                 for column, _ in REQUIREMENT_LIST_SECTIONS
@@ -755,6 +763,9 @@ class RequirementHandler(BaseHandler):
             req = requirements[0]
             review_line = self._changed_since_review_line(req["id"])
             verified_line = self._last_verified_line(req["id"])
+            # Only a derived requirement says where it came from: a line on every stated one would be noise on the
+            # ordinary case, which is the whole of the tracker today (roadmap R17, R21).
+            origin_line = f"\n- **Origin**: {req['origin']}" if req["origin"] != "stated" else ""
 
             # Build detailed report
             report = f"""# Requirement Details: {req["id"]}
@@ -768,7 +779,7 @@ class RequirementHandler(BaseHandler):
 - **Author**: {req["author"]}
 - **Created**: {req["created_at"]}
 - **Updated**: {req["updated_at"]}
-- **Revision**: {req["revision"]}{verified_line}{review_line}
+- **Revision**: {req["revision"]}{origin_line}{verified_line}{review_line}
 
 ## Problem Definition
 **Current State**: {req["current_state"]}
@@ -814,6 +825,18 @@ class RequirementHandler(BaseHandler):
                 for task in tasks:
                     report += f"- {task['id']}: {task['title']} [{task['status']}]\n"
 
+            # The decisions this requirement addresses, and its links to other requirements. R9 gave architecture and
+            # task details their link sections and left the requirement end out, so a requirement with a decision
+            # against it and no tasks yet read as though nothing linked to it (roadmap R23).
+            report += self._format_linked(
+                "Addresses Decisions",
+                "SELECT a.id, a.title, a.status FROM architecture a JOIN relationships rel ON rel.target_id = a.id "
+                "WHERE rel.source_type = 'requirement' AND rel.source_id = ? AND rel.target_type = 'architecture' "
+                "AND rel.relationship_type = 'addresses' ORDER BY a.id",
+                req["id"],
+            )
+            report += self._format_requirement_links(req["id"])
+
             report += self._format_comments("requirement", req["id"])
 
             # Create above-the-fold response for requirement details
@@ -825,6 +848,39 @@ class RequirementHandler(BaseHandler):
 
         except Exception as e:
             return self._create_error_response("Failed to get requirement details", e)
+
+    def _format_requirement_links(self, requirement_id: str) -> str:
+        """Details section naming the requirements linked to this one and each link's type; "" when there are none.
+
+        The type varies, so it is named per row rather than in the heading the way the single-type sections are.
+        Both directions are shown, as query_relationships shows them.
+        """
+        rows = (
+            self.db.execute_query(
+                """
+                SELECT r.id AS id, r.title AS title, r.status AS status,
+                       rel.relationship_type AS link, '\u2192' AS arrow
+                FROM requirements r JOIN relationships rel ON rel.target_id = r.id
+                WHERE rel.source_type = 'requirement' AND rel.source_id = ? AND rel.target_type = 'requirement'
+                UNION ALL
+                SELECT r.id AS id, r.title AS title, r.status AS status,
+                       rel.relationship_type AS link, '\u2190' AS arrow
+                FROM requirements r JOIN relationships rel ON rel.source_id = r.id
+                WHERE rel.target_type = 'requirement' AND rel.target_id = ? AND rel.source_type = 'requirement'
+                ORDER BY id
+                """,
+                [requirement_id, requirement_id],
+                fetch_all=True,
+                row_factory=True,
+            )
+            or []
+        )
+        if not rows:
+            return ""
+        lines = "".join(
+            f"- {row['link']} {row['arrow']} {row['id']}: {row['title']} [{row['status']}]\n" for row in rows
+        )
+        return f"\n## Linked Requirements ({len(rows)})\n{lines}"
 
     def _trace_requirement(self, **params) -> list[TextContent]:
         """Trace requirement through full lifecycle including decomposition relationships"""

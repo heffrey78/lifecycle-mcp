@@ -158,8 +158,16 @@ def test_the_viewer_imports_the_definitions_instead_of_restating_them():
     for name in ("WORK_COMPLETE_WHERE", "BLOCKED_TASKS_SQL", "READY_TASKS_WHERE", "stale_requirements"):
         assert name in source, f"{name} should be imported and used"
 
-    # The shapes those definitions are made of, which a reimplementation would have to spell out again.
-    for copied in ("tasks_completed", "relationship_type = 'depends'", "status = 'Blocked'", "NOT IN ('Complete'"):
+    # The shapes those definitions are made of, which a reimplementation would have to spell out again. Comparisons and
+    # joins, not bare column names: the page lists tasks_completed among the fields it displays, and naming a column in
+    # order to show it is not restating the rule that reads it.
+    for copied in (
+        "tasks_completed >=",
+        "relationship_type = 'depends'",
+        "relationship_type = 'implements'",
+        "status = 'Blocked'",
+        "NOT IN ('Complete'",
+    ):
         assert copied not in source, f"{copied!r} looks like a copy of a definition the handlers own"
 
 

@@ -10,6 +10,19 @@ from mcp.types import TextContent
 
 from .base_handler import ENTITY_TABLES, BaseHandler
 
+# Pairs the handlers create through BaseHandler._link that create_relationship deliberately does not make. The link is
+# real, stored and guarded like any other; what makes it more than a row is named here, with the tool that owns it, so
+# a refusal can send the caller somewhere instead of calling a link the server creates invalid (REQ-0007-INTF-00).
+# tests/test_link_pairs.py fails when a pair created through _link is neither permitted nor listed here.
+LINKS_OWNED_BY_A_TOOL: dict[tuple[str, str, str], tuple[str, str]] = {
+    ("task", "task", "parent"): (
+        "update_task and its parent_task_id",
+        "Re-parenting goes through _apply_edit, so it bumps the task's revision and logs a field_edit event; a row "
+        "written straight into relationships would move the task in the hierarchy with nothing in its history "
+        "saying so. An empty parent_task_id makes a task top-level again.",
+    ),
+}
+
 
 class RelationshipHandler(BaseHandler):
     """Handler for entity relationship operations"""
@@ -181,6 +194,15 @@ class RelationshipHandler(BaseHandler):
 
         if not source_type or not target_type:
             return self._create_error_response(f"Invalid entity IDs: {source_id}, {target_id}")
+
+        # A link the server does make, through a tool that does more than write the row (REQ-0007-INTF-00). Checked
+        # before validity, because these pairs are deliberately absent from the permitted table.
+        owned = LINKS_OWNED_BY_A_TOOL.get((source_type, target_type, rel_type))
+        if owned:
+            tool, reason = owned
+            return self._create_error_response(
+                f"A {source_type}'s {rel_type} link is made with {tool}, not create_relationship. {reason}"
+            )
 
         # Validate relationship makes sense
         if not self._validate_relationship(source_type, target_type, rel_type):

@@ -10,6 +10,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from lifecycle_mcp.viewer.browse import BROWSE_SCRIPT
 from lifecycle_mcp.viewer.figures import derive_figures
 from lifecycle_mcp.viewer.render import embed_json, project_name, render_page, write_page
 from lifecycle_mcp.viewer.snapshot import ReadOnlyDatabase, read_snapshot
@@ -37,27 +38,42 @@ def embedded(page: str) -> dict:
 # --- self-contained ------------------------------------------------------------------------------
 
 
-def chrome_of(page: str) -> str:
-    """The page without its embedded records: the part whose content the viewer chose.
-
-    A URL inside the data block is inert text and may be perfectly legitimate - tasks carry a github_issue_url, and a
-    requirement may quote a link. This repository's own tracker contains "http://" because TASK-0092's test plan says
-    the word. So the property to assert is that nothing is *loaded* from a network, and that the page's own markup
-    names no host; not that the string never appears in somebody's record.
-    """
-    return re.sub(r'<script type="application/json".*?</script>', "", page, flags=re.DOTALL)
+WRITE_PATH = ("fetch(", "XMLHttpRequest", "<form", "WebAssembly", "serviceWorker", "sql.js", "localStorage", "url(")
 
 
 async def test_the_page_loads_nothing_from_a_network(mcp_server):  # noqa: F811
+    await populate(mcp_server)
     page = page_for(mcp_server)
 
-    assert not re.search(r"(src|href)\s*=", page), "nothing is fetched, not even locally"
+    assert not re.search(r"\b(src|href|action)\s*=", page), "nothing is fetched, not even locally"
     assert "<link" not in page, "no external stylesheet"
     assert "@import" not in page
     assert "//fonts." not in page
 
 
-async def test_the_pages_own_markup_names_no_host(mcp_server):  # noqa: F811
+async def test_with_no_records_the_page_names_no_host_and_holds_no_write_path(mcp_server):  # noqa: F811
+    """Render a tracker with nothing in it and every byte left is the viewer's own choice.
+
+    Asserting this against a populated page stopped working twice: first because TASK-0092's own test plan, stored in
+    this repository's tracker, contains "http://" and "XMLHttpRequest"; then because records are now rendered as text
+    in the page body, not only in the data block, so a record that quotes a link legitimately puts one there. What a
+    record says is its own business. What the viewer adds must name no host and reach for nothing.
+    """
+    page = page_for(mcp_server)
+
+    assert "http://" not in page and "https://" not in page
+    for forbidden in WRITE_PATH:
+        assert forbidden not in page, forbidden
+
+
+def test_the_only_code_the_page_runs_holds_no_write_path():
+    """The page runs BROWSE_SCRIPT and nothing else; the injection test pins that no record can add a block."""
+    for forbidden in WRITE_PATH:
+        assert forbidden not in BROWSE_SCRIPT, forbidden
+    assert "innerHTML" not in BROWSE_SCRIPT, "text the page writes goes through textContent, never parsed as markup"
+
+
+async def test_a_record_that_quotes_a_link_keeps_it_as_text(mcp_server):  # noqa: F811
     result = await call(
         mcp_server,
         "create_requirement",
@@ -74,20 +90,7 @@ async def test_the_pages_own_markup_names_no_host(mcp_server):  # noqa: F811
     page = page_for(mcp_server)
 
     assert "https://example.com/spec" in page, "a record's own text is preserved, URLs included"
-    assert "http://" not in chrome_of(page) and "https://" not in chrome_of(page), "but the viewer names no host"
-
-
-async def test_the_page_holds_no_write_path(mcp_server):  # noqa: F811
-    """Asserted against the page's own markup, for the same reason as the host check.
-
-    A record may contain the word "XMLHttpRequest" - this repository's tracker does, because TASK-0092's test plan
-    says it - and inside an escaped application/json block that is text, not code. What must not exist is the page
-    itself reaching for any of it.
-    """
-    chrome = chrome_of(page_for(mcp_server))
-
-    for forbidden in ("fetch(", "XMLHttpRequest", "<form", "WebAssembly", "serviceWorker", "sql.js", "localStorage"):
-        assert forbidden not in chrome, forbidden
+    assert not re.search(r"(src|href|action)\s*=\s*\"?https://example", page), "as text, never as something to load"
 
 
 async def test_the_page_stands_on_its_own_as_a_document(mcp_server):  # noqa: F811
@@ -195,8 +198,9 @@ async def test_a_record_cannot_inject_markup_into_the_page(mcp_server):  # noqa:
 
     assert "<script>alert" not in page
     assert "&lt;script&gt;alert" in page or "\\u003cscript\\u003ealert" in page
-    # Exactly the blocks the page defines itself, and none opened by a record.
-    assert page.count("<script") == 1, "only the data block"
+    # Exactly the two blocks the page defines itself - its data and its browsing code - and none opened by a record.
+    opened = re.findall(r"<script[^>]*>", page)
+    assert opened == ['<script type="application/json" id="tracker-data">', '<script id="tracker-browse">'], opened
 
 
 def test_the_data_block_cannot_be_closed_early():

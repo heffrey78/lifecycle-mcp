@@ -5,14 +5,13 @@ installed, it reaches for nothing on a network, and it cannot write. The first t
 the third is testable because the page has no database in it to write to.
 """
 
-import json
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from lifecycle_mcp.viewer.browse import BROWSE_SCRIPT
 from lifecycle_mcp.viewer.figures import derive_figures
-from lifecycle_mcp.viewer.render import embed_json, project_name, render_page, write_page
+from lifecycle_mcp.viewer.render import project_name, render_page, write_page
 from lifecycle_mcp.viewer.snapshot import ReadOnlyDatabase, read_snapshot
 
 from .test_next_tasks import add_task, link, move
@@ -28,11 +27,9 @@ def page_for(server, generated_at: datetime | None = FIXED_TIME) -> str:
     return render_page(snapshot, derive_figures(snapshot, ReadOnlyDatabase(path)), generated_at)
 
 
-def embedded(page: str) -> dict:
-    """The data block the page carries, as a reader of the page would parse it."""
-    match = re.search(r'<script type="application/json" id="tracker-data">(.*?)</script>', page, re.DOTALL)
-    assert match, "the page should carry its records"
-    return json.loads(match.group(1))
+def record_ids(page: str) -> list[str]:
+    """The records the page renders, in order."""
+    return re.findall(r'<details class="record" id="([^"]+)"', page)
 
 
 # --- self-contained ------------------------------------------------------------------------------
@@ -45,7 +42,12 @@ async def test_the_page_loads_nothing_from_a_network(mcp_server):  # noqa: F811
     await populate(mcp_server)
     page = page_for(mcp_server)
 
-    assert not re.search(r"\b(src|href|action)\s*=", page), "nothing is fetched, not even locally"
+    assert not re.search(r"\b(src|action)\s*=", page), "nothing is fetched, not even locally"
+    # The only links are anchors to records the page itself holds (TASK-0094).
+    targets = re.findall(r'href="([^"]*)"', page)
+    assert targets, "links exist, so this is checking something"
+    assert all(target.startswith("#") for target in targets), [t for t in targets if not t.startswith("#")]
+    assert {target[1:] for target in targets} <= set(record_ids(page)), "every link lands on a record in the page"
     assert "<link" not in page, "no external stylesheet"
     assert "@import" not in page
     assert "//fonts." not in page
@@ -106,8 +108,7 @@ async def test_the_page_stands_on_its_own_as_a_document(mcp_server):  # noqa: F8
 async def test_the_page_names_when_it_was_generated(mcp_server):  # noqa: F811
     page = page_for(mcp_server)
 
-    assert "2026-09-28 15:30" in page, "a snapshot has to say how stale it is"
-    assert embedded(page)["generated_at"].startswith("2026-09-28 15:30")
+    assert "Snapshot generated 2026-09-28 15:30" in page, "a snapshot has to say how stale it is"
 
 
 async def test_two_runs_differ_only_in_the_generation_time(mcp_server):  # noqa: F811
@@ -137,12 +138,21 @@ async def test_every_record_travels_with_the_page(mcp_server):  # noqa: F811
     ids = await populate(mcp_server)
     second = await add_task(mcp_server, ids["requirement"], "Cache layer", "P2")
 
-    data = embedded(page_for(mcp_server))
+    page = page_for(mcp_server)
 
-    assert [r["id"] for r in data["requirements"]] == [ids["requirement"]]
-    assert {t["id"] for t in data["tasks"]} == {ids["task"], second}
-    assert [a["id"] for a in data["architecture"]] == [ids["adr"]]
-    assert data["relationships"], "the links come too, for the views that navigate them"
+    assert set(record_ids(page)) == {ids["requirement"], ids["task"], second, ids["adr"]}
+    assert '<div class="links">' in page, "the links come too, rendered on the records they join"
+
+
+async def test_the_page_carries_no_second_copy_of_the_records(mcp_server):  # noqa: F811
+    """The records once also travelled as a JSON block for the browse and link views to read. Both render their content
+    as markup instead, so the page reads with scripting off, and the block was 37% of the file with nothing reading it
+    (417 KB of 1.1 MB on this repository's tracker). Removed in TASK-0094; this keeps it from coming back unread."""
+    await populate(mcp_server)
+
+    page = page_for(mcp_server)
+
+    assert "application/json" not in page
 
 
 async def test_the_dashboard_signals_appear_with_their_records(mcp_server):  # noqa: F811
@@ -198,17 +208,9 @@ async def test_a_record_cannot_inject_markup_into_the_page(mcp_server):  # noqa:
 
     assert "<script>alert" not in page
     assert "&lt;script&gt;alert" in page or "\\u003cscript\\u003ealert" in page
-    # Exactly the two blocks the page defines itself - its data and its browsing code - and none opened by a record.
+    # Exactly the one block the page defines itself - its browsing code - and none opened by a record.
     opened = re.findall(r"<script[^>]*>", page)
-    assert opened == ['<script type="application/json" id="tracker-data">', '<script id="tracker-browse">'], opened
-
-
-def test_the_data_block_cannot_be_closed_early():
-    payload = embed_json({"title": "</script><script>alert(1)</script>"})
-
-    assert "</script>" not in payload
-    assert "\\u003c/script\\u003e" in payload
-    assert json.loads(payload.replace("\\u003c", "<").replace("\\u003e", ">").replace("\\u0026", "&"))
+    assert opened == ['<script id="tracker-browse">'], opened
 
 
 # --- writing it out -----------------------------------------------------------------------------
@@ -244,4 +246,4 @@ async def test_the_page_is_readable_without_python_or_the_server(mcp_server, tmp
 
     page = moved.read_text(encoding="utf-8")
     assert Path(snapshot.database_path).name in page, "it still says where it came from"
-    assert embedded(page)["requirements"], "and it still holds the records, with the database gone from beside it"
+    assert record_ids(page), "and it still holds the records, with the database gone from beside it"

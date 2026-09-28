@@ -1,13 +1,18 @@
 """Emit one self-contained HTML file that works offline (REQ-0006-INTF-00, TASK-0092).
 
-Everything the page needs is in the page: the records as embedded JSON, the styling inline, and no reference to
+Everything the page needs is in the page: every record rendered as markup, the styling inline, and no reference to
 anything on a network. A browser will not fetch a local .db from a file:// document, so the alternative was SQLite
 compiled to WASM plus a file picker - a megabyte of wasm, an extra step for the reader, and handing over the database
-itself. Embedding the data costs a regeneration when the tracker changes, which a snapshot needs anyway, and buys a
+itself. Rendering the records costs a regeneration when the tracker changes, which a snapshot needs anyway, and buys a
 file that opens by double-clicking on a machine that has never had this project installed.
 
+The page once also carried every record a second time as a JSON block, for the browsing and link views to read. Both
+were built to render their content here instead, so the page reads with scripting off, and the block became 37% of the
+file with nothing reading it. It was removed in TASK-0094.
+
 The page holds no write path at all. There is no form, no fetch, no XMLHttpRequest and no database in it, so opening it
-cannot change a tracker - and could not even if it tried, because the tracker is not there.
+cannot change a tracker - and could not even if it tried, because the tracker is not there. The only links are anchors
+to records within the page.
 
 Deliberately not byte-deterministic: the page states when it was generated, which a snapshot needs and a tracked file
 cannot have. That is the opposite of the text dump in REQ-0007-TECH-00, and the two can differ because this output is a
@@ -15,13 +20,13 @@ build artefact that is never committed.
 """
 
 import html
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .browse import BROWSE_SCRIPT, BROWSE_STYLE, browse_section
 from .figures import Figures
+from .links import LINKS_STYLE
 from .snapshot import Snapshot
 
 # Everything the page shows about a record kind, so the sections below stay declarative.
@@ -101,17 +106,6 @@ def _esc(value: Any) -> str:
     return html.escape("" if value is None else str(value), quote=True)
 
 
-def embed_json(data: Any) -> str:
-    """JSON for a <script type="application/json"> block.
-
-    sort_keys so that two runs against an unchanged tracker differ only in the generation time, and the escaping so a
-    value containing "</script>" cannot end the block early. There is nothing to execute here either way: the block is
-    data the page reads, not code.
-    """
-    text = json.dumps(data, sort_keys=True, ensure_ascii=False, default=str)
-    return text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-
-
 def _tile(count: int, label: str) -> str:
     return f'<div class="tile"><div class="n">{count}</div><div class="k">{_esc(label)}</div></div>'
 
@@ -151,7 +145,7 @@ def _row(entry: dict[str, Any], section: str) -> str:
         count = entry.get("task_count") or 0
         meta = f"{count} task{'s' if count != 1 else ''} complete, awaiting a decision"
     return (
-        f'<li><span class="id">{_esc(entry.get("id"))}</span> '
+        f'<li><a class="id" href="#{_esc(entry.get("id"))}">{_esc(entry.get("id"))}</a> '
         f'<span class="title">{_esc(entry.get("title"))}</span> {pills}'
         + (f'<div class="meta">{meta}</div>' if meta else "")
         + "</li>"
@@ -196,26 +190,13 @@ def render_page(snapshot: Snapshot, figures: Figures, generated_at: datetime | N
         )
     )
     signal_sections = "".join(_section(key, heading, why, figures) for key, heading, why in SECTIONS)
-    # The records travel with the page so that later views of them need nothing fetched (TASK-0093, TASK-0094).
-    payload = {
-        "generated_at": generated,
-        "database_path": snapshot.database_path,
-        "requirements": snapshot.requirements,
-        "tasks": snapshot.tasks,
-        "architecture": snapshot.architecture,
-        "relationships": snapshot.relationships,
-        "comments": snapshot.comments,
-        "figures": {key: getattr(figures, key) for key, _, _ in SECTIONS},
-        "empty_reasons": figures.empty_reasons,
-    }
-
     return f"""<!DOCTYPE html>
 <html lang="en" >
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{_esc(name)} tracker</title>
-<style>{STYLE}{BROWSE_STYLE}</style>
+<style>{STYLE}{BROWSE_STYLE}{LINKS_STYLE}</style>
 </head>
 <body>
 <div class="wrap">
@@ -235,7 +216,6 @@ def render_page(snapshot: Snapshot, figures: Figures, generated_at: datetime | N
   Every figure above comes from the definitions the server's own tools use.
 </footer>
 </div>
-<script type="application/json" id="tracker-data">{embed_json(payload)}</script>
 <script id="tracker-browse">{BROWSE_SCRIPT}</script>
 </body>
 </html>

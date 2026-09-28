@@ -72,7 +72,8 @@ async def test_every_record_is_in_the_page_and_nothing_starts_hidden(mcp_server)
     page = page_for(mcp_server)
 
     for record_id in (ids["requirement"], ids["task"], second, ids["adr"]):
-        assert "hidden" not in record_block(page, record_id).split(">", 1)[0], record_id
+        # The attribute, not the word: the tag carries the record's search text, which may say "hidden".
+        assert not re.search(r"\shidden(?:=|[\s>])", record_block(page, record_id).split(">", 1)[0] + ">"), record_id
 
 
 async def test_a_record_reads_without_opening_it(mcp_server):  # noqa: F811

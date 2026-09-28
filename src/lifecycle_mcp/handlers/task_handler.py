@@ -82,6 +82,14 @@ UNMET_DEPENDENCIES_SQL = f"""
     ORDER BY d.id
 """
 
+# Ready to start: Not Started, and every task it waits on is Complete (roadmap R7). Named rather than inline in
+# _query_tasks so that anything else reporting the ready set reads this one definition (REQ-0006-INTF-00, TASK-0091).
+READY_TASKS_WHERE = (
+    f"t.status = 'Not Started' AND NOT EXISTS (SELECT 1 FROM ({TASK_DEPENDENCIES_SQL}) dep "
+    "JOIN tasks d ON d.id = dep.dependency_id WHERE dep.task_id = t.id AND d.status != 'Complete')"
+)
+READY_TASKS_ORDER = "t.priority, t.task_number, t.subtask_number"
+
 # A task's subtasks that are neither Complete nor Abandoned, for the workflow rules (roadmap R8).
 OPEN_SUBTASKS_SQL = """
     SELECT t.id, t.status FROM tasks t JOIN relationships rel ON rel.source_id = t.id
@@ -705,12 +713,8 @@ class TaskHandler(BaseHandler):
 
             order_by = "t.priority, t.created_at DESC"
             if params.get("ready"):
-                # Ready to start: Not Started, and every task it waits on is Complete (roadmap R7)
-                where_clauses.append(
-                    f"t.status = 'Not Started' AND NOT EXISTS (SELECT 1 FROM ({TASK_DEPENDENCIES_SQL}) dep "
-                    "JOIN tasks d ON d.id = dep.dependency_id WHERE dep.task_id = t.id AND d.status != 'Complete')"
-                )
-                order_by = "t.priority, t.task_number, t.subtask_number"
+                where_clauses.append(READY_TASKS_WHERE)
+                order_by = READY_TASKS_ORDER
 
             where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
             tasks = self.db.execute_query(

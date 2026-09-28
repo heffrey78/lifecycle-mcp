@@ -136,6 +136,37 @@ which lifecycle-mcp  # Copy this path
 claude mcp add lifecycle /path/to/venv/bin/lifecycle-mcp -e LIFECYCLE_DB=./lifecycle.db
 ```
 
+## Viewing the Tracker
+
+Every tool returns text for an agent to relay. To look at a tracker yourself, generate a read-only HTML view of it:
+
+```bash
+make viewer                                  # this repository's tracker
+make viewer DB=~/work/quire/lifecycle.db     # another project's
+make viewer OUT=/tmp/tracker.html            # somewhere other than exports/
+```
+
+This writes `exports/<project>-tracker.html` — one file that opens by double-clicking, in any browser, on any machine,
+with nothing installed and nothing fetched from the network. It holds:
+
+- the dashboard: blocked and waiting work, work complete and awaiting a decision, what is ready to start, what needs
+  verification and what changed since review, each computed by the same definitions the server's tools use
+- every requirement, task and decision with every field it holds and its comments, searchable across all of them
+- each record's links from its own end, with every link jumping to the record it names
+
+**It is a snapshot, not a live view.** It shows the tracker as it was when generated and says when that was at the top.
+Run `make viewer` again to see later changes.
+
+**It is read-only.** The page contains no database and no way to write to one; nothing done in it can change a tracker.
+
+**It is as sensitive as the database.** The page embeds the whole tracker as plaintext. Treat it like `lifecycle.db`
+itself before attaching or publishing it.
+
+`make viewer` reads this repository's `lifecycle.db` unless `DB` names another. It does not consult `LIFECYCLE_DB`: that
+often points at a different project, and a command that says it shows this repository should not quietly show another.
+A path that does not exist is reported, never created. Output lands in `exports/`, which is gitignored, so generating
+it never shows up in `git status`.
+
 ## MCP Tools Reference
 
 The server exposes 23 MCP tools (24 with GitHub integration on) across 7 handler modules for comprehensive lifecycle management. Every tool rejects fields it does not declare, and the error names the field. [CHANGELOG.md](CHANGELOG.md) lists tools that were removed or renamed, with their replacements.

@@ -9,6 +9,7 @@ uv sync                                  # dependencies
 uv run server.py                         # run the server
 uv run --extra test pytest               # the suite (benchmarks are opt-in)
 make lint                                # ruff check + ruff format --check
+make viewer                              # read-only HTML view of the tracker in exports/ (DB=path for another)
 
 # register with Claude Code
 claude mcp add lifecycle $(which uv) -- --directory $(pwd) run server.py
@@ -36,6 +37,11 @@ them and `tests/tool_surface_budget.json` holds the counts, so neither number is
   schema. Each migration runs in one transaction with its `schema_version` row; a failure rolls back and
   `MigrationError` stops the server from starting
 - `prompts.py` — the prompts the server offers clients
+- `viewer/` — the read-only HTML view `make viewer` writes (`scripts/tracker_viewer.py`): `snapshot.py` reads the
+  rows, `figures.py` runs the dashboard's own definitions, `render.py`, `browse.py` and `links.py` write the page.
+  It opens trackers through `ReadOnlyDatabase`, never `DatabaseManager`, whose constructor migrates the database it
+  is given and creates one at a path that does not exist. Import a definition to show it; never restate its SQL —
+  `tests/test_viewer_figures.py` reads the viewer's source for copies
 - `pyproject.toml` — entry point `lifecycle-mcp = "lifecycle_mcp.server:main"`; the only dependency is
   `mcp[cli]>=1.10,<2` (2.x removed the decorator API `server.py` uses)
 

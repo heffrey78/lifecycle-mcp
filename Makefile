@@ -1,6 +1,6 @@
 # Makefile for lifecycle-mcp project
 
-.PHONY: help install dev test build-dxt clean lint type-check coverage test-all test-unit test-integration pre-commit
+.PHONY: help install dev test build-dxt clean lint type-check coverage test-all test-unit test-integration pre-commit viewer
 
 help:
 	@echo "Available commands:"
@@ -14,6 +14,7 @@ help:
 	@echo "  make coverage       - Generate coverage report"
 	@echo "  make test-all       - Run all quality checks"
 	@echo "  make build-dxt      - Build the Desktop Extension (.dxt) package"
+	@echo "  make viewer         - Write a read-only HTML view of the tracker to exports/ (DB=path for another)"
 	@echo "  make clean          - Clean build artifacts"
 	@echo "  make pre-commit     - Install pre-commit hooks"
 
@@ -50,6 +51,11 @@ test-all: lint type-check test
 pre-commit:
 	pre-commit install
 	pre-commit run --all-files
+
+# A read-only HTML snapshot of the tracker. This repository's lifecycle.db unless DB names another; LIFECYCLE_DB is
+# deliberately not consulted. The output lands in exports/, which is gitignored.
+viewer:
+	uv run python scripts/tracker_viewer.py $(if $(DB),--db "$(DB)") $(if $(OUT),--out "$(OUT)")
 
 build-dxt:
 	@echo "Building Desktop Extension package..."

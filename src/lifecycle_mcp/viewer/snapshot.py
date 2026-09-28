@@ -108,12 +108,18 @@ class ReadOnlyDatabase:
             connection.close()
 
 
-def _parse_json_columns(row: dict[str, Any], columns: tuple[str, ...]) -> dict[str, Any]:
-    """Parse the stored JSON columns, leaving a malformed value as None rather than dropping the row.
+UNREADABLE = "_unreadable"
 
-    The handlers fall back to [] and log; here a value that will not parse is reported as missing, so a reader sees
-    that the field could not be read instead of an empty list that looks like a field nobody filled in.
+
+def _parse_json_columns(row: dict[str, Any], columns: tuple[str, ...]) -> dict[str, Any]:
+    """Parse the stored JSON columns, keeping a malformed value and saying so rather than dropping it.
+
+    An empty column comes back as None: nobody filled it in. A column holding text that will not parse keeps that
+    text verbatim and is named in row["_unreadable"], so the page can show what is stored and say it could not be read.
+    The handlers fall back to [] and log, which a viewer cannot do - there is no log in front of a reader, and an empty
+    list renders exactly like a field nobody filled in. None for both would have the same flaw.
     """
+    unreadable = []
     for column in columns:
         stored = row.get(column)
         if not stored:
@@ -123,7 +129,9 @@ def _parse_json_columns(row: dict[str, Any], columns: tuple[str, ...]) -> dict[s
             try:
                 row[column] = json.loads(stored)
             except (json.JSONDecodeError, TypeError):
-                row[column] = None
+                unreadable.append(column)
+    if unreadable:
+        row[UNREADABLE] = unreadable
     return row
 
 

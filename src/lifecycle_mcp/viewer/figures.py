@@ -22,8 +22,14 @@ from ..handlers.status_handler import BLOCKED_TASKS_SQL
 from ..handlers.task_handler import READY_TASKS_ORDER, READY_TASKS_WHERE
 from .snapshot import ReadOnlyDatabase, Snapshot
 
-WORK_COMPLETE_SQL = f"SELECT id, title, status, priority, task_count FROM requirements WHERE {WORK_COMPLETE_WHERE} ORDER BY priority, id"
-READY_TASKS_SQL = f"SELECT t.id, t.title, t.status, t.priority, t.effort FROM tasks t WHERE {READY_TASKS_WHERE} ORDER BY {READY_TASKS_ORDER}"
+WORK_COMPLETE_SQL = (
+    f"SELECT id, title, status, priority, task_count FROM requirements "
+    f"WHERE {WORK_COMPLETE_WHERE} ORDER BY priority, id"
+)
+READY_TASKS_SQL = (
+    f"SELECT t.id, t.title, t.status, t.priority, t.effort FROM tasks t "
+    f"WHERE {READY_TASKS_WHERE} ORDER BY {READY_TASKS_ORDER}"
+)
 
 
 @dataclass

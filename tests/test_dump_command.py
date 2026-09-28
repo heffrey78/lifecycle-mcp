@@ -159,3 +159,58 @@ def test_restore_from_a_missing_dump_exits_nonzero(tmp_path, capsys):
 
     assert status == 1 and "none.sql" in capsys.readouterr().err
     assert not (tmp_path / "x.db").exists()
+
+
+# --- make, documentation, and the committed dump (TASK-0104) -------------------------------------
+
+
+def test_the_make_targets_run_both_halves_and_pass_arguments_through():
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+
+    export = re.search(r"^tracker-export:\n\t(.+)$", makefile, re.MULTILINE)
+    rebuild = re.search(r"^tracker-restore:\n\t(.+)$", makefile, re.MULTILINE)
+    assert export and "scripts/tracker_dump.py export" in export.group(1)
+    assert rebuild and "scripts/tracker_dump.py restore" in rebuild.group(1)
+    assert '$(if $(INTO),--into "$(INTO)")' in rebuild.group(1) and "$(if $(FORCE),--force)" in rebuild.group(1)
+    assert re.search(r"^\.PHONY:.*\btracker-export\b.*\btracker-restore\b", makefile, re.MULTILINE)
+
+
+def test_the_readme_says_what_the_dump_is_and_how_to_rebuild_from_it():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    section = readme.split("## The Tracker in Git", 1)[1].split("\n## ", 1)[0]
+
+    for needed in (
+        "lifecycle-data.sql",
+        "Never edit it by hand",
+        "make tracker-restore",
+        "Stop the server before replacing",
+        "FORCE=1",
+        "LIFECYCLE_DB",
+        "pre-commit install",
+    ):
+        assert needed in section, needed
+
+
+def test_claude_md_carries_the_dumps_rules():
+    guidance = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+
+    assert "make tracker-export" in guidance and "make tracker-restore" in guidance
+    assert "never the dump" in guidance, "the schema lives in migrations"
+    assert "updated_at" in guidance, "and why records load last"
+
+
+def test_the_committed_dump_rebuilds_a_tracker(tmp_path):
+    """CI cannot see the tracker - it is local by design - but it can see its dump. A dump that was hand-edited, cut
+    short or corrupted fails here, in the build, rather than in someone's restore."""
+    from lifecycle_mcp.dump import parse_dump, restore
+
+    committed = ROOT / "lifecycle-data.sql"
+    if not committed.exists():
+        return  # a fork without a tracker has no dump to check
+    text = committed.read_text(encoding="utf-8")
+
+    result = restore(text, tmp_path / "rebuilt.db")
+
+    parsed = parse_dump(text)
+    assert result["restored"] == {t: n for t, n in parsed.counts().items() if t != "schema_version" and n}
+    assert result["restored"].get("requirements"), "a tracker with requirements in it"

@@ -10,6 +10,8 @@ uv run server.py                         # run the server
 uv run --extra test pytest               # the suite (benchmarks are opt-in)
 make lint                                # ruff check + ruff format --check
 make viewer                              # read-only HTML view of the tracker in exports/ (DB=path for another)
+make tracker-export                      # lifecycle.db -> lifecycle-data.sql, the copy git keeps
+make tracker-restore                     # rebuild lifecycle.db from it (INTO=path, FORCE=1 to replace records)
 
 # register with Claude Code
 claude mcp add lifecycle $(which uv) -- --directory $(pwd) run server.py
@@ -37,6 +39,11 @@ them and `tests/tool_surface_budget.json` holds the counts, so neither number is
   schema. Each migration runs in one transaction with its `schema_version` row; a failure rolls back and
   `MigrationError` stops the server from starting
 - `prompts.py` — the prompts the server offers clients
+- `dump.py` — `lifecycle-data.sql`, the tracker as text in git (REQ-0007-TECH-00). Rows and `schema_version`
+  only: the schema stays in the baseline and migrations, never the dump. Restore builds to the dump's version, loads
+  the rows, then migrates forward, and loads records after the tables pointing at them: inserting a relationship
+  fires counter triggers that UPDATE requirements, which restamps `updated_at`. Each row is one line so no
+  whitespace fixer can alter stored text
 - `viewer/` — the read-only HTML view `make viewer` writes (`scripts/tracker_viewer.py`): `snapshot.py` reads the
   rows, `figures.py` runs the dashboard's own definitions, `render.py`, `browse.py` and `links.py` write the page.
   It opens trackers through `ReadOnlyDatabase`, never `DatabaseManager`, whose constructor migrates the database it

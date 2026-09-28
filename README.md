@@ -167,6 +167,39 @@ often points at a different project, and a command that says it shows this repos
 A path that does not exist is reported, never created. Output lands in `exports/`, which is gitignored, so generating
 it never shows up in `git status`.
 
+## The Tracker in Git
+
+`lifecycle.db` is local and gitignored. It can't simply be committed: the server runs SQLite in WAL mode, so the file
+holds only what has been checkpointed and recent work lives in `lifecycle.db-wal`, and a binary database can be neither
+diffed nor merged. Instead the tracker travels as **`lifecycle-data.sql`**: every row as an `INSERT`, one row per line,
+read through SQLite so nothing still in the write-ahead log is missed.
+
+```bash
+make tracker-export                     # lifecycle.db -> lifecycle-data.sql
+make tracker-restore                    # lifecycle-data.sql -> lifecycle.db
+make tracker-restore INTO=/tmp/check.db # rebuild somewhere else to inspect it
+make tracker-restore FORCE=1            # replace a tracker that already holds records
+```
+
+- **It is generated. Never edit it by hand.** Change the tracker through the tools and export again.
+- **It holds rows, not schema.** The schema is `lifecycle-schema.sql` plus `migrations.py`, so there is exactly one
+  definition of it. Restoring builds the schema from those and loads the rows into it.
+- **Exports are deterministic.** An unchanged tracker exports to identical bytes, so the file changes only when the
+  tracker did, and its diff shows what changed.
+- **From a fresh clone**, `make tracker-restore` rebuilds `lifecycle.db` and checks itself: the rebuilt tracker must
+  export back to the same file byte for byte, or the restore is refused and nothing is written.
+- **Restore refuses to overwrite records.** Pointed at a tracker that already holds any, it names them and stops.
+  `FORCE=1` replaces it; export first if you might want it back. **Stop the server before replacing a tracker it has
+  open**: the file is swapped out from under it, and until it reconnects it keeps writing to the old one.
+- **Older dumps are carried forward** through the same migrations an existing database takes. A dump written by newer
+  code than your checkout is refused: update the checkout first.
+- Both commands use this repository's files and never the database `LIFECYCLE_DB` names, since that often points at a
+  different project.
+
+A `tracker-dump` hook in `.pre-commit-config.yaml` re-exports on every commit and stages the file only when the tracker
+changed. It runs only where the pre-commit framework is installed (`pre-commit install`); until then, run
+`make tracker-export` before committing.
+
 ## MCP Tools Reference
 
 The server exposes 23 MCP tools (24 with GitHub integration on) across 7 handler modules for comprehensive lifecycle management. Every tool rejects fields it does not declare, and the error names the field. [CHANGELOG.md](CHANGELOG.md) lists tools that were removed or renamed, with their replacements.

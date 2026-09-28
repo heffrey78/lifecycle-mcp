@@ -103,8 +103,8 @@ async def test_json_columns_arrive_parsed(mcp_server):  # noqa: F811
     assert requirement["out_of_scope"] is None, "a field nobody filled is None, not an empty list to render"
 
 
-async def test_an_unparseable_json_column_is_reported_missing_rather_than_empty(mcp_server):  # noqa: F811
-    """An empty list reads as a field nobody filled in; None says the value could not be read."""
+async def test_an_unparseable_json_column_keeps_its_text_and_is_named(mcp_server):  # noqa: F811
+    """Empty, unreadable and filled are three different things, and the page has to be able to tell them apart."""
     ids = await populate(mcp_server)
     path = db_path(mcp_server)
     writer = sqlite3.connect(str(path), timeout=30.0)
@@ -118,7 +118,10 @@ async def test_an_unparseable_json_column_is_reported_missing_rather_than_empty(
 
     snapshot = read_snapshot(path)
 
-    assert snapshot.requirements[0]["functional_requirements"] is None
+    requirement = snapshot.requirements[0]
+    assert requirement["functional_requirements"] == "{not json", "what is stored is kept, not discarded"
+    assert requirement["_unreadable"] == ["functional_requirements"], "and named as unreadable"
+    assert requirement["out_of_scope"] is None, "while a column nobody filled is still just empty"
 
 
 def test_the_read_only_uri_does_not_claim_the_file_is_immutable(tmp_path):

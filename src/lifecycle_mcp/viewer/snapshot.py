@@ -71,6 +71,43 @@ def read_only_uri(db_path: str | Path) -> str:
     return f"{Path(db_path).resolve().as_uri()}?mode=ro"
 
 
+class ReadOnlyDatabase:
+    """Enough of DatabaseManager's read interface to run the server's own derivations against a tracker, read-only.
+
+    The server's staleness, work-complete and dependency definitions are functions and SQL that take a
+    DatabaseManager, and a viewer cannot have one: DatabaseManager.__init__ calls _ensure_database_exists, which runs
+    apply_all_migrations against the path it was given and creates a whole new tracker from the baseline schema if the
+    file is absent. Pointed at somebody's database that would migrate it; pointed at a typo it would silently make an
+    empty one. So the viewer passes this instead, and gets to run the real definitions rather than copies of them.
+    """
+
+    def __init__(self, db_path: str | Path, timeout: float = 30.0):
+        self.db_path = str(Path(db_path).resolve())
+        self._timeout = timeout
+
+    def execute_query(
+        self,
+        query: str,
+        params: list[Any] | None = None,
+        fetch_one: bool = False,
+        fetch_all: bool = False,
+        row_factory: bool = False,
+    ) -> Any:
+        """DatabaseManager.execute_query's signature, minus every path that writes."""
+        connection = sqlite3.connect(read_only_uri(self.db_path), uri=True, timeout=self._timeout)
+        try:
+            if row_factory:
+                connection.row_factory = sqlite3.Row
+            cursor = connection.execute(query, params or [])
+            if fetch_one:
+                return cursor.fetchone()
+            if fetch_all:
+                return cursor.fetchall()
+            return None
+        finally:
+            connection.close()
+
+
 def _parse_json_columns(row: dict[str, Any], columns: tuple[str, ...]) -> dict[str, Any]:
     """Parse the stored JSON columns, leaving a malformed value as None rather than dropping the row.
 

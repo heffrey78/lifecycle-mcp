@@ -15,7 +15,9 @@ it reconnects it keeps writing to the old one.
 """
 
 import argparse
+import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from lifecycle_mcp.dump import RestoreRefused, restore, write_dump
@@ -29,12 +31,24 @@ def _describe(counts: dict[str, int]) -> str:
     return ", ".join(f"{count} {table}" for table, count in counts.items()) or "no records"
 
 
-def run_export(db: Path, out: Path) -> int:
+def git_add(path: Path) -> None:
+    """Stage one file. Separate so the tests, which may not spawn git, can see what would be staged."""
+    subprocess.run(["git", "add", "--", str(path)], cwd=REPO, check=True)  # noqa: S603, S607
+
+
+def run_export(db: Path, out: Path, stage: bool = False, add: Callable[[Path], None] = git_add) -> int:
+    """Write the dump; with stage, also add it to the commit being made - but only when it changed.
+
+    The pre-commit hook runs this on every commit. An unchanged tracker writes nothing and stages nothing, so a commit
+    that touched only code carries no dump diff. A clone with no tracker commits normally.
+    """
     if not db.exists():
         print(f"No tracker at {db}; nothing to export.", file=sys.stderr)
         return 0
     changed = write_dump(db, out)
-    print(f"Wrote {out}." if changed else f"{out} is already current.")
+    if changed and stage:
+        add(out)
+    print(f"Wrote {out}{' and staged it' if stage else ''}." if changed else f"{out} is already current.")
     return 0
 
 
@@ -69,6 +83,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     export = commands.add_parser("export", help="write the tracker's rows to the dump")
     export.add_argument("--db", type=Path, default=DEFAULT_DB, help="the tracker (default: this repository's)")
     export.add_argument("--out", type=Path, default=DEFAULT_DUMP, help=f"the dump (default: {DEFAULT_DUMP.name})")
+    export.add_argument("--stage", action="store_true", help="git add the dump when it changed (the commit hook)")
 
     rebuild = commands.add_parser("restore", help="rebuild a tracker from the dump")
     rebuild.add_argument("--from", dest="dump", type=Path, default=DEFAULT_DUMP, help="the dump to read")
@@ -80,7 +95,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.command == "export":
-        return run_export(args.db, args.out)
+        return run_export(args.db, args.out, args.stage)
     return run_restore(args.dump, args.into, args.force)
 
 

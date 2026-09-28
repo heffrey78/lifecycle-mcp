@@ -2,15 +2,24 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
     hooks:
+      # lifecycle-data.sql is generated tracker data (REQ-0007-TECH-00). Its values must never be tidied: a fixer
+      # rewriting whitespace inside it would change the tracker. The format already avoids giving them anything to
+      # touch; the excludes keep it that way if the format ever changes.
       - id: trailing-whitespace
+        exclude: ^lifecycle-data\.sql$
       - id: end-of-file-fixer
+        exclude: ^lifecycle-data\.sql$
       - id: check-yaml
+      # The dump was 719 KB when first committed and grows with the event log, which cannot be trimmed: staleness and
+      # verification are derived from it. It is diffable text, so the limit meant for accidental binaries is waived.
       - id: check-added-large-files
+        exclude: ^lifecycle-data\.sql$
       - id: check-json
       - id: check-toml
       - id: check-merge-conflict
       - id: debug-statements
       - id: mixed-line-ending
+        exclude: ^lifecycle-data\.sql$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.8.0
@@ -36,6 +45,14 @@ repos:
 
   - repo: local
     hooks:
+      # Keeps lifecycle-data.sql equal to this repository's tracker (REQ-0007-TECH-00). Rewrites and stages it only
+      # when the tracker changed, so a code-only commit carries no dump diff; never reads LIFECYCLE_DB.
+      - id: tracker-dump
+        name: tracker-dump
+        entry: uv run python scripts/tracker_dump.py export --stage
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: pytest-check
         name: pytest-check
         entry: pytest

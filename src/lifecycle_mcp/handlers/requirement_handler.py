@@ -13,6 +13,7 @@ from typing import Any
 from mcp.types import TextContent
 
 from ..database_manager import DatabaseManager
+from ..migrations import IS_LEAF_TASK
 from ..rules import stale_after_days, thin_record_reasons
 from .base_handler import (
     EDIT_OPTION_PROPERTIES,
@@ -94,11 +95,30 @@ REQUIREMENT_TRANSITIONS = {
     "Validated": ["Deprecated"],
     "Deprecated": [],
 }
-# The tasks implementing a requirement that are not Complete, for the Implemented gate (roadmap R8).
-OPEN_TASKS_SQL = """
-    SELECT t.id, t.status FROM tasks t JOIN relationships rel ON rel.target_id = t.id
+# Work that is still open. Complete and Abandoned are both endings - one was done, the other was decided against -
+# and every other part of the server has always counted them together: status_handler and task_handler ask for
+# NOT IN ('Complete', 'Abandoned') in a dozen places and report "every task is Complete or Abandoned" as finished.
+# Only the requirement gates ever disagreed, and an Abandoned task held a requirement open for good (REQ-0014-FUNC-00).
+OPEN_TASK_STATUSES = ("Not Started", "In Progress", "Blocked")
+_OPEN_TASK_VALUES = ", ".join(f"'{status}'" for status in OPEN_TASK_STATUSES)
+_COMPLETE_VALUE = "'Complete'"
+
+
+def _has_leaf_task_with_status(values: str, req: str = "requirements.id") -> str:
+    """SQL testing whether a requirement has a leaf task in one of values. req is the id expression to correlate on."""
+    return f"""EXISTS (
+    SELECT 1 FROM relationships rel JOIN tasks t ON t.id = rel.target_id
+    WHERE rel.source_type = 'requirement' AND rel.source_id = {req} AND rel.target_type = 'task'
+      AND rel.relationship_type = 'implements' AND t.status IN ({values}) AND {IS_LEAF_TASK}
+)"""
+
+
+# Every leaf task implementing a requirement, for the messages the gates give. The gates decide with
+# VALIDATION_READY_WHERE and use these rows only to say why, so a refusal can never contradict the dashboard.
+LEAF_TASKS_SQL = f"""
+    SELECT t.id, t.title, t.status FROM tasks t JOIN relationships rel ON rel.target_id = t.id
     WHERE rel.source_type = 'requirement' AND rel.source_id = ?
-      AND rel.target_type = 'task' AND rel.relationship_type = 'implements' AND t.status != 'Complete'
+      AND rel.target_type = 'task' AND rel.relationship_type = 'implements' AND {IS_LEAF_TASK}
     ORDER BY t.id
 """
 
@@ -106,12 +126,18 @@ OPEN_TASKS_SQL = """
 # approved requirement, and validation is a deliberate step (ADR-0003).
 REQUIREMENT_STOP_STATUSES = ("Approved", "Validated")
 
-# Requirements whose implementing tasks are all Complete but that have not reached Implemented: the work is done and
-# only the decision is missing. The counters are kept by triggers and count leaf tasks (F-22), and the tracker knew
-# both facts all along without ever putting them together (roadmap R17, F-52).
-WORK_COMPLETE_WHERE = (
-    "task_count > 0 AND tasks_completed >= task_count AND status NOT IN ('Implemented', 'Validated', 'Deprecated')"
+# The work has an ending: at least one leaf task was completed and none is still open. Abandoned tasks do not hold a
+# requirement open, but a requirement where everything was abandoned completed nothing, so it is a candidate for
+# Deprecated rather than Validated and this is false for it. Derived rather than stored - no counter column and no
+# trigger - the way staleness and changes-since-review already are (REQ-0014-FUNC-00).
+VALIDATION_READY_WHERE = (
+    f"{_has_leaf_task_with_status(_COMPLETE_VALUE)} AND NOT {_has_leaf_task_with_status(_OPEN_TASK_VALUES)}"
 )
+
+# Requirements whose work is finished but that have not reached Implemented: the work is done and only the decision is
+# missing. One definition behind the dashboard section, query_requirements(work_complete=True) and the Validated gate,
+# so none of the three can disagree about one requirement (roadmap R17, F-52).
+WORK_COMPLETE_WHERE = f"{VALIDATION_READY_WHERE} AND status NOT IN ('Implemented', 'Validated', 'Deprecated')"
 
 
 def requirement_path(current: str, target: str, stops: Iterable[str] = REQUIREMENT_STOP_STATUSES) -> list[str] | None:
@@ -618,34 +644,13 @@ class RequirementHandler(BaseHandler):
         if path is None:
             raise StatusRefused(refused_move_reason(current_status, new_status))
 
-        # Validate task completion before allowing Validated status
-        if new_status == "Validated":
-            incomplete_tasks = self.db.execute_query(
-                """
-                SELECT t.id, t.title, t.status FROM tasks t
-                JOIN relationships rel ON rel.target_id = t.id
-                WHERE rel.source_type = 'requirement' AND rel.source_id = ?
-                  AND rel.target_type = 'task' AND rel.relationship_type = 'implements'
-                  AND t.status != 'Complete'
-            """,
-                [requirement_id],
-                fetch_all=True,
-                row_factory=True,
-            )
+        # The Validated gate is always on (roadmap R8, ADR-0004), but it only ever refuses work with no ending:
+        # tasks still open, or nothing completed at all. Abandoned work is finished work and is warned about below.
+        abandoned = self._validation_gate(requirement_id) if new_status == "Validated" else []
 
-            if incomplete_tasks:
-                task_list = "\n".join(
-                    f"- {task['id']}: {task['title']} (status: {task['status']})" for task in incomplete_tasks
-                )
-                raise StatusRefused(
-                    f"Cannot validate requirement with incomplete tasks. "
-                    f"The following tasks must be completed first:\n{task_list}\n\n"
-                    f"All tasks must have 'Complete' status before requirement validation."
-                )
-
-        # Reaching Implemented with open tasks is a workflow rule: warn or enforce, unlike the Validated gate
-        # above, which is always on (roadmap R8, ADR-0004).
-        warnings = self._rule_warnings(self._implemented_gate_reasons(requirement_id, path))
+        # Reaching Implemented with open tasks, and validating one whose work was abandoned, are workflow rules:
+        # warn or enforce, unlike the gate above (roadmap R8, ADR-0004).
+        warnings = self._rule_warnings(self._implemented_gate_reasons(requirement_id, path) + abandoned)
 
         # One UPDATE per step, so the status trigger logs each step; all of them or none (ADR-0003).
         # CURRENT_TIMESTAMP has to be SQL, not a bound value (F-42).
@@ -665,15 +670,70 @@ class RequirementHandler(BaseHandler):
             requirement_id, current_status, new_status, path if len(path) > 2 else None, warnings=warnings
         )
 
+    def _leaf_tasks(self, requirement_id: str) -> list:
+        """Every leaf task implementing the requirement, for the gates' messages"""
+        return self.db.execute_query(LEAF_TASKS_SQL, [requirement_id], fetch_all=True, row_factory=True) or []
+
+    def _validation_gate(self, requirement_id: str) -> list[str]:
+        """Refuse a Validated move with no ending; return the abandoned tasks to warn about (REQ-0014-FUNC-00).
+
+        The decision comes from VALIDATION_READY_WHERE, the same SQL the dashboard's Work Complete section and
+        query_requirements(work_complete=True) read, so a refusal here can never contradict either of them. The task
+        rows are only used to say why.
+        """
+        tasks = self._leaf_tasks(requirement_id)
+        if not tasks:
+            return []  # A requirement with no tasks has always been validatable, and still is.
+
+        ready = self.db.execute_query(
+            f"SELECT 1 FROM requirements WHERE id = ? AND ({VALIDATION_READY_WHERE})", [requirement_id], fetch_one=True
+        )
+        abandoned = [row for row in tasks if row["status"] == "Abandoned"]
+        if ready:
+            if not abandoned:
+                return []
+            listed = ", ".join(f"{row['id']} ({row['title']})" for row in abandoned)
+            return [f"Validating with work abandoned rather than completed: {listed}"]
+
+        open_tasks = [row for row in tasks if row["status"] in OPEN_TASK_STATUSES]
+        if open_tasks:
+            listed = "\n".join(f"- {row['id']}: {row['title']} (status: {row['status']})" for row in open_tasks)
+            raise StatusRefused(
+                f"Cannot validate requirement with incomplete tasks. "
+                f"The following tasks must be completed first:\n{listed}\n\n"
+                f"Abandoned tasks do not block validation; these are still open."
+            )
+
+        # Nothing open and nothing complete: every task was abandoned, so no work was verified.
+        listed = "\n".join(f"- {row['id']}: {row['title']}" for row in abandoned)
+        raise StatusRefused(
+            f"Cannot validate a requirement whose every task was abandoned. Nothing was completed, so there is "
+            f"nothing to validate:\n{listed}\n\n"
+            f"Deprecate the requirement instead, or complete one of these tasks."
+        )
+
     def _implemented_gate_reasons(self, requirement_id: str, path: list[str]) -> list[str]:
-        """Why reaching Implemented is risky: tasks implementing the requirement are still open (roadmap R8)"""
+        """Why reaching Implemented is risky: tasks implementing the requirement are still open (roadmap R8).
+
+        Abandoned tasks are named separately and never as work that is not Complete: they can never become Complete,
+        so a warning that counted them would fire for good, and a signal that always fires teaches the reader to
+        ignore it (roadmap R17, REQ-0014-FUNC-00). The shape follows _dependency_reasons, which already does this.
+        """
         if "Implemented" not in path[1:]:
             return []
-        rows = self.db.execute_query(OPEN_TASKS_SQL, [requirement_id], fetch_all=True, row_factory=True) or []
-        if not rows:
-            return []
-        listed = ", ".join(f"{row['id']} ({row['status']})" for row in rows)
-        return [f"Tasks not Complete: {listed}"]
+        rows = self._leaf_tasks(requirement_id)
+        open_tasks = [row for row in rows if row["status"] in OPEN_TASK_STATUSES]
+        abandoned = [row for row in rows if row["status"] == "Abandoned"]
+        reasons = []
+        if open_tasks:
+            listed = ", ".join(f"{row['id']} ({row['status']})" for row in open_tasks)
+            reasons.append(f"Tasks not Complete: {listed}")
+        # A move that carries on to Validated gets its own abandoned-work warning from _validation_gate; saying it
+        # twice for one move is the noise R17 is about.
+        if abandoned and path[-1] != "Validated":
+            listed = ", ".join(row["id"] for row in abandoned)
+            reasons.append(f"Tasks abandoned rather than completed: {listed}")
+        return reasons
 
     def _query_requirements(self, **params) -> list[TextContent]:
         """Query requirements with filters"""

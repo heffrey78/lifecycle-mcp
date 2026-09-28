@@ -705,7 +705,9 @@ def add_blocked_reason(conn: sqlite3.Connection) -> None:
 
 # A task that has a parent is counted through that parent, not again on its own: create_task links every task to
 # its requirements, subtasks included, so counting all implements links reported a split task twice (F-22, R14).
-_IS_LEAF = """NOT EXISTS (
+# Public because the gates and WORK_COMPLETE_WHERE read the same rule rather than restating it: correlates on an
+# outer relationships row aliased rel (REQ-0014-FUNC-00).
+IS_LEAF_TASK = """NOT EXISTS (
     SELECT 1 FROM relationships child
     WHERE child.source_type = 'task' AND child.target_type = 'task'
       AND child.target_id = rel.target_id AND child.relationship_type = 'parent'
@@ -713,12 +715,12 @@ _IS_LEAF = """NOT EXISTS (
 _LEAF_TASK_COUNT = f"""(
     SELECT COUNT(*) FROM relationships rel
     WHERE rel.source_type = 'requirement' AND rel.source_id = {{req}}
-      AND rel.target_type = 'task' AND rel.relationship_type = 'implements' AND {_IS_LEAF}
+      AND rel.target_type = 'task' AND rel.relationship_type = 'implements' AND {IS_LEAF_TASK}
 )"""
 _LEAF_TASKS_COMPLETED = f"""(
     SELECT COUNT(*) FROM relationships rel JOIN tasks t ON t.id = rel.target_id
     WHERE rel.source_type = 'requirement' AND rel.source_id = {{req}} AND rel.target_type = 'task'
-      AND rel.relationship_type = 'implements' AND t.status = 'Complete' AND {_IS_LEAF}
+      AND rel.relationship_type = 'implements' AND t.status = 'Complete' AND {IS_LEAF_TASK}
 )"""
 
 LEAF_COUNT_TRIGGER_SQL = [

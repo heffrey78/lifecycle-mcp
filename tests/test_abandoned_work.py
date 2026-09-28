@@ -33,7 +33,10 @@ async def status_of(server, requirement_id: str) -> str:
 
 
 async def one_complete_one_abandoned(server) -> tuple[str, str]:
-    """A requirement whose work has an ending: one task done, one dropped. Returns the requirement and the dropped id."""
+    """A requirement whose work has an ending: one task done, one dropped.
+
+    Returns the requirement and the abandoned task.
+    """
     ids = await populate(server)
     dropped = await add_task(server, ids["requirement"], "Cache layer", "P2")
     await move(server, ids["task"], "Complete")

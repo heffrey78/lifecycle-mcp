@@ -14,9 +14,15 @@ that normalises whitespace or line endings - this repository's own pre-commit co
 data by tidying the file.
 """
 
+import os
+import re
 import sqlite3
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from .database_manager import create_baseline
+from .migrations import MIGRATIONS, apply_all_migrations
 
 # Tables whose rows are the tracker's substance, first, so a reader of the dump meets them before the bookkeeping.
 LEADING_TABLES = ("schema_version", "requirements", "tasks", "architecture")
@@ -129,3 +135,212 @@ def write_dump(db_path: str | Path, out_path: str | Path) -> bool:
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(text, encoding="utf-8", newline="\n")
     return True
+
+
+# --- restore -------------------------------------------------------------------------------------
+
+
+class RestoreRefused(Exception):  # noqa: N818 (named like StatusRefused and EditRefused)
+    """The restore was refused before anything was written, or rolled back leaving the target as it was."""
+
+
+@dataclass
+class ParsedDump:
+    """A dump read into statements per table, and the schema version it was written at."""
+
+    by_table: dict[str, list[str]] = field(default_factory=dict)
+    version: int = 0
+
+    def counts(self) -> dict[str, int]:
+        return {table: len(rows) for table, rows in self.by_table.items()}
+
+
+# Loaded last, after every table that points at them. Inserting a relationship fires triggers that UPDATE
+# requirements (task counts) and architecture (superseded_by), and an UPDATE on requirements or tasks stamps its
+# updated_at with the current time. Loaded first, 27 of this repository's requirements came back "edited" at the
+# moment of the restore. Loaded last, those triggers find no rows to touch, and each record arrives with its stored
+# counters, superseded_by and updated_at exactly as they were.
+RECORD_TABLES = ("requirements", "tasks", "architecture")
+
+_INSERT = re.compile(r'^INSERT INTO "([A-Za-z_][A-Za-z0-9_]*)" \(')
+
+
+def parse_dump(text: str) -> ParsedDump:
+    """Read a dump into INSERT statements, refusing anything else before a single row is written.
+
+    A dump is rows. A line that is not an INSERT into a named table - a CREATE, a DELETE, an UPDATE, a pragma - is not
+    something a restore will run, so it is refused here rather than discovered halfway through loading.
+    """
+    parsed = ParsedDump()
+    pending = ""
+    for number, line in enumerate(text.replace("\r\n", "\n").split("\n"), start=1):
+        if not pending and (not line.strip() or line.startswith("--")):
+            continue
+        pending = f"{pending}\n{line}" if pending else line
+        if not sqlite3.complete_statement(pending):
+            continue
+        match = _INSERT.match(pending)
+        if not match:
+            raise RestoreRefused(f"Line {number} is not an INSERT; a dump holds rows only: {pending[:80]}")
+        parsed.by_table.setdefault(match.group(1), []).append(pending)
+        pending = ""
+    if pending:
+        raise RestoreRefused(f"The dump ends partway through a statement: {pending[:80]}")
+
+    versions = parsed.by_table.get("schema_version")
+    if not versions:
+        raise RestoreRefused("No schema_version rows: this is not a tracker dump, or it was cut short")
+    scratch = sqlite3.connect(":memory:")
+    try:
+        scratch.execute(
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TIMESTAMP, description TEXT)"
+        )
+        for statement in versions:
+            scratch.execute(statement)
+        parsed.version = scratch.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+    except sqlite3.Error as error:
+        raise RestoreRefused(f"The dump's schema_version rows could not be read: {error}") from error
+    finally:
+        scratch.close()
+    return parsed
+
+
+def latest_version() -> int:
+    """The newest schema version this checkout's migrations reach."""
+    return MIGRATIONS[-1][0]
+
+
+def tracker_rows(db_path: str | Path) -> dict[str, int]:
+    """Rows per data table in an existing tracker, leaving out schema_version and empty tables. {} if it is absent."""
+    path = Path(db_path)
+    if not path.exists():
+        return {}
+    connection = read_only_connection(path)
+    try:
+        return tracker_rows_in(connection)
+    finally:
+        connection.close()
+
+
+def _describe(counts: dict[str, int]) -> str:
+    return ", ".join(f"{count} {table}" for table, count in counts.items())
+
+
+def _build(parsed: ParsedDump, building: Path) -> None:
+    """Build a tracker at `building`: baseline, migrations to the dump's version, its rows, then the rest.
+
+    Loading happens in one transaction, so a statement that fails leaves no rows from the dump behind. The fresh
+    database's own schema_version rows are replaced by the dump's, so the rebuilt tracker's history says when its
+    migrations were first applied rather than that they all ran today.
+    """
+    create_baseline(building)
+    apply_all_migrations(str(building), parsed.version)
+    connection = sqlite3.connect(str(building), isolation_level=None)
+    try:
+        connection.execute("BEGIN")
+        try:
+            already = tracker_rows_in(connection)
+            if already:
+                raise RestoreRefused(f"A new database already held rows before loading: {_describe(already)}")
+            connection.execute("DELETE FROM schema_version")
+            order = [table for table in parsed.by_table if table not in RECORD_TABLES]
+            order += [table for table in RECORD_TABLES if table in parsed.by_table]
+            for table in order:
+                rows = parsed.by_table[table]
+                for index, statement in enumerate(rows, start=1):
+                    try:
+                        connection.execute(statement)
+                    except (sqlite3.Error, sqlite3.Warning) as error:
+                        raise RestoreRefused(f"Row {index} of {table} could not be loaded: {error}") from error
+            connection.execute("COMMIT")
+        except BaseException:
+            connection.execute("ROLLBACK")
+            raise
+    finally:
+        connection.close()
+    # Carry an older dump forward exactly as an existing database would be carried.
+    apply_all_migrations(str(building))
+
+
+def tracker_rows_in(connection: sqlite3.Connection) -> dict[str, int]:
+    """Rows per data table on an open connection, leaving out schema_version and empty tables."""
+    counts = {
+        table: connection.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]  # noqa: S608
+        for table in data_tables(connection)
+        if table != "schema_version"
+    }
+    return {table: count for table, count in counts.items() if count}
+
+
+def _verify(parsed: ParsedDump, built: Path, text: str) -> None:
+    """Check the rebuilt tracker holds what the dump said, and at the same version, byte for byte."""
+    found = tracker_rows(built)
+    expected = {table: count for table, count in parsed.counts().items() if table != "schema_version" and count}
+    if found != expected:
+        raise RestoreRefused(f"The rebuilt tracker holds {_describe(found)}, but the dump holds {_describe(expected)}")
+    if parsed.version == latest_version() and export_rows(built) != text.replace("\r\n", "\n"):
+        raise RestoreRefused("The rebuilt tracker does not export back to the same dump")
+
+
+def _retire(target: Path) -> None:
+    """Fold a tracker's write-ahead log into it and remove the sidecars, so none outlives the file it belonged to.
+
+    SQLite applies a -wal to whatever database file sits beside it. Left in place, the old tracker's log would be
+    applied to the rebuilt one on its first open. Checkpointing first means that however far this gets, the old
+    tracker is still whole on disk.
+    """
+    connection = sqlite3.connect(str(target), timeout=30.0)
+    try:
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    finally:
+        connection.close()
+    for suffix in ("-wal", "-shm"):
+        Path(f"{target}{suffix}").unlink(missing_ok=True)
+
+
+def restore(text: str, target: str | Path, force: bool = False) -> dict[str, Any]:
+    """Rebuild a tracker at `target` from a dump's text, or refuse and leave everything as it was.
+
+    Refuses, before writing anything: a statement that is not an INSERT, a dump newer than this checkout's migrations,
+    and a target that already holds records unless force is given. The tracker is built beside the target, verified,
+    and moved into place in one step, so an interrupted restore leaves the target untouched.
+    """
+    destination = Path(target).resolve()
+    parsed = parse_dump(text)
+    if parsed.version > latest_version():
+        raise RestoreRefused(
+            f"The dump was written at schema version {parsed.version}, and this checkout's migrations reach "
+            f"{latest_version()}. Update the checkout before restoring it; loading newer rows into an older schema "
+            "would give the code a tracker it cannot read."
+        )
+    existing = tracker_rows(destination)
+    if existing and not force:
+        raise RestoreRefused(
+            f"{destination} already holds {_describe(existing)}. Nothing was written. Restoring would replace it; "
+            "export it first if you might want it back, then pass --force, or restore somewhere else with --into."
+        )
+
+    # lifecycle.restoring.db rather than lifecycle.db.restoring: the *.db ignore rule covers it if a restore is killed.
+    building = destination.with_name(f"{destination.stem}.restoring{destination.suffix}")
+    for leftover in (building, Path(f"{building}-journal")):
+        leftover.unlink(missing_ok=True)
+    try:
+        _build(parsed, building)
+        _verify(parsed, building, text)
+    except BaseException:
+        building.unlink(missing_ok=True)
+        Path(f"{building}-journal").unlink(missing_ok=True)
+        raise
+
+    had_log = Path(f"{destination}-wal").exists()
+    if destination.exists():
+        _retire(destination)
+    os.replace(building, destination)
+    return {
+        "target": str(destination),
+        "restored": tracker_rows(destination),
+        "dump_version": parsed.version,
+        "version": latest_version(),
+        "replaced": existing,
+        "had_write_ahead_log": had_log,
+    }

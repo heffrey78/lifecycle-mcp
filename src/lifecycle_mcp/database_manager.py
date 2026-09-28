@@ -16,6 +16,25 @@ from typing import Any
 
 from .migrations import apply_all_migrations
 
+SCHEMA_PATH = Path(__file__).parent / "lifecycle-schema.sql"
+
+
+def create_baseline(db_path: str | Path) -> None:
+    """Create a new database from the version 0 baseline schema, leaving migrations to the caller.
+
+    The server creates every database this way and then applies all migrations. A restore creates one this way and
+    applies migrations only up to the version its dump was written at, loads the rows, then applies the rest - the
+    same path any existing database takes (REQ-0007-TECH-00).
+    """
+    if not SCHEMA_PATH.exists():
+        raise FileNotFoundError(f"Schema file not found at {SCHEMA_PATH}")
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    finally:
+        conn.close()
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -175,16 +194,12 @@ class DatabaseManager:
         """Initialize database with schema if needed"""
         if not Path(self.db_path).exists():
             logger.info(f"Creating new database at {self.db_path}")
-            conn = sqlite3.connect(self.db_path)
-            schema_path = Path(__file__).parent / "lifecycle-schema.sql"
-            if schema_path.exists():
-                with open(schema_path, encoding="utf-8") as f:
-                    conn.executescript(f.read())
-                logger.info("Database schema initialized")
-            else:
-                logger.error(f"Schema file not found at {schema_path}")
-                raise FileNotFoundError(f"Schema file not found at {schema_path}")
-            conn.close()
+            try:
+                create_baseline(self.db_path)
+            except FileNotFoundError:
+                logger.error(f"Schema file not found at {SCHEMA_PATH}")
+                raise
+            logger.info("Database schema initialized")
 
         # Apply any pending migrations
         apply_all_migrations(self.db_path)

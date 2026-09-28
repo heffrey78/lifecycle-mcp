@@ -14,9 +14,12 @@ import html
 from collections import defaultdict
 from typing import Any
 
+from .links import link_index, links_html, record_titles
 from .snapshot import UNREADABLE, Snapshot
 
 # What the page calls each kind of record, and which snapshot rows are that kind.
+ENTITY = {"requirement": "requirement", "task": "task", "decision": "architecture"}
+
 KINDS: tuple[tuple[str, str, str], ...] = (
     ("requirement", "Requirements", "requirements"),
     ("task", "Tasks", "tasks"),
@@ -141,8 +144,24 @@ function init() {
     none.textContent = count === 0 ? emptyReason(records, state) : "";
   }
 
+  // Following a link opens the record it points at. If the filters are hiding it, clear them first: a link that
+  // leads to nothing visible reads as a broken one.
+  function reveal() {
+    var id = decodeURIComponent(location.hash.slice(1));
+    var target = id && document.getElementById(id);
+    if (!target || !target.classList.contains("record")) return;
+    if (target.hidden) {
+      controls.forEach(function (control) { control.value = ""; });
+      apply();
+    }
+    target.open = true;
+    target.scrollIntoView();
+  }
+
   controls.forEach(function (control) { control.addEventListener("input", apply); });
+  window.addEventListener("hashchange", reveal);
   apply();
+  reveal();
 }
 
 if (typeof document !== "undefined") init();
@@ -197,7 +216,7 @@ def _filled(value: Any) -> bool:
     return value not in (None, "", [], {})
 
 
-def record_details(kind: str, record: dict[str, Any], comments: list[dict[str, Any]]) -> str:
+def record_details(kind: str, record: dict[str, Any], comments: list[dict[str, Any]], links: str = "") -> str:
     """One record: a summary line readable without opening it, then every field it holds, then its comments."""
     pills = "".join(
         f'<span class="pill">{_esc(record[key])}</span>'
@@ -214,6 +233,7 @@ def record_details(kind: str, record: dict[str, Any], comments: list[dict[str, A
     body = f"<dl>{fields}</dl>" if fields else ""
     if unfilled:
         body += f'<p class="unfilled">Not filled: {_esc(", ".join(label(c).lower() for c in unfilled))}</p>'
+    body += links
     if comments:
         items = "".join(
             f'<li><div class="who">{_esc(comment.get("reviewer") or "Someone")}, '
@@ -255,12 +275,21 @@ def browse_section(snapshot: Snapshot) -> str:
     for comment in snapshot.comments:
         comments_by_entity[str(comment.get("entity_id"))].append(comment)
 
+    index, known = link_index(snapshot), record_titles(snapshot)
     groups = []
     every: list[dict[str, Any]] = []
     for kind, heading, attribute in KINDS:
         rows = getattr(snapshot, attribute)
         every += rows
-        items = "".join(record_details(kind, row, comments_by_entity.get(str(row.get("id")), [])) for row in rows)
+        items = "".join(
+            record_details(
+                kind,
+                row,
+                comments_by_entity.get(str(row.get("id")), []),
+                links_html(str(row.get("id")), ENTITY[kind], index, known),
+            )
+            for row in rows
+        )
         groups.append(
             f'<section class="kind" id="records-{kind}"><h2>{_esc(heading)} '
             f'<span class="pill kind-count">{len(rows)}</span></h2>{items}</section>'

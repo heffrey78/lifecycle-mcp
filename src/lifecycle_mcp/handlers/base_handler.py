@@ -60,7 +60,12 @@ EDIT_OPTION_PROPERTIES = {
 }
 
 # Record type -> table, for tools that take any record's ID.
-ENTITY_TABLES = {"requirement": "requirements", "task": "tasks", "architecture": "architecture"}
+ENTITY_TABLES = {
+    "requirement": "requirements",
+    "task": "tasks",
+    "architecture": "architecture",
+    "project": "projects",
+}
 
 # The list form of a status tool's ID parameter (roadmap R9, ADR-0003).
 STATUS_ID_LIST_PROPERTY = {
@@ -266,7 +271,8 @@ class BaseHandler(ABC):
         """Record a link in the relationships table, the only place links are stored (idempotent).
 
         Direction conventions: requirement -> task (implements), requirement -> architecture (addresses),
-        child -> parent (parent), dependent -> dependency (depends/requires/informs), blocker -> blocked (blocks).
+        child -> parent (parent), dependent -> dependency (depends/requires/informs), blocker -> blocked (blocks),
+        requirement -> project (part_of).
         Pass cursor to write inside an open transaction.
         """
         sql = (
@@ -519,13 +525,15 @@ class BaseHandler(ABC):
 
     @staticmethod
     def _get_entity_type(entity_id: str) -> str | None:
-        """Record type from an ID prefix: REQ- requirement, TASK- task, ADR- or TDD- architecture"""
+        """Record type from an ID prefix: REQ- requirement, TASK- task, ADR- or TDD- architecture, PROJ- project"""
         if entity_id.startswith("REQ-"):
             return "requirement"
         if entity_id.startswith("TASK-"):
             return "task"
         if entity_id.startswith(("ADR-", "TDD-")):
             return "architecture"
+        if entity_id.startswith("PROJ-"):
+            return "project"
         return None
 
     def _format_comments(self, entity_type: str, entity_id: str) -> str:

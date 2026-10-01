@@ -7,6 +7,7 @@ tedious to type and easy to get wrong. A caller may leave out the padding and th
     REQ-12-FUNC   -> REQ-0012-FUNC-00        TASK-12    -> TASK-0012-00-00
     REQ-0012-FUNC -> REQ-0012-FUNC-00        TASK-12-1  -> TASK-0012-01-00
     ADR-4         -> ADR-0004                TDD-4      -> TDD-0004
+    PROJ-2        -> PROJ-0002
 
 The type stays in a requirement's alias because numbers repeat across types: REQ-12 alone can be four records
 (owner decision, 2026-09-15). Stored IDs are never rewritten; this is only an input form, resolved in one place so
@@ -20,7 +21,7 @@ import re
 STORED_IDS = (
     re.compile(r"^REQ-\d{4}-[A-Z]+-\d{2}$"),
     re.compile(r"^TASK-\d{4}-\d{2}-\d{2}$"),
-    re.compile(r"^(?:ADR|TDD)-\d{4}$"),
+    re.compile(r"^(?:ADR|TDD|PROJ)-\d{4}$"),
 )
 
 # Table and the column pattern each alias shape has to match, by ID prefix.
@@ -29,8 +30,15 @@ ALIAS_PATTERNS = {
     "TASK": re.compile(r"^TASK-(\d+)(?:-(\d+))?(?:-(\d+))?$", re.IGNORECASE),
     "ADR": re.compile(r"^ADR-(\d+)$", re.IGNORECASE),
     "TDD": re.compile(r"^TDD-(\d+)$", re.IGNORECASE),
+    "PROJ": re.compile(r"^PROJ-(\d+)$", re.IGNORECASE),
 }
-PREFIX_TABLES = {"REQ": "requirements", "TASK": "tasks", "ADR": "architecture", "TDD": "architecture"}
+PREFIX_TABLES = {
+    "REQ": "requirements",
+    "TASK": "tasks",
+    "ADR": "architecture",
+    "TDD": "architecture",
+    "PROJ": "projects",
+}
 
 
 def is_stored_id(value: str) -> bool:
@@ -54,7 +62,7 @@ def candidates(alias: str) -> tuple[str, str] | None:
 
     parts = match.groups()
     number = f"{int(parts[0]):04d}"
-    if prefix in ("ADR", "TDD"):
+    if prefix in ("ADR", "TDD", "PROJ"):
         return PREFIX_TABLES[prefix], f"{prefix}-{number}"
     if prefix == "REQ":
         req_type = parts[1].upper() if parts[1] else "%"

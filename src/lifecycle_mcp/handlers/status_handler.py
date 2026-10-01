@@ -10,6 +10,7 @@ from typing import Any
 from mcp.types import TextContent
 
 from .base_handler import BaseHandler
+from .project_handler import describe_progress, project_rollups
 from .requirement_handler import WORK_COMPLETE_WHERE, changes_since_review, describe_age, stale_requirements
 from .task_handler import TASK_DEPENDENCIES_SQL
 
@@ -119,6 +120,11 @@ class StatusHandler(BaseHandler):
             else:
                 report += "- No tasks found\n"
 
+            # What the requirements above are grouped into, and how far each group has got. A requirement can be in
+            # several projects, so these lines overlap and do not add up to the totals.
+            projects = project_rollups(self.db)
+            report += self._projects_section(projects)
+
             if blocked:
                 report += f"\n## ⚠️ Blocked Items ({len(blocked)})\n"
                 for item in blocked:
@@ -189,12 +195,39 @@ class StatusHandler(BaseHandler):
             # blocked items when they were asked for (roadmap R7)
             metrics = self._project_metrics()
             metrics["requirements"]["work_complete"] = [row["id"] for row in awaiting]
+            if projects:
+                metrics["projects"] = projects
             if include_blocked:
                 metrics["blocked"] = blocked
             return self._create_structured_response("INFO", key_info, metrics, action_info, report)
 
         except Exception as e:
             return self._create_error_response("Failed to get project status", e)
+
+    def _projects_section(self, projects: list[dict[str, Any]]) -> str:
+        """Dashboard section listing the active projects; "" when the tracker has no projects.
+
+        Closed projects are counted rather than listed, and requirements in no project are counted only when there
+        is one: a tracker that does not use projects is not told that everything is ungrouped.
+        """
+        if not projects:
+            return ""
+        active = [project for project in projects if project["status"] == "Active"]
+        section = f"\n## Projects ({len(active)} active)\n"
+        for project in active:
+            section += f"- {project['id']}: {project['title']} - {describe_progress(project)}\n"
+        closed = len(projects) - len(active)
+        if closed:
+            section += f"- {closed} closed\n"
+        ungrouped = self.db.execute_query(
+            "SELECT COUNT(*) FROM requirements WHERE status != 'Deprecated' AND id NOT IN ("
+            "SELECT source_id FROM relationships WHERE source_type = 'requirement' AND target_type = 'project' "
+            "AND relationship_type = 'part_of')",
+            fetch_one=True,
+        )[0]
+        if ungrouped:
+            section += f"- {ungrouped} requirement{'s' if ungrouped != 1 else ''} in no project\n"
+        return section
 
     def _work_complete_requirements(self) -> list[Any]:
         """Requirements whose tasks are all Complete but that have not reached Implemented (roadmap R17)"""

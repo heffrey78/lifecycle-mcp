@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Projects: groups of requirements with a stated purpose
+
+Exported documents had no owning concept. Requirements came out grouped by type with nothing saying what the group
+was for, so whoever passed an export on wrote that summary by hand afterwards, and it lived outside the tracker.
+A project is a named group of requirements - an epic, a roadmap item, a layer - with its purpose stored as a field,
+and export opens with it. The tool count goes from 23 to 25; definitions go from 13,185 to 14,871 characters.
+
+#### Added
+- `create_project` and `update_project`. A project has a title, a required `purpose`, optional `success_criteria`
+  and `out_of_scope`, and is Active or Closed. IDs are `PROJ-0001`; `PROJ-1` works wherever an ID is taken.
+- Membership is a requirement → project `part_of` link, so a requirement can be in several projects. Set it with
+  `create_project`'s `requirement_ids`, `update_project`'s `add_requirement_ids` and `remove_requirement_ids`,
+  `create_requirement`'s `project_ids`, or `create_relationship`. Tasks and decisions are not members; they belong
+  to a project through the requirement they implement or address.
+- `export_project_documentation` takes `project_id` and writes that project's requirements, tasks and decisions,
+  each document opening with the project's purpose. Without it, the requirements document opens with every project,
+  its purpose and its requirements, followed by the requirements in no project.
+- `query_requirements` and `query_tasks` take `project_id`. `get_details`, `add_comment`, `get_entity_history` and
+  `delete_record` take a project's ID; a project is deleted only once it holds no requirements.
+- `get_project_status` lists the active projects with each one's requirement and task progress.
+- The viewer shows projects and the links between a project and its requirements.
+
+#### Changed
+- Migration 19 adds the `projects` table and rebuilds `relationships` and `reviews`, whose CHECK constraints name
+  the record types. Every row, comment ID and trigger is kept.
+- A tracker with no projects exports and reports exactly as before.
+
 ### Amending an accepted decision (roadmap R20)
 
 Observed in the linkcheck dogfooding run: that project's ADR-0001 recorded that the thread pool defaults "to

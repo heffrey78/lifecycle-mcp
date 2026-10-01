@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from ..handlers.architecture_handler import ARCHITECTURE_JSON_FIELDS
+from ..handlers.project_handler import PROJECT_JSON_FIELDS
 from ..handlers.requirement_handler import REQUIREMENT_JSON_FIELDS
 from ..handlers.task_handler import TASK_JSON_FIELDS
 
@@ -26,11 +27,13 @@ JSON_FIELDS: dict[str, tuple[str, ...]] = {
     "requirements": tuple(REQUIREMENT_JSON_FIELDS),
     "tasks": tuple(TASK_JSON_FIELDS),
     "architecture": tuple(ARCHITECTURE_JSON_FIELDS),
+    "projects": tuple(PROJECT_JSON_FIELDS),
 }
 
 # Ordered by primary key so two snapshots of an unchanged database are identical: the page's own content should differ
 # only when the tracker did.
 TABLE_ORDER: dict[str, str] = {
+    "projects": "id",
     "requirements": "id",
     "tasks": "id",
     "architecture": "id",
@@ -40,12 +43,17 @@ TABLE_ORDER: dict[str, str] = {
     "schema_version": "version",
 }
 
+# Tables a tracker may not have yet. The viewer never migrates what it opens, so a tracker last opened by a server
+# from before projects (migration 19) has no such table, and that reads as no projects rather than as unreadable.
+OPTIONAL_TABLES = ("projects",)
+
 
 @dataclass
 class Snapshot:
     """Every row the viewer shows, with JSON columns already parsed."""
 
     database_path: str
+    projects: list[dict[str, Any]] = field(default_factory=list)
     requirements: list[dict[str, Any]] = field(default_factory=list)
     tasks: list[dict[str, Any]] = field(default_factory=list)
     architecture: list[dict[str, Any]] = field(default_factory=list)
@@ -57,6 +65,7 @@ class Snapshot:
     def counts(self) -> dict[str, int]:
         """Row counts by kind, for a restore or a render to check itself against."""
         return {
+            "projects": len(self.projects),
             "requirements": len(self.requirements),
             "tasks": len(self.tasks),
             "architecture": len(self.architecture),
@@ -152,7 +161,11 @@ def read_snapshot(db_path: str | Path) -> Snapshot:
         # write and disagree with each other. WAL means this neither blocks the writer nor is blocked by it.
         connection.execute("BEGIN")
         rows: dict[str, list[dict[str, Any]]] = {}
+        present = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         for table, order_by in TABLE_ORDER.items():
+            if table in OPTIONAL_TABLES and table not in present:
+                rows[table] = []
+                continue
             cursor = connection.execute(f"SELECT * FROM {table} ORDER BY {order_by}")  # noqa: S608 (fixed names above)
             rows[table] = [_parse_json_columns(dict(row), JSON_FIELDS.get(table, ())) for row in cursor.fetchall()]
         connection.execute("COMMIT")
@@ -161,6 +174,7 @@ def read_snapshot(db_path: str | Path) -> Snapshot:
 
     return Snapshot(
         database_path=str(path),
+        projects=rows["projects"],
         requirements=rows["requirements"],
         tasks=rows["tasks"],
         architecture=rows["architecture"],

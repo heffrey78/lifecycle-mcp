@@ -22,6 +22,7 @@ from .base_handler import (
     StatusChange,
     StatusRefused,
 )
+from .project_handler import PROJECT_REQUIREMENT_IDS_SQL
 
 # Fields update_task changes directly; parent_task_id and requirement_ids are links and handled separately.
 TASK_EDITABLE = (
@@ -177,6 +178,7 @@ class TaskHandler(BaseHandler):
                         "priority": {"type": "string"},
                         "assignee": {"type": "string"},
                         "requirement_id": {"type": "string"},
+                        "project_id": {"type": "string"},
                         "ready": {
                             "type": "boolean",
                             "description": "Only Not Started tasks whose dependencies are all Complete, by priority",
@@ -703,6 +705,15 @@ class TaskHandler(BaseHandler):
                 )
                 where_params.append(params["requirement_id"])
 
+            if params.get("project_id"):
+                # A task is in a project through the requirements it implements; it is never a member itself.
+                where_clauses.append(
+                    "t.id IN (SELECT target_id FROM relationships WHERE source_type = 'requirement' "
+                    "AND target_type = 'task' AND relationship_type = 'implements' "
+                    f"AND source_id IN ({PROJECT_REQUIREMENT_IDS_SQL}))"
+                )
+                where_params.append(params["project_id"])
+
             for column in ("status", "priority", "assignee"):
                 if params.get(column):
                     where_clauses.append(f"t.{column} = ?")
@@ -747,6 +758,8 @@ class TaskHandler(BaseHandler):
                 filters.append(f"assignee: {params['assignee']}")
             if params.get("requirement_id"):
                 filters.append(f"requirement: {params['requirement_id']}")
+            if params.get("project_id"):
+                filters.append(f"project: {params['project_id']}")
             if params.get("ready"):
                 filters.append("ready to start")
             filter_desc = " | ".join(filters) if filters else "all tasks"

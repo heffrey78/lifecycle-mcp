@@ -22,6 +22,7 @@ from .database_manager import DatabaseManager
 from .handlers import (
     ArchitectureHandler,
     ExportHandler,
+    ProjectHandler,
     RecordHandler,
     RelationshipHandler,
     RequirementHandler,
@@ -116,8 +117,13 @@ class LifecycleMCPServer:
         self.task_handler = TaskHandler(self.db_manager)
         self.architecture_handler = ArchitectureHandler(self.db_manager)
         self.relationship_handler = RelationshipHandler(self.db_manager)
+        self.project_handler = ProjectHandler(self.db_manager)
         self.record_handler = RecordHandler(
-            self.db_manager, self.requirement_handler, self.task_handler, self.architecture_handler
+            self.db_manager,
+            self.requirement_handler,
+            self.task_handler,
+            self.architecture_handler,
+            self.project_handler,
         )
         self.export_handler = ExportHandler(self.db_manager)
         self.status_handler = StatusHandler(self.db_manager)
@@ -141,7 +147,10 @@ class LifecycleMCPServer:
             "delete_relationship": self.relationship_handler,
             "query_relationships": self.relationship_handler,
             "get_entity_history": self.relationship_handler,
-            # Record tools: any requirement, task or architecture decision ID
+            # Project tools
+            "create_project": self.project_handler,
+            "update_project": self.project_handler,
+            # Record tools: any requirement, task, architecture decision or project ID
             "get_details": self.record_handler,
             "delete_record": self.record_handler,
             "add_comment": self.record_handler,
@@ -228,6 +237,7 @@ class LifecycleMCPServer:
             self.requirement_handler,
             self.task_handler,
             self.architecture_handler,
+            self.project_handler,
             self.relationship_handler,
             self.record_handler,
             self.export_handler,

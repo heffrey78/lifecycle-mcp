@@ -659,12 +659,12 @@ SUPERSEDED_BY_TRIGGER_SQL = [
 ]
 
 
-def allow_supersedes_links(conn: sqlite3.Connection) -> None:
-    """Add the supersedes link type and keep architecture.superseded_by in step with it (roadmap R9, ADR-0003).
+def _rebuild_relationships(conn: sqlite3.Connection, create_sql: str) -> None:
+    """Replace relationships with the table create_sql defines as relationships_new, keeping every row.
 
     SQLite can't change a CHECK constraint in place, so relationships is rebuilt. Views and triggers that read it are
     dropped first and recreated from their stored SQL afterwards, together with its indexes and its own triggers,
-    which go with the old table. Decisions whose superseded_by is already set get the matching link.
+    which go with the old table.
     """
     dependents = conn.execute(
         "SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name != 'relationships' "
@@ -675,7 +675,7 @@ def allow_supersedes_links(conn: sqlite3.Connection) -> None:
         if kind in ("view", "trigger"):
             conn.execute(f'DROP {kind.upper()} IF EXISTS "{name}"')
 
-    conn.execute(RELATIONSHIPS_WITH_SUPERSEDES_SQL)
+    conn.execute(create_sql)
     conn.execute(
         f"INSERT INTO relationships_new ({RELATIONSHIP_COLUMNS}) SELECT {RELATIONSHIP_COLUMNS} FROM relationships"
     )
@@ -683,6 +683,15 @@ def allow_supersedes_links(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE relationships_new RENAME TO relationships")
     for _, _, sql in dependents:
         conn.execute(sql)
+
+
+def allow_supersedes_links(conn: sqlite3.Connection) -> None:
+    """Add the supersedes link type and keep architecture.superseded_by in step with it (roadmap R9, ADR-0003).
+
+    The CHECK on relationship_type changes, so relationships is rebuilt. Decisions whose superseded_by is already set
+    get the matching link.
+    """
+    _rebuild_relationships(conn, RELATIONSHIPS_WITH_SUPERSEDES_SQL)
 
     conn.execute(f"""{_INSERT_LINK})
         SELECT 'rel-' || superseded_by || '-' || id || '-supersedes',
@@ -839,6 +848,77 @@ def add_requirement_origin(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE requirements ADD COLUMN origin TEXT NOT NULL DEFAULT 'stated'")
 
 
+# --- migration 19 ------------------------------------------------------------------------------
+
+PROJECTS_SQL = """CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY, -- PROJ-XXXX
+    project_number INTEGER NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Active' CHECK (status IN ('Active', 'Closed')),
+    purpose TEXT NOT NULL,
+    success_criteria TEXT, -- JSON array
+    out_of_scope TEXT, -- JSON array
+    author TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    revision INTEGER NOT NULL DEFAULT 0
+)"""
+
+RELATIONSHIPS_WITH_PROJECTS_SQL = """CREATE TABLE relationships_new (
+    id TEXT PRIMARY KEY,
+    source_type TEXT NOT NULL CHECK (source_type IN ('requirement', 'task', 'architecture', 'project')),
+    source_id TEXT NOT NULL,
+    target_type TEXT NOT NULL CHECK (target_type IN ('requirement', 'task', 'architecture', 'project')),
+    target_id TEXT NOT NULL,
+    relationship_type TEXT NOT NULL CHECK (relationship_type IN (
+        'implements', 'addresses', 'depends', 'blocks', 'informs',
+        'requires', 'parent', 'refines', 'conflicts', 'relates', 'supersedes', 'part_of'
+    )),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(source_type, source_id, target_type, target_id, relationship_type)
+)"""
+
+REVIEW_COLUMNS = "id, entity_type, entity_id, reviewer, comment, created_at, resolved"
+
+REVIEWS_WITH_PROJECTS_SQL = """CREATE TABLE reviews_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL CHECK (entity_type IN ('requirement', 'task', 'architecture', 'project')),
+    entity_id TEXT NOT NULL,
+    reviewer TEXT NOT NULL,
+    comment TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    resolved BOOLEAN DEFAULT FALSE
+)"""
+
+
+def add_projects(conn: sqlite3.Connection) -> None:
+    """Projects: a named group of requirements and the purpose that group serves.
+
+    A project is its own kind of record rather than a requirement at the top of a parent tree: it has no Draft to
+    Validated path, so the transition map and its gates (ADR-0004) are untouched. Membership is a requirement ->
+    project part_of link, stored in relationships like every other link (ADR-0001), so a requirement can belong to
+    several projects - an epic and a layer at once. Tasks and decisions are never members themselves; they come along
+    through the requirement they implement or address.
+
+    Two CHECK constraints name the record types and have to admit the new one, so relationships and reviews (the
+    comments) are rebuilt. reviews keeps its ids and its AUTOINCREMENT high-water mark, so a comment id is never
+    reused.
+    """
+    conn.execute(PROJECTS_SQL)
+    _rebuild_relationships(conn, RELATIONSHIPS_WITH_PROJECTS_SQL)
+
+    sequence = conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'reviews'").fetchone()
+    conn.execute(REVIEWS_WITH_PROJECTS_SQL)
+    conn.execute(f"INSERT INTO reviews_new ({REVIEW_COLUMNS}) SELECT {REVIEW_COLUMNS} FROM reviews")
+    conn.execute("DROP TABLE reviews")
+    conn.execute("ALTER TABLE reviews_new RENAME TO reviews")
+    if sequence is not None:
+        # The copy only records the highest id still present; a deleted comment's id must stay retired too.
+        updated = conn.execute("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = 'reviews'", [sequence[0]])
+        if updated.rowcount == 0:
+            conn.execute("INSERT INTO sqlite_sequence (name, seq) VALUES ('reviews', ?)", [sequence[0]])
+
+
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "GitHub integration fields", add_github_integration_columns),
     (2, "GitHub sync metadata fields", add_github_sync_metadata_columns),
@@ -858,6 +938,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (16, "Count leaf tasks only in requirement progress", count_leaf_tasks_only),
     (17, "Keep the commit and evidence behind a task's status", add_task_evidence),
     (18, "Record where a requirement came from", add_requirement_origin),
+    (19, "Projects: groups of requirements with a stated purpose", add_projects),
 ]
 
 

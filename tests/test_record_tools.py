@@ -43,8 +43,9 @@ async def test_get_details_returns_the_report_for_each_record_type(mcp_server): 
 async def test_malformed_and_unknown_ids_are_refused(mcp_server):  # noqa: F811
     for tool, extra in (("get_details", {}), ("delete_record", {}), ("add_comment", {"comment": "x"})):
         malformed = await call(mcp_server, tool, {"entity_id": "NOTE-1", **extra})
-        assert malformed.isError and "Expected an ID like REQ-0001-FUNC-00, TASK-0001-00-00 or ADR-0001" in text_of(
-            malformed
+        assert (
+            malformed.isError
+            and "Expected an ID like REQ-0001-FUNC-00, TASK-0001-00-00, ADR-0001 or PROJ-0001" in text_of(malformed)
         ), tool
 
     missing = await call(mcp_server, "get_details", {"entity_id": "TASK-0099-00-00"})

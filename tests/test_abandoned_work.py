@@ -239,4 +239,6 @@ async def test_nothing_was_migrated_for_this(mcp_server):  # noqa: F811
     """Derived, not stored: the open-work question is answered in SQL against the tasks, so there is no new column."""
     from lifecycle_mcp.migrations import MIGRATIONS
 
-    assert len(MIGRATIONS) == 18, "REQ-0014-FUNC-00 adds no migration"
+    # 18 was the newest migration when this was built; what follows it is accounted for by name.
+    later = [description for _, description, _ in MIGRATIONS[18:]]
+    assert later == ["Projects: groups of requirements with a stated purpose"], "REQ-0014-FUNC-00 adds no migration"

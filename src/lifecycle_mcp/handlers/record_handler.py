@@ -10,15 +10,16 @@ from mcp.types import TextContent
 
 from .architecture_handler import ArchitectureHandler
 from .base_handler import ENTITY_TABLES, BaseHandler
+from .project_handler import ProjectHandler
 from .requirement_handler import RequirementHandler
 from .task_handler import TaskHandler
 
-ID_EXAMPLES = "REQ-0001-FUNC-00, TASK-0001-00-00 or ADR-0001"
+ID_EXAMPLES = "REQ-0001-FUNC-00, TASK-0001-00-00, ADR-0001 or PROJ-0001"
 RECORD_TOOLS = ("get_details", "delete_record", "add_comment")
 
 
 class RecordHandler(BaseHandler):
-    """ID-only operations shared by requirements, tasks and architecture decisions; the ID prefix gives the type"""
+    """ID-only operations shared by requirements, tasks, decisions and projects; the ID prefix gives the type"""
 
     def __init__(
         self,
@@ -26,18 +27,20 @@ class RecordHandler(BaseHandler):
         requirement_handler: RequirementHandler,
         task_handler: TaskHandler,
         architecture_handler: ArchitectureHandler,
+        project_handler: ProjectHandler | None = None,
     ):
         super().__init__(db_manager)
         self.requirements = requirement_handler
         self.tasks = task_handler
         self.architecture = architecture_handler
+        self.projects = project_handler or ProjectHandler(db_manager)
 
     def get_tool_definitions(self) -> list[dict[str, Any]]:
         """Return record tool definitions"""
         return [
             {
                 "name": "get_details",
-                "description": "Details of a requirement, task or ADR, with links and comments",
+                "description": "Details of a requirement, task, ADR or project, with links and comments",
                 "inputSchema": {
                     "type": "object",
                     "properties": {"entity_id": {"type": "string"}},
@@ -47,8 +50,8 @@ class RecordHandler(BaseHandler):
             {
                 "name": "delete_record",
                 "description": (
-                    "Delete a Draft requirement, Not Started task or Proposed ADR that nothing depends on. "
-                    "Refusals say what blocks it."
+                    "Delete a Draft requirement, Not Started task or Proposed ADR that nothing depends on, "
+                    "or a project with no requirements. Refusals say what blocks it."
                 ),
                 "inputSchema": {
                     "type": "object",
@@ -58,7 +61,7 @@ class RecordHandler(BaseHandler):
             },
             {
                 "name": "add_comment",
-                "description": "Comment on a requirement, task or ADR; shown in details and history",
+                "description": "Comment on a requirement, task, ADR or project; shown in details and history",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -96,6 +99,8 @@ class RecordHandler(BaseHandler):
             return self.requirements._get_requirement_details(requirement_id=entity_id)
         if entity_type == "task":
             return self.tasks._get_task_details(task_id=entity_id)
+        if entity_type == "project":
+            return self.projects._get_project_details(project_id=entity_id)
         return self.architecture._get_architecture_details(architecture_id=entity_id)
 
     def _delete_record(self, entity_type: str, entity_id: str) -> list[TextContent]:
@@ -103,6 +108,8 @@ class RecordHandler(BaseHandler):
             return self.requirements._delete_requirement(requirement_id=entity_id)
         if entity_type == "task":
             return self.tasks._delete_task(task_id=entity_id)
+        if entity_type == "project":
+            return self.projects._delete_project(project_id=entity_id)
         return self.architecture._delete_architecture(architecture_id=entity_id)
 
     def _add_comment(self, entity_type: str, entity_id: str, arguments: dict[str, Any]) -> list[TextContent]:

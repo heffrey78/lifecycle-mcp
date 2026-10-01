@@ -30,8 +30,8 @@ them and `tests/tool_surface_budget.json` holds the counts, so neither number is
 - `server.py` — tool routing, input validation, short-ID resolution, the call log
 - `handlers/` — one module per domain, each inheriting `BaseHandler`: `RequirementHandler` (create, edit, status,
   query, trace), `TaskHandler` (create, edit, status, query, plus `sync_github_tasks` when GitHub is on),
-  `ArchitectureHandler` (create, edit, status, query), `RecordHandler` (details, delete and comment for any record's
-  ID, dispatching to the per-type handlers by ID prefix), `RelationshipHandler` (links and history), `ExportHandler`
+  `ArchitectureHandler` (create, edit, status, query), `ProjectHandler` (create, edit), `RecordHandler` (details,
+  delete and comment for any record's ID, dispatching to the per-type handlers by ID prefix), `RelationshipHandler` (links and history), `ExportHandler`
   (docs and diagrams), `StatusHandler` (the dashboard)
 - `database_manager.py` — connections, pooling, schema initialisation
 - `lifecycle-schema.sql` + `migrations.py` — the schema file is the version 0 baseline; every change after it is a
@@ -60,12 +60,20 @@ them and `tests/tool_surface_budget.json` holds the counts, so neither number is
   requires and on the tasks that block it: `TASK_DEPENDENCIES_SQL` in `task_handler.py` feeds the ready filter,
   task details and the dashboard
 - **Architecture**: ADRs and technical design documents with decision drivers and consequences
+- **Projects**: a named group of requirements and the `purpose` that group serves (migration 19): an epic, a roadmap
+  item, a layer. Its own record (`PROJ-0001`), not a requirement at the top of a parent tree, so the transition map
+  and its gates never apply to it; it is Active or Closed, an ordinary field of `update_project`. Membership is a
+  requirement → project `part_of` link and a requirement can be in several, so per-project counts overlap. Only
+  requirements are members: tasks and ADRs are reached through the requirement they implement or address.
+  `PROJECT_REQUIREMENT_IDS_SQL` in `project_handler.py` is the one definition of membership behind the filters,
+  export and dashboard (owner decisions, 2026-09-30)
 - **Relationships**: the `relationships` table is the only place links are stored (migration 8 removed the old
   `requirement_tasks`, `requirement_architecture`, `task_dependencies`, `requirement_dependencies` tables and
   `tasks.parent_task_id`). Write links with `BaseHandler._link()`. Direction conventions: requirement → task
   (`implements`), requirement → architecture (`addresses`), child → parent (`parent`), dependent → dependency
   (`depends`/`requires`/`informs`), blocker → blocked (`blocks`), task → architecture (`implements`), newer →
-  older architecture (`supersedes`). `create_relationship` normalizes reversed requirement and task/ADR links;
+  older architecture (`supersedes`), requirement → project (`part_of`). `create_relationship` normalizes reversed
+  requirement and task/ADR links;
   a `supersedes` link also moves the older ADR to Superseded in the same transaction (ADR-0003).
 - **Views**: requirement_progress, task_hierarchy, blocked_items, requirement_hierarchy (all over `relationships`)
 - **Triggers on relationships**: keep `requirements.task_count`/`tasks_completed` current, keep
@@ -135,6 +143,10 @@ them and `tests/tool_surface_budget.json` holds the counts, so neither number is
   `commit_ref` and `evidence` (migration 17), as it keeps a Blocked comment in `blocked_reason`. Omitting them
   leaves the stored values alone. Export carries them, and carries every record's comments (roadmap R12)
 - **Call log**: with `LIFECYCLE_CALL_LOG=/path/calls.jsonl` the server appends one JSON line per tool call (tool, argument names, ms, isError, response size; no argument values). Every call the server receives is logged, the refused ones included: `error_kind` is `validation`, `unknown_tool` or `handler`, and `rejected` carries the rule and parameter a schema refusal names — never the value, because jsonschema quotes it in the message. `scripts/tool_usage_report.py` counts refusals apart from handler errors; evidence so far is in `docs/tool-surface/usage-evidence.md`, whose figures predate this and undercount refused calls (roadmap R18)
+- **Export opens with what the records are for**: the whole tracker's requirements document starts with every
+  project's stored purpose and the requirements in it, and `export_project_documentation(project_id=...)` writes
+  one project's documents, each opening with that purpose. The purpose is the project's own field, never a summary
+  composed at export time. Trackers without projects export exactly as before
 - **Details show a record's links from its own end**: R9 gave architecture and task details theirs and R23
   added the requirement end, so a requirement with a decision against it and no tasks no longer reads as
   unlinked. A section appears only when it has rows

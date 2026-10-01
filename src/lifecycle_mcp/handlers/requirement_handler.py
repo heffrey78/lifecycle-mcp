@@ -25,6 +25,7 @@ from .base_handler import (
     StatusChange,
     StatusRefused,
 )
+from .project_handler import PROJECT_REQUIREMENT_IDS_SQL, REQUIREMENT_PROJECTS_SQL
 
 # Records that depend on a requirement and therefore block deleting it.
 REQUIREMENT_DELETE_BLOCKERS = [
@@ -338,6 +339,7 @@ class RequirementHandler(BaseHandler):
                         "validation_metrics": {"type": "array", "items": {"type": "string"}},
                         "out_of_scope": {"type": "array", "items": {"type": "string"}},
                         "origin": {"type": "string", "enum": list(REQUIREMENT_ORIGINS)},
+                        "project_ids": {"type": "array", "items": {"type": "string"}},
                     },
                     "required": ["type", "title", "priority", "current_state", "desired_state"],
                 },
@@ -381,6 +383,7 @@ class RequirementHandler(BaseHandler):
                         "priority": {"type": "string"},
                         "type": {"type": "string"},
                         "search_text": {"type": "string"},
+                        "project_id": {"type": "string"},
                         "work_complete": {
                             "type": "boolean",
                             "description": "Only those whose tasks are all Complete but that are not yet Implemented",
@@ -562,8 +565,18 @@ class RequirementHandler(BaseHandler):
         except StatusRefused as e:
             return self._create_error_response(str(e))
 
+        # A requirement can be born into its projects, so membership is not a step to remember afterwards.
+        project_ids = list(dict.fromkeys(params.get("project_ids") or []))
+        missing = [
+            project_id for project_id in project_ids if not self.db.check_exists("projects", "id = ?", [project_id])
+        ]
+        if missing:
+            return self._create_error_response(f"No project {', '.join(missing)}; nothing was created")
+
         try:
             req_id = self._create_single_requirement(params)
+            for project_id in project_ids:
+                self._link("requirement", req_id, "project", project_id, "part_of")
 
             # One status line; the facts an agent needs next come back as structured data (roadmap R10).
             structured = {
@@ -573,6 +586,8 @@ class RequirementHandler(BaseHandler):
                 "priority": params["priority"],
                 "status": "Draft",
             }
+            if project_ids:
+                structured["projects"] = project_ids
             if warnings:
                 structured["warnings"] = warnings
             details = "\n".join(f"⚠️ {warning}" for warning in warnings)
@@ -758,6 +773,10 @@ class RequirementHandler(BaseHandler):
                 search = f"%{params['search_text']}%"
                 where_params.extend([search, search])
 
+            if params.get("project_id"):
+                where_clauses.append(f"id IN ({PROJECT_REQUIREMENT_IDS_SQL})")
+                where_params.append(params["project_id"])
+
             if params.get("work_complete"):
                 # Work done, decision pending: the same requirements the dashboard names (roadmap R17)
                 where_clauses.append(WORK_COMPLETE_WHERE)
@@ -788,6 +807,8 @@ class RequirementHandler(BaseHandler):
                 filters.append(f"type: {params['type']}")
             if params.get("search_text"):
                 filters.append(f"search: {params['search_text']}")
+            if params.get("project_id"):
+                filters.append(f"project: {params['project_id']}")
             if params.get("work_complete"):
                 filters.append("work complete, decision pending")
             filter_desc = " | ".join(filters) if filters else "all requirements"
@@ -896,6 +917,7 @@ class RequirementHandler(BaseHandler):
                 req["id"],
             )
             report += self._format_requirement_links(req["id"])
+            report += self._format_linked("Projects", REQUIREMENT_PROJECTS_SQL, req["id"])
 
             report += self._format_comments("requirement", req["id"])
 

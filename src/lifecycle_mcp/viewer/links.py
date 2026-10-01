@@ -35,6 +35,8 @@ HEADINGS: dict[tuple[str, str, str], str] = {
     ("parent", IN, "requirement"): "Child requirements",
     ("supersedes", OUT, "architecture"): "Supersedes",
     ("supersedes", IN, "architecture"): "Superseded by",
+    ("part_of", OUT, "requirement"): "Projects",
+    ("part_of", IN, "project"): "Requirements",
 }
 
 # Types whose meaning does not depend on the kind of record: dependent -> dependency, blocker -> blocked, and so on.
@@ -90,7 +92,7 @@ def record_titles(snapshot: Snapshot) -> dict[str, dict[str, Any]]:
     """Each record's title and status by id, for naming the record at the other end of a link."""
     return {
         str(row["id"]): {"title": row.get("title"), "status": row.get("status")}
-        for rows in (snapshot.requirements, snapshot.tasks, snapshot.architecture)
+        for rows in (snapshot.projects, snapshot.requirements, snapshot.tasks, snapshot.architecture)
         for row in rows
     }
 

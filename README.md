@@ -7,6 +7,7 @@ A Model Context Protocol (MCP) server for comprehensive software lifecycle manag
 - **Requirements Management**: Create and manage software requirements with validation and lifecycle tracking
 - **Task Management**: Track implementation tasks with hierarchical structure and effort estimation
 - **Architecture Decisions**: Record ADRs (Architecture Decision Records) with full context
+- **Projects**: Group requirements into epics, roadmap items or layers, each with a stated purpose that its exported documents open with
 - **Project Dashboards**: Real-time project health metrics and status reporting
 - **Requirement Tracing**: Complete traceability from requirements through implementation
 - **State Validation**: Automatic validation of lifecycle state transitions
@@ -202,7 +203,7 @@ changed. It runs only where the pre-commit framework is installed (`pre-commit i
 
 ## MCP Tools Reference
 
-The server exposes 23 MCP tools (24 with GitHub integration on) across 7 handler modules for comprehensive lifecycle management. Every tool rejects fields it does not declare, and the error names the field. [CHANGELOG.md](CHANGELOG.md) lists tools that were removed or renamed, with their replacements.
+The server exposes 25 MCP tools (26 with GitHub integration on) across 8 handler modules for comprehensive lifecycle management. Every tool rejects fields it does not declare, and the error names the field. [CHANGELOG.md](CHANGELOG.md) lists tools that were removed or renamed, with their replacements.
 
 Results are text for the model to read. Most tools also return the same facts as data in `structuredContent`: create tools return the new ID and status, edit tools the changed fields and new revision, status tools the old and new status (a list of IDs gets a result per ID), and query tools the full records. No tool declares an `outputSchema`.
 
@@ -211,14 +212,14 @@ Results are text for the model to read. Most tools also return the same facts as
 - `create_requirement` - Create new requirements
 - `update_requirement` - Edit a requirement's content (a reason is required at Approved or later)
 - `update_requirement_status` - Move one or many requirements through lifecycle states, stepping through the allowed path
-- `query_requirements` - Search and filter requirements, including the ones whose work is done and only the decision is missing; the matching records also come back as structured data
+- `query_requirements` - Search and filter requirements, by project among other things, including the ones whose work is done and only the decision is missing; the matching records also come back as structured data
 - `trace_requirement` - Trace requirement through implementation
 
 **Tasks**
 - `create_task` - Create implementation tasks from requirements
 - `update_task` - Edit a task's content, move it to another parent or change its requirements
 - `update_task_status` - Update the progress of one or many tasks; the comment on a move to Blocked is kept as the reason
-- `query_tasks` - Search and filter tasks, including the ones ready to start; the matching records also come back as structured data
+- `query_tasks` - Search and filter tasks, by requirement or project, including the ones ready to start; the matching records also come back as structured data
 - `sync_github_tasks` - Sync one task, or every linked task, from GitHub issues (listed only when `LIFECYCLE_GITHUB=on`)
 
 **Architecture decisions**
@@ -227,20 +228,24 @@ Results are text for the model to read. Most tools also return the same facts as
 - `update_architecture_status` - Update the status of one or many architecture decisions; Superseded comes from a supersedes link
 - `query_architecture_decisions` - Search and filter architecture decisions; the matching records also come back as structured data
 
-**Any record (requirement, task or architecture decision, by ID)**
+**Projects**
+- `create_project` - Create a project: a named group of requirements (an epic, a roadmap item, a layer) and the purpose it serves
+- `update_project` - Edit a project's purpose and other content, close it, and add or remove requirements
+
+**Any record (requirement, task, architecture decision or project, by ID)**
 - `get_details` - Full details of a record, with its links and comments
-- `delete_record` - Delete a Draft requirement, Not Started task or Proposed architecture decision created by mistake
+- `delete_record` - Delete a Draft requirement, Not Started task or Proposed architecture decision created by mistake, or a project that holds no requirements
 - `add_comment` - Comment on a record; comments show in its details and history
 
 **Relationships and history**
-- `create_relationship` - Link two records: dependencies, refinements, blocks, a task implementing an architecture decision, a newer decision superseding an older one, and more
+- `create_relationship` - Link two records: dependencies, refinements, blocks, a task implementing an architecture decision, a newer decision superseding an older one, a requirement that is part of a project, and more
 - `delete_relationship` - Remove a link between two records
 - `query_relationships` - Query links: one record's links by direction and type, or every link as JSON for a graph
 - `get_entity_history` - Show how a record changed: creation, edits with before and after values, status changes, comments and deletion
 
 **Status and export**
-- `get_project_status` - Project health dashboard; the metrics also come back as structured data
-- `export_project_documentation` - Export comprehensive markdown documentation
+- `get_project_status` - Health dashboard for the whole tracker, listing its projects and their progress; the metrics also come back as structured data
+- `export_project_documentation` - Export Markdown documentation for the whole tracker, opening with each project's purpose, or for one project
 - `create_architectural_diagrams` - Generate Mermaid diagrams for project visualization
 
 ### Editing, Deleting and History
@@ -293,6 +298,42 @@ Comment on a requirement, task or architecture decision.
 - `author` (optional): Who wrote it (default: MCP User)
 
 **Returns:** Confirmation. The comment appears in the record's details under Comments and in `get_entity_history`.
+
+### Projects
+
+A project is a named group of requirements and the purpose that group serves: an epic, a roadmap item, a layer of the
+system, or any other grouping worth a name. The purpose is a stored field, so the documents exported for a project
+open with what its author said it is for, not with a summary written afterwards.
+
+- **A requirement can be in several projects.** Membership is a `part_of` link, so one requirement can sit in an epic
+  and in a layer at once. Per-project counts on the dashboard therefore overlap and do not add up to the totals.
+- **Only requirements are members.** A task or decision belongs to a project through the requirement it implements or
+  addresses; one linked to no requirement is in no project.
+- **A project has no review path.** It is Active or Closed, set with `update_project`. Closing keeps the grouping and
+  its purpose and takes the project off the dashboard's list.
+
+#### `create_project`
+**Parameters:**
+- `title` (required), `purpose` (required): the name, and the goal its requirements serve
+- `success_criteria`, `out_of_scope` (optional): lists
+- `requirement_ids` (optional): the requirements it starts with
+- `author` (optional)
+
+**Returns:** The new ID (`PROJ-0001`). An unknown requirement refuses the whole call.
+
+#### `update_project`
+**Parameters:**
+- `project_id` (required)
+- `title`, `purpose`, `success_criteria`, `out_of_scope`, `status` (`Active` or `Closed`)
+- `add_requirement_ids`, `remove_requirement_ids`: change membership; logged in the project's history as an edit of
+  `requirements`
+- `reason`, `actor`, `if_revision`: as for every update tool
+
+Requirements also join a project at birth with `create_requirement`'s `project_ids`, or one at a time with
+`create_relationship` (`relationship_type: part_of`). `get_details` on a project shows its purpose, its requirements
+with their progress and the decisions they address; on a requirement it lists the projects it is in.
+`query_requirements` and `query_tasks` take `project_id`. `delete_record` removes a project only once it holds no
+requirements.
 
 ### Requirement Management
 
@@ -544,7 +585,7 @@ Get comprehensive project health metrics and dashboards.
 **Parameters:**
 - `include_blocked` (optional): Include blocked items analysis (default: true)
 
-**Returns:** Dashboard with requirement overview, task statistics, completion percentages, and blocked items: every Blocked task with its reason, and every task or requirement still waiting on a dependency with what it waits on. `structuredContent` holds the metrics and, when `include_blocked` is on, the same items under `blocked`.
+**Returns:** Dashboard with requirement overview, task statistics, the active projects with each one's progress, completion percentages, and blocked items: every Blocked task with its reason, and every task or requirement still waiting on a dependency with what it waits on. `structuredContent` holds the metrics and, when `include_blocked` is on, the same items under `blocked`.
 
 ### Documentation Export Tools
 
@@ -552,7 +593,8 @@ Get comprehensive project health metrics and dashboards.
 Export comprehensive project documentation in structured markdown format.
 
 **Parameters:**
-- `project_name` (optional): Name for the project used in filenames (default: "project")
+- `project_name` (optional): Name used in filenames (default: "project", or the project's ID when `project_id` is given)
+- `project_id` (optional): Export one project: its requirements, and the tasks and decisions that hang off them
 - `include_requirements` (optional): Include requirements documentation (default: true)
 - `include_tasks` (optional): Include tasks documentation (default: true)
 - `include_architecture` (optional): Include architecture documentation (default: true)
@@ -561,9 +603,11 @@ Export comprehensive project documentation in structured markdown format.
 **Returns:** List of exported files with their paths.
 
 **Generated Files:**
-- `{project_name}-requirements.md` - Complete requirements documentation grouped by type
+- `{project_name}-requirements.md` - Complete requirements documentation grouped by type. When the tracker has projects it opens with each one: its purpose, success criteria, what is out of scope and the requirements in it, then the requirements in no project. Each requirement names the projects it belongs to
 - `{project_name}-tasks.md` - Task documentation grouped by status, with linked requirements, each task's commit and evidence, and its comments
 - `{project_name}-architecture.md` - Architecture decisions with context, decisions, and consequences
+
+With `project_id`, each of the three documents is titled with the project's title and opens with its stored purpose, and holds only that project's records. A project with no requirements yet still exports its purpose.
 
 **Example:**
 ```json
@@ -618,9 +662,10 @@ The server maintains a comprehensive SQLite database with the following key enti
 - **Requirements**: Central entity with lifecycle states (Draft → Under Review → Approved → Architecture → Ready → Implemented → Validated → Deprecated)
 - **Tasks**: Implementation work items with hierarchical structure (TASK-XXXX-YY-ZZ format)
 - **Architecture**: ADRs and technical design documents
-- **Relationships**: Many-to-many links between requirements, tasks, and architecture
+- **Projects**: Named groups of requirements with a stated purpose (PROJ-XXXX format)
+- **Relationships**: Many-to-many links between requirements, tasks, architecture and projects
 - **Events**: Automatic logging of lifecycle events and status changes
-- **Comments**: Notes on requirements, tasks and architecture decisions, added with `add_comment` or a status change's `comment`
+- **Comments**: Notes on requirements, tasks, architecture decisions and projects, added with `add_comment` or a status change's `comment`
 
 ### Short IDs
 
@@ -632,6 +677,7 @@ Anywhere a tool takes a record ID, the zero padding and the trailing version can
 | `TASK-12` | `TASK-0012-00-00` |
 | `TASK-12-1` | `TASK-0012-01-00` |
 | `ADR-4` | `ADR-0004` |
+| `PROJ-2` | `PROJ-0002` |
 
 A requirement's short form keeps its type, because requirement numbers repeat across types: `REQ-12` on its own can mean four different records. Full stored IDs always work. An alias that matches nothing is refused as unknown, and one that matches several is refused naming the candidates, so a tool never acts on a guess. Stored IDs never change; this is only an input form.
 
@@ -646,6 +692,7 @@ Refused calls reach the call log like any other when `LIFECYCLE_CALL_LOG` is set
 - **Requirements**: `REQ-XXXX-TYPE-VV` (e.g., REQ-0001-FUNC-00)
 - **Tasks**: `TASK-XXXX-YY-ZZ` (e.g., TASK-0001-00-00)
 - **Architecture**: `ADR-XXXX` (e.g., ADR-0001)
+- **Projects**: `PROJ-XXXX` (e.g., PROJ-0001)
 
 ## Environment Variables
 

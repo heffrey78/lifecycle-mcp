@@ -37,9 +37,10 @@ test-unit:
 test-integration:
 	pytest -m integration
 
+# Exactly what the Lint step in .github/workflows/test.yml runs, so passing here means passing there.
 lint:
-	ruff check src tests
-	ruff format src tests --check
+	uv run --extra test --extra dev ruff check src tests --select E,F,I
+	uv run --extra test --extra dev ruff format src tests --check
 
 type-check:
 	mypy src tests --strict

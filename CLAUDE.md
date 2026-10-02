@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 uv sync                                  # dependencies
 uv run server.py                         # run the server
 uv run --extra test pytest               # the suite (benchmarks are opt-in)
-make lint                                # ruff check + ruff format --check
+make lint                                # CI's lint step exactly (line length included); run before pushing
 make viewer                              # read-only HTML view of the tracker in exports/ (DB=path for another)
 make tracker-export                      # lifecycle.db -> lifecycle-data.sql, the copy git keeps
 make tracker-restore                     # rebuild lifecycle.db from it (INTO=path, FORCE=1 to replace records)

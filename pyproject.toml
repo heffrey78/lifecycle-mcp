@@ -84,8 +84,8 @@ select = [
     "ASYNC", # flake8-async
     "T20",   # no print(): stdout is the MCP protocol channel
 ]
+# E501 is not ignored: the formatter cannot wrap a long string or comment, and CI fails on one.
 ignore = [
-    "E501",  # line too long (handled by formatter)
     "B008",  # do not perform function calls in argument defaults
 ]
 

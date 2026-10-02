@@ -148,12 +148,12 @@ async def test_counts_describe_the_snapshot(mcp_server):  # noqa: F811
     counts = read_snapshot(db_path(mcp_server)).counts()
 
     assert counts["requirements"] == 1 and counts["tasks"] == 1 and counts["architecture"] == 1
-    assert set(counts) == {"requirements", "tasks", "architecture", "relationships", "comments", "events"}
+    assert set(counts) == {"projects", "requirements", "tasks", "architecture", "relationships", "comments", "events"}
 
 
 def test_an_empty_snapshot_is_still_a_snapshot():
     empty = Snapshot(database_path="/nowhere/lifecycle.db")
 
     assert empty.counts() == dict.fromkeys(
-        ("requirements", "tasks", "architecture", "relationships", "comments", "events"), 0
+        ("projects", "requirements", "tasks", "architecture", "relationships", "comments", "events"), 0
     )

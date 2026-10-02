@@ -18,9 +18,10 @@ from .links import link_index, links_html, record_titles
 from .snapshot import UNREADABLE, Snapshot
 
 # What the page calls each kind of record, and which snapshot rows are that kind.
-ENTITY = {"requirement": "requirement", "task": "task", "decision": "architecture"}
+ENTITY = {"project": "project", "requirement": "requirement", "task": "task", "decision": "architecture"}
 
 KINDS: tuple[tuple[str, str, str], ...] = (
+    ("project", "Projects", "projects"),
     ("requirement", "Requirements", "requirements"),
     ("task", "Tasks", "tasks"),
     ("decision", "Decisions", "architecture"),
@@ -32,6 +33,7 @@ SUMMARY_FIELDS = ("id", "title", "status", "priority", "type", "effort")
 # Bookkeeping the server maintains rather than content somebody wrote. Still shown - every field a record holds is on
 # the page - but after the content, so it does not bury it.
 BOOKKEEPING = (
+    "project_number",
     "requirement_number",
     "task_number",
     "subtask_number",
@@ -309,7 +311,7 @@ def browse_section(snapshot: Snapshot) -> str:
     total = len(every)
     return (
         '<section id="records"><h2>Records</h2>'
-        '<p class="why">Every requirement, task and decision, with every field it holds. '
+        '<p class="why">Every project, requirement, task and decision, with every field it holds. '
         "Search matches every field and every comment, not only titles.</p>"
         f'<div class="controls">{controls}</div>'
         f'<p class="sub" id="shown">{total} records</p>'

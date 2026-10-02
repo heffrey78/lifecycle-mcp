@@ -13,6 +13,12 @@ from mcp.types import TextContent
 
 from .architecture_handler import ARCHITECTURE_LIST_SECTIONS, amendments, format_amendments
 from .base_handler import BaseHandler
+from .project_handler import (
+    PROJECT_LIST_SECTIONS,
+    PROJECT_REQUIREMENT_IDS_SQL,
+    REQUIREMENT_PROJECTS_SQL,
+    project_requirements,
+)
 from .requirement_handler import REQUIREMENT_LIST_SECTIONS
 from .task_handler import TASK_LIST_SECTIONS
 
@@ -94,6 +100,7 @@ class ExportHandler(BaseHandler):
                     "type": "object",
                     "properties": {
                         "project_name": {"type": "string", "description": "Used in file names"},
+                        "project_id": {"type": "string", "description": "Only this project, opening with its purpose"},
                         "include_requirements": {"type": "boolean", "default": True},
                         "include_tasks": {"type": "boolean", "default": True},
                         "include_architecture": {"type": "boolean", "default": True},
@@ -112,6 +119,7 @@ class ExportHandler(BaseHandler):
                             "enum": ["requirements", "tasks", "architecture", "full_project", "dependencies"],
                         },
                         "requirement_ids": {"type": "array", "items": {"type": "string"}},
+                        "project_id": {"type": "string"},
                         "include_relationships": {"type": "boolean", "default": True},
                         "limit": {"type": "integer", "description": "Cap each kind of record; the rest are reported"},
                         "output_format": {
@@ -140,7 +148,15 @@ class ExportHandler(BaseHandler):
     def _export_project_documentation(self, **params) -> list[TextContent]:
         """Export comprehensive project documentation in markdown format"""
         try:
-            project_name = params.get("project_name", "project")
+            # One project's documents open with its purpose and hold only its requirements, with the tasks and
+            # decisions that hang off them. The whole tracker's open with every project instead.
+            project = None
+            if params.get("project_id"):
+                found = self.db.get_records("projects", "*", "id = ?", [params["project_id"]])
+                if not found:
+                    return self._create_error_response(f"Project {params['project_id']} not found")
+                project = found[0]
+            project_name = params.get("project_name") or (project["id"] if project else "project")
             output_dir = params.get("output_directory", ".")
 
             # Create output directory if needed
@@ -149,18 +165,18 @@ class ExportHandler(BaseHandler):
             exported_files = []
 
             if params.get("include_requirements", True):
-                exported_files.extend(self._export_requirements(project_name, output_dir))
+                exported_files.extend(self._export_requirements(project_name, output_dir, project))
 
             if params.get("include_tasks", True):
-                exported_files.extend(self._export_tasks(project_name, output_dir))
+                exported_files.extend(self._export_tasks(project_name, output_dir, project))
 
             if params.get("include_architecture", True):
-                exported_files.extend(self._export_architecture(project_name, output_dir))
+                exported_files.extend(self._export_architecture(project_name, output_dir, project))
 
             if exported_files:
                 # Create above-the-fold response for successful export
                 key_info = f"Exported {len(exported_files)} files to {output_dir}"
-                action_info = f"📄 {project_name} documentation"
+                action_info = f"📄 {project['title'] if project else project_name} documentation"
                 details = "\n".join(f"- {f}" for f in exported_files)
                 return self._create_above_fold_response("SUCCESS", key_info, action_info, details)
             else:
@@ -171,18 +187,66 @@ class ExportHandler(BaseHandler):
         except Exception as e:
             return self._create_error_response("Failed to export project documentation", e)
 
-    def _export_requirements(self, project_name: str, output_dir: str) -> list[str]:
-        """Export requirements to markdown file"""
-        requirements = self.db.get_records("requirements", "*", order_by="type, requirement_number")
+    def _document_head(self, project_name: str, kind: str, project: Any = None) -> str:
+        """How every exported document opens: its title, when it was written and, for one project, what it is for"""
+        content = f"# {project['title'] if project else project_name} - {kind} Documentation\n\n"
+        content += f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        if project:
+            content += f"**Project**: {project['id']} [{project['status']}]\n\n"
+            content += self._project_purpose(project)
+        return content
 
-        if not requirements:
+    def _project_purpose(self, project: Any) -> str:
+        """A project's purpose and its list fields, as stored: the canonical statement, not a summary of the export"""
+        text = f"**Purpose**: {project['purpose']}\n\n"
+        return text + self._format_sections(project, PROJECT_LIST_SECTIONS, "**{title}**:\n{body}\n")
+
+    def _projects_overview(self, requirements: list[Any]) -> str:
+        """Every project with its purpose and the requirements in it, ahead of the requirements themselves.
+
+        A requirement can be in several projects, so each project lists its requirements by ID and title and the
+        requirement is written out once, further down. "" when the tracker has no projects.
+        """
+        projects = self.db.get_records("projects", "*", order_by="project_number")
+        if not projects:
+            return ""
+        content = "## Projects\n\n"
+        grouped: set[str] = set()
+        for project in projects:
+            content += f"### {project['id']}: {project['title']}\n\n"
+            content += f"- **Status**: {project['status']}\n\n"
+            content += self._project_purpose(project)
+            members = project_requirements(self.db, project["id"])
+            grouped.update(member["id"] for member in members)
+            content += "**Requirements**:\n"
+            content += "".join(f"- {member['id']}: {member['title']} [{member['status']}]\n" for member in members)
+            content += "\n" if members else "- None yet\n\n"
+        ungrouped = [req for req in requirements if req["id"] not in grouped]
+        if ungrouped:
+            content += "### In No Project\n\n"
+            content += "".join(f"- {req['id']}: {req['title']} [{req['status']}]\n" for req in ungrouped)
+            content += "\n"
+        return content + "---\n\n"
+
+    def _export_requirements(self, project_name: str, output_dir: str, project: Any = None) -> list[str]:
+        """Export requirements to markdown file"""
+        if project:
+            requirements = project_requirements(self.db, project["id"])
+        else:
+            requirements = self.db.get_records("requirements", "*", order_by="type, requirement_number")
+
+        # A project with nothing in it yet still has a purpose worth a document; an empty tracker has nothing.
+        if not requirements and not project:
             return []
 
         filename = f"{project_name}-requirements.md"
         filepath = os.path.join(output_dir, filename)
 
-        content = f"# {project_name} - Requirements Documentation\n\n"
-        content += f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        content = self._document_head(project_name, "Requirements", project)
+        if project and not requirements:
+            content += "No requirements in this project yet.\n"
+        if not project:
+            content += self._projects_overview(requirements)
 
         # Group by type
         req_by_type = {}
@@ -202,6 +266,12 @@ class ExportHandler(BaseHandler):
                 content += f"- **Author**: {req['author']}\n"
                 if req["origin"] != "stated":
                     content += f"- **Origin**: {req['origin']}\n"
+                projects = self.db.execute_query(
+                    REQUIREMENT_PROJECTS_SQL, [req["id"]], fetch_all=True, row_factory=True
+                )
+                if projects:
+                    listed = "; ".join(f"{row['id']}: {row['title']}" for row in projects)
+                    content += f"- **Projects**: {listed}\n"
                 content += f"- **Created**: {req['created_at']}\n"
                 content += f"- **Updated**: {req['updated_at']}\n\n"
 
@@ -237,9 +307,30 @@ class ExportHandler(BaseHandler):
 
         return [filename]
 
-    def _export_tasks(self, project_name: str, output_dir: str) -> list[str]:
+    def _project_records(self, table: str, link: str, project_id: str, order_by: str) -> list[Any]:
+        """The tasks or decisions reached through a project's requirements by one kind of link"""
+        target_type = "task" if table == "tasks" else "architecture"
+        return (
+            self.db.execute_query(
+                f"""
+                SELECT DISTINCT t.* FROM {table} t JOIN relationships rel ON rel.target_id = t.id
+                WHERE rel.source_type = 'requirement' AND rel.target_type = ? AND rel.relationship_type = ?
+                  AND rel.source_id IN ({PROJECT_REQUIREMENT_IDS_SQL})
+                ORDER BY {order_by}
+                """,
+                [target_type, link, project_id],
+                fetch_all=True,
+                row_factory=True,
+            )
+            or []
+        )
+
+    def _export_tasks(self, project_name: str, output_dir: str, project: Any = None) -> list[str]:
         """Export tasks to markdown file"""
-        tasks = self.db.get_records("tasks", "*", order_by="task_number, subtask_number")
+        if project:
+            tasks = self._project_records("tasks", "implements", project["id"], "t.task_number, t.subtask_number")
+        else:
+            tasks = self.db.get_records("tasks", "*", order_by="task_number, subtask_number")
 
         if not tasks:
             return []
@@ -247,8 +338,7 @@ class ExportHandler(BaseHandler):
         filename = f"{project_name}-tasks.md"
         filepath = os.path.join(output_dir, filename)
 
-        content = f"# {project_name} - Tasks Documentation\n\n"
-        content += f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        content = self._document_head(project_name, "Tasks", project)
 
         # Group by status
         tasks_by_status = {}
@@ -335,9 +425,12 @@ class ExportHandler(BaseHandler):
         lines = "".join(f"- **{row['reviewer']}** ({row['created_at']}): {row['comment']}\n" for row in rows)
         return f"**Comments**:\n{lines}\n"
 
-    def _export_architecture(self, project_name: str, output_dir: str) -> list[str]:
+    def _export_architecture(self, project_name: str, output_dir: str, project: Any = None) -> list[str]:
         """Export architecture decisions to markdown file"""
-        architecture = self.db.get_records("architecture", "*", order_by="created_at DESC")
+        if project:
+            architecture = self._project_records("architecture", "addresses", project["id"], "t.created_at DESC")
+        else:
+            architecture = self.db.get_records("architecture", "*", order_by="created_at DESC")
 
         if not architecture:
             return []
@@ -345,8 +438,7 @@ class ExportHandler(BaseHandler):
         filename = f"{project_name}-architecture.md"
         filepath = os.path.join(output_dir, filename)
 
-        content = f"# {project_name} - Architecture Documentation\n\n"
-        content += f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        content = self._document_head(project_name, "Architecture", project)
 
         for arch in architecture:
             content += f"## {arch['id']}: {arch['title']}\n\n"
@@ -439,6 +531,19 @@ class ExportHandler(BaseHandler):
             mermaid_content = ""
             requirement_ids = params.get("requirement_ids", [])
             limit = params.get("limit")
+
+            # One project's diagram is the diagram of its requirements, narrowed further by requirement_ids when
+            # both are given. An empty list means "everything" to the generators, so an empty project stops here.
+            project_id = params.get("project_id")
+            if project_id:
+                if not self.db.check_exists("projects", "id = ?", [project_id]):
+                    return self._create_error_response(f"Project {project_id} not found")
+                members = [row["id"] for row in project_requirements(self.db, project_id)]
+                requirement_ids = [req for req in members if not requirement_ids or req in requirement_ids]
+                if not requirement_ids:
+                    return self._create_above_fold_response(
+                        "INFO", "No data found for diagram", f"{project_id} holds none of the requirements asked for"
+                    )
 
             if diagram_type == "requirements":
                 diagram = self._generate_requirements_diagram(requirement_ids, limit)

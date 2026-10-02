@@ -105,6 +105,8 @@ VALID_ARGUMENTS = {
     "create_task": {"requirement_ids": [REQ], "title": "Build index", "priority": "P1"},
     "create_architecture_decision": DECISION,
     "create_relationship": {"source_id": REQ, "target_id": TASK, "relationship_type": "implements"},
+    "create_project": {"title": "Search", "purpose": "Find any note quickly"},
+    "update_project": {"project_id": "PROJ-0001", "title": "Search and ranking"},
     "update_requirement": {"requirement_id": REQ, "title": "Ranked search"},
     "update_requirement_status": {"requirement_id": REQ, "new_status": "Under Review"},
     "update_task": {"task_id": TASK, "title": "Build FTS index"},

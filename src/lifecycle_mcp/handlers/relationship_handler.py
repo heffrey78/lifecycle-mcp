@@ -54,6 +54,7 @@ class RelationshipHandler(BaseHandler):
                                 "conflicts",  # conflicts with another entity
                                 "relates",  # generic relationship
                                 "supersedes",  # newer architecture decision replaces an older one
+                                "part_of",  # requirement belongs to a project
                             ],
                         },
                     },
@@ -84,7 +85,7 @@ class RelationshipHandler(BaseHandler):
                         "direction": {"type": "string", "enum": ["incoming", "outgoing", "both"]},
                         "entity_types": {
                             "type": "array",
-                            "items": {"type": "string", "enum": ["requirement", "task", "architecture"]},
+                            "items": {"type": "string", "enum": ["requirement", "task", "architecture", "project"]},
                         },
                     },
                 },
@@ -313,9 +314,9 @@ class RelationshipHandler(BaseHandler):
 
     @staticmethod
     def _normalize_direction(source_id: str, target_id: str, source_type: str, target_type: str):
-        """Requirement links are stored requirement -> task/architecture and design links task -> architecture;
-        accept either direction from callers."""
-        if target_type == "requirement" and source_type in ("task", "architecture"):
+        """Requirement links are stored requirement -> task/architecture/project and design links task ->
+        architecture; accept either direction from callers."""
+        if target_type == "requirement" and source_type in ("task", "architecture", "project"):
             return target_id, source_id, target_type, source_type
         if source_type == "architecture" and target_type == "task":
             return target_id, source_id, target_type, source_type
@@ -382,6 +383,8 @@ class RelationshipHandler(BaseHandler):
             ("requirement", "requirement", "refines"): True,
             ("requirement", "requirement", "conflicts"): True,
             ("requirement", "requirement", "relates"): True,
+            ("requirement", "project", "part_of"): True,
+            ("project", "requirement", "part_of"): True,  # Reverse is also valid
         }
 
         return valid_combinations.get((source_type, target_type, rel_type), False)
@@ -474,35 +477,8 @@ class RelationshipHandler(BaseHandler):
             source_type = row["source_type"]
             target_type = row["target_type"]
 
-            # Get source entity title
-            source_title = source_id  # Default fallback
-            if source_type == "requirement":
-                source_rows = self.db.get_records("requirements", "title", "id = ?", [source_id])
-                if source_rows:
-                    source_title = source_rows[0]["title"]
-            elif source_type == "task":
-                source_rows = self.db.get_records("tasks", "title", "id = ?", [source_id])
-                if source_rows:
-                    source_title = source_rows[0]["title"]
-            elif source_type == "architecture":
-                source_rows = self.db.get_records("architecture", "title", "id = ?", [source_id])
-                if source_rows:
-                    source_title = source_rows[0]["title"]
-
-            # Get target entity title
-            target_title = target_id  # Default fallback
-            if target_type == "requirement":
-                target_rows = self.db.get_records("requirements", "title", "id = ?", [target_id])
-                if target_rows:
-                    target_title = target_rows[0]["title"]
-            elif target_type == "task":
-                target_rows = self.db.get_records("tasks", "title", "id = ?", [target_id])
-                if target_rows:
-                    target_title = target_rows[0]["title"]
-            elif target_type == "architecture":
-                target_rows = self.db.get_records("architecture", "title", "id = ?", [target_id])
-                if target_rows:
-                    target_title = target_rows[0]["title"]
+            source_title = self._title(source_type, source_id)
+            target_title = self._title(target_type, target_id)
 
             relationships.append(
                 {
@@ -515,6 +491,12 @@ class RelationshipHandler(BaseHandler):
             )
 
         return relationships
+
+    def _title(self, entity_type: str, entity_id: str) -> str:
+        """A record's title, or its ID when the record is gone"""
+        table = ENTITY_TABLES.get(entity_type)
+        rows = self.db.get_records(table, "title", "id = ?", [entity_id]) if table else []
+        return rows[0]["title"] if rows else entity_id
 
     def _format_entity_relationships_details(self, entity_id: str, relationships: list[dict[str, Any]]) -> str:
         """Format entity relationships for detailed display"""

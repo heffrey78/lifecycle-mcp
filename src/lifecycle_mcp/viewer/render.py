@@ -181,6 +181,7 @@ def render_page(snapshot: Snapshot, figures: Figures, generated_at: datetime | N
     tiles = "".join(
         _tile(counts[key], label)
         for key, label in (
+            ("projects", "projects"),
             ("requirements", "requirements"),
             ("tasks", "tasks"),
             ("architecture", "decisions"),

@@ -19,6 +19,7 @@ from .base_handler import (
     StatusChange,
     StatusRefused,
 )
+from .project_handler import PROJECT_REQUIREMENT_IDS_SQL
 
 # Records that depend on an architecture decision and therefore block deleting it. The requirement links it
 # addresses belong to the decision itself and are removed with it.
@@ -183,6 +184,7 @@ class ArchitectureHandler(BaseHandler):
                         "status": {"type": "string"},
                         "type": {"type": "string"},
                         "requirement_id": {"type": "string"},
+                        "project_id": {"type": "string"},
                         "search_text": {"type": "string"},
                     },
                 },
@@ -470,47 +472,32 @@ class ArchitectureHandler(BaseHandler):
         try:
             where_clauses = []
             where_params = []
-            base_query = "SELECT * FROM architecture"
 
-            # Handle requirement_id filter specially (requires join)
+            # A decision is found through the requirements that address it: one requirement, or a project's.
+            addressed_by = (
+                "a.id IN (SELECT target_id FROM relationships WHERE source_type = 'requirement' "
+                "AND target_type = 'architecture' AND relationship_type = 'addresses' AND source_id {match})"
+            )
             if params.get("requirement_id"):
-                base_query = """
-                    SELECT a.* FROM architecture a
-                    JOIN relationships rel ON rel.target_id = a.id
-                    WHERE rel.source_type = 'requirement' AND rel.source_id = ?
-                      AND rel.target_type = 'architecture' AND rel.relationship_type = 'addresses'
-                """
+                where_clauses.append(addressed_by.format(match="= ?"))
                 where_params.append(params["requirement_id"])
 
-                # Add additional filters for the joined query
-                if params.get("search_text"):
-                    where_clauses.append("(a.title LIKE ? OR a.context LIKE ?)")
-                    search = f"%{params['search_text']}%"
-                    where_params.extend([search, search])
-            else:
-                # Build standard filters
-                if params.get("status"):
-                    where_clauses.append("status = ?")
-                    where_params.append(params["status"])
+            if params.get("project_id"):
+                where_clauses.append(addressed_by.format(match=f"IN ({PROJECT_REQUIREMENT_IDS_SQL})"))
+                where_params.append(params["project_id"])
 
-                if params.get("type"):
-                    where_clauses.append("type = ?")
-                    where_params.append(params["type"])
+            for column in ("status", "type"):
+                if params.get(column):
+                    where_clauses.append(f"a.{column} = ?")
+                    where_params.append(params[column])
 
-                if params.get("search_text"):
-                    where_clauses.append("(title LIKE ? OR context LIKE ?)")
-                    search = f"%{params['search_text']}%"
-                    where_params.extend([search, search])
+            if params.get("search_text"):
+                where_clauses.append("(a.title LIKE ? OR a.context LIKE ?)")
+                search = f"%{params['search_text']}%"
+                where_params.extend([search, search])
 
-            # Construct final query
-            if where_clauses:
-                if "WHERE" in base_query:
-                    base_query += " AND " + " AND ".join(where_clauses)
-                else:
-                    base_query += " WHERE " + " AND ".join(where_clauses)
-
-            # relationships also has created_at, so qualify it when joined
-            base_query += " ORDER BY a.created_at DESC" if params.get("requirement_id") else " ORDER BY created_at DESC"
+            where = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+            base_query = f"SELECT a.* FROM architecture a{where} ORDER BY a.created_at DESC"
 
             decisions = self.db.execute_query(base_query, where_params, fetch_all=True, row_factory=True)
 
@@ -529,8 +516,12 @@ class ArchitectureHandler(BaseHandler):
             filters = []
             if params.get("status"):
                 filters.append(f"status: {params['status']}")
+            if params.get("type"):
+                filters.append(f"type: {params['type']}")
             if params.get("requirement_id"):
                 filters.append(f"requirement: {params['requirement_id']}")
+            if params.get("project_id"):
+                filters.append(f"project: {params['project_id']}")
             if params.get("search_text"):
                 filters.append(f"search: {params['search_text']}")
             filter_desc = " | ".join(filters) if filters else "all decisions"

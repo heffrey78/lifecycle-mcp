@@ -1,6 +1,6 @@
 # Makefile for lifecycle-mcp project
 
-.PHONY: help install dev test build-dxt clean lint type-check coverage test-all test-unit test-integration pre-commit viewer
+.PHONY: help install dev test build-dxt clean lint type-check coverage test-all test-unit test-integration pre-commit viewer tracker-export tracker-restore
 
 help:
 	@echo "Available commands:"
@@ -15,6 +15,8 @@ help:
 	@echo "  make test-all       - Run all quality checks"
 	@echo "  make build-dxt      - Build the Desktop Extension (.dxt) package"
 	@echo "  make viewer         - Write a read-only HTML view of the tracker to exports/ (DB=path for another)"
+	@echo "  make tracker-export - Write lifecycle.db's rows to lifecycle-data.sql, the copy git keeps"
+	@echo "  make tracker-restore - Rebuild lifecycle.db from lifecycle-data.sql (INTO=path elsewhere, FORCE=1 to replace)"
 	@echo "  make clean          - Clean build artifacts"
 	@echo "  make pre-commit     - Install pre-commit hooks"
 
@@ -35,9 +37,10 @@ test-unit:
 test-integration:
 	pytest -m integration
 
+# Exactly what the Lint step in .github/workflows/test.yml runs, so passing here means passing there.
 lint:
-	ruff check src tests
-	ruff format src tests --check
+	uv run --extra test --extra dev ruff check src tests --select E,F,I
+	uv run --extra test --extra dev ruff format src tests --check
 
 type-check:
 	mypy src tests --strict
@@ -56,6 +59,14 @@ pre-commit:
 # deliberately not consulted. The output lands in exports/, which is gitignored.
 viewer:
 	uv run python scripts/tracker_viewer.py $(if $(DB),--db "$(DB)") $(if $(OUT),--out "$(OUT)")
+
+# The tracker as text in git (REQ-0007-TECH-00). Both use this repository's files, never LIFECYCLE_DB. Restore refuses
+# to replace a tracker that holds records unless FORCE=1; stop the server before replacing one it has open.
+tracker-export:
+	uv run python scripts/tracker_dump.py export
+
+tracker-restore:
+	uv run python scripts/tracker_dump.py restore $(if $(INTO),--into "$(INTO)") $(if $(FORCE),--force)
 
 build-dxt:
 	@echo "Building Desktop Extension package..."

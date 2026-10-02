@@ -7,6 +7,7 @@ allowlists below are explicit on purpose: adding a column or a tool property mea
 import sqlite3
 
 from lifecycle_mcp.handlers.architecture_handler import ARCHITECTURE_EDIT_COLUMNS
+from lifecycle_mcp.handlers.project_handler import PROJECT_EDITABLE
 from lifecycle_mcp.handlers.requirement_handler import REQUIREMENT_EDITABLE
 from lifecycle_mcp.handlers.task_handler import TASK_EDITABLE
 
@@ -18,11 +19,13 @@ TABLES = {
     "requirements": ("create_requirement", "update_requirement"),
     "tasks": ("create_task", "update_task"),
     "architecture": ("create_architecture_decision", "update_architecture"),
+    "projects": ("create_project", "update_project"),
 }
 
 # Columns the server maintains itself: IDs and numbering come from ID generation, status moves (with a task's
 # blocked_reason, commit_ref and evidence) go through the update_*_status tools, counters, completed_at and
-# superseded_by (from supersedes links) are kept by triggers, and GitHub fields by GitHub sync.
+# superseded_by (from supersedes links) are kept by triggers, and GitHub fields by GitHub sync. A project's status
+# has no gate and no status tool, so it is an ordinary field of update_project and not listed here.
 SYSTEM_COLUMNS = {
     "requirements": {
         "id",
@@ -54,6 +57,7 @@ SYSTEM_COLUMNS = {
         "evidence",
     },
     "architecture": {"id", "type", "status", "revision", "created_at", "updated_at", "superseded_by"},
+    "projects": {"id", "project_number", "revision", "created_at", "updated_at"},
 }
 
 # Columns no tool can set yet, with the roadmap item that will expose each one.
@@ -61,6 +65,7 @@ PENDING_COLUMNS = {
     "requirements": {},
     "tasks": {},
     "architecture": {},
+    "projects": {},
 }
 
 # Tool properties that are not columns: record IDs, links stored in relationships, edit options, and amendment,
@@ -71,6 +76,10 @@ NON_COLUMN_PROPERTIES = {
     "task_id",
     "architecture_id",
     "requirement_ids",
+    "project_id",
+    "project_ids",
+    "add_requirement_ids",
+    "remove_requirement_ids",
     "parent_task_id",
     "reason",
     "actor",
@@ -79,13 +88,19 @@ NON_COLUMN_PROPERTIES = {
 }
 
 # Tool properties stored under a different column name.
-RENAMED_PROPERTIES = {"requirements": {}, "tasks": {}, "architecture": {"decision": "decision_outcome"}}
+RENAMED_PROPERTIES = {
+    "requirements": {},
+    "tasks": {},
+    "architecture": {"decision": "decision_outcome"},
+    "projects": {},
+}
 
 # Columns each update handler passes to the edit engine; the update tool schema must declare exactly these.
 UPDATE_HANDLER_COLUMNS = {
     "requirements": set(REQUIREMENT_EDITABLE),
     "tasks": set(TASK_EDITABLE),
     "architecture": set(ARCHITECTURE_EDIT_COLUMNS.values()),
+    "projects": set(PROJECT_EDITABLE),
 }
 
 

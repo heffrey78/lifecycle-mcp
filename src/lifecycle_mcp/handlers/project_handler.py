@@ -123,7 +123,9 @@ class ProjectHandler(BaseHandler):
         return [
             {
                 "name": "create_project",
-                "description": "Create a project: a group of requirements (an epic, roadmap item, layer) and its purpose",
+                "description": (
+                    "Create a project: a group of requirements (an epic, roadmap item, layer) and its purpose"
+                ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -310,7 +312,8 @@ class ProjectHandler(BaseHandler):
                 members = [row[0] for row in cur.execute(PROJECT_REQUIREMENT_IDS_SQL, [project_id]).fetchall()]
                 if members:
                     raise DeleteRefused(
-                        f"Project {project_id} still holds {len(members)} requirement(s) ({', '.join(sorted(members))}). "
+                        f"Project {project_id} still holds {len(members)} requirement(s) "
+                        f"({', '.join(sorted(members))}). "
                         "Take them out with update_project remove_requirement_ids first, or set its status to Closed "
                         "to keep the grouping and its purpose."
                     )

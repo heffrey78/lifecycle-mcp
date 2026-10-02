@@ -467,3 +467,83 @@ def test_the_viewer_reads_a_tracker_from_before_projects(tmp_path):
     apply_all_migrations(str(path), 18)
 
     assert read_snapshot(path).projects == []
+
+
+# --- decisions, diagrams and prompts by project --------------------------------------------------
+
+
+async def outside_work(server) -> str:
+    """An approved requirement in no project, with a task and a decision of its own"""
+    other = await approved_requirement(server, "Indexing")
+    await ok(server, "create_task", {"requirement_ids": [other], "title": "Outside task", "priority": "P2"})
+    await ok(
+        server,
+        "create_architecture_decision",
+        {"requirement_ids": [other], "title": "Outside decision", "context": "c", "decision": "d"},
+    )
+    return other
+
+
+async def test_decisions_are_found_through_the_requirements_of_a_project(mcp_server):  # noqa: F811
+    ids = await populate(mcp_server)
+    await outside_work(mcp_server)
+    project_id = await project(mcp_server, requirement_ids=[ids["requirement"]])
+
+    found = await ok(mcp_server, "query_architecture_decisions", {"project_id": project_id})
+    none = await ok(mcp_server, "query_architecture_decisions", {"project_id": project_id, "status": "Accepted"})
+
+    assert [row["id"] for row in found.structuredContent["architecture_decisions"]] == [ids["adr"]]
+    assert f"project: {project_id}" in text_of(found)
+    assert none.structuredContent["count"] == 0
+
+
+async def test_a_status_filter_is_no_longer_dropped_beside_a_requirement(mcp_server):  # noqa: F811
+    ids = await populate(mcp_server)
+
+    found = await ok(
+        mcp_server, "query_architecture_decisions", {"requirement_id": ids["requirement"], "status": "Accepted"}
+    )
+
+    assert found.structuredContent["count"] == 0
+
+
+async def test_a_diagram_of_one_project_draws_only_its_records(mcp_server, tmp_path):  # noqa: F811
+    ids = await populate(mcp_server)
+    other = await outside_work(mcp_server)
+    project_id = await project(mcp_server, requirement_ids=[ids["requirement"]])
+
+    diagram = text_of(
+        await ok(
+            mcp_server,
+            "create_architectural_diagrams",
+            {"diagram_type": "full_project", "project_id": project_id, "output_path": str(tmp_path)},
+        )
+    )
+
+    assert "1 requirements, 1 tasks, 1 decisions" in diagram
+    assert "Searchable notes" in diagram and "Build index" in diagram and "Use FTS5" in diagram
+    assert "Outside" not in diagram and other.replace("-", "_") not in diagram
+
+
+async def test_a_diagram_of_an_empty_or_unknown_project_draws_nothing(mcp_server, tmp_path):  # noqa: F811
+    await populate(mcp_server)
+    project_id = await project(mcp_server)
+
+    empty = await ok(
+        mcp_server, "create_architectural_diagrams", {"project_id": project_id, "output_path": str(tmp_path)}
+    )
+    unknown = await call(
+        mcp_server, "create_architectural_diagrams", {"project_id": "PROJ-0009", "output_path": str(tmp_path)}
+    )
+
+    assert "No data found for diagram" in text_of(empty) and "Searchable notes" not in text_of(empty)
+    assert unknown.isError and "Project PROJ-0009 not found" in text_of(unknown)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_both_prompts_say_how_a_requirement_joins_its_project():
+    from lifecycle_mcp.prompts import CAPTURE_REQUIREMENT, RECONCILE_REQUIREMENTS, render_prompt
+
+    for name in (CAPTURE_REQUIREMENT, RECONCILE_REQUIREMENTS):
+        text = render_prompt(name).messages[0].content.text
+        assert "project_ids" in text and "get_project_status" in text, name

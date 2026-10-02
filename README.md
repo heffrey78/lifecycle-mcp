@@ -332,8 +332,10 @@ open with what its author said it is for, not with a summary written afterwards.
 Requirements also join a project at birth with `create_requirement`'s `project_ids`, or one at a time with
 `create_relationship` (`relationship_type: part_of`). `get_details` on a project shows its purpose, its requirements
 with their progress and the decisions they address; on a requirement it lists the projects it is in.
-`query_requirements` and `query_tasks` take `project_id`. `delete_record` removes a project only once it holds no
-requirements.
+`query_requirements`, `query_tasks` and `query_architecture_decisions` take `project_id`, and
+`create_architectural_diagrams` takes it to draw one project. `delete_record` removes a project only once it holds
+no requirements. The `capture_requirement` and `reconcile_requirements` prompts ask which projects a new requirement
+belongs to.
 
 ### Requirement Management
 

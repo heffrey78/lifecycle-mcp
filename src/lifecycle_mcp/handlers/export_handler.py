@@ -119,6 +119,7 @@ class ExportHandler(BaseHandler):
                             "enum": ["requirements", "tasks", "architecture", "full_project", "dependencies"],
                         },
                         "requirement_ids": {"type": "array", "items": {"type": "string"}},
+                        "project_id": {"type": "string"},
                         "include_relationships": {"type": "boolean", "default": True},
                         "limit": {"type": "integer", "description": "Cap each kind of record; the rest are reported"},
                         "output_format": {
@@ -530,6 +531,19 @@ class ExportHandler(BaseHandler):
             mermaid_content = ""
             requirement_ids = params.get("requirement_ids", [])
             limit = params.get("limit")
+
+            # One project's diagram is the diagram of its requirements, narrowed further by requirement_ids when
+            # both are given. An empty list means "everything" to the generators, so an empty project stops here.
+            project_id = params.get("project_id")
+            if project_id:
+                if not self.db.check_exists("projects", "id = ?", [project_id]):
+                    return self._create_error_response(f"Project {project_id} not found")
+                members = [row["id"] for row in project_requirements(self.db, project_id)]
+                requirement_ids = [req for req in members if not requirement_ids or req in requirement_ids]
+                if not requirement_ids:
+                    return self._create_above_fold_response(
+                        "INFO", "No data found for diagram", f"{project_id} holds none of the requirements asked for"
+                    )
 
             if diagram_type == "requirements":
                 diagram = self._generate_requirements_diagram(requirement_ids, limit)

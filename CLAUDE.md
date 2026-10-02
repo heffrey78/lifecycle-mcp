@@ -66,7 +66,7 @@ them and `tests/tool_surface_budget.json` holds the counts, so neither number is
   requirement → project `part_of` link and a requirement can be in several, so per-project counts overlap. Only
   requirements are members: tasks and ADRs are reached through the requirement they implement or address.
   `PROJECT_REQUIREMENT_IDS_SQL` in `project_handler.py` is the one definition of membership behind the filters,
-  export and dashboard (owner decisions, 2026-09-30)
+  export, diagrams and dashboard (owner decisions, 2026-09-30)
 - **Relationships**: the `relationships` table is the only place links are stored (migration 8 removed the old
   `requirement_tasks`, `requirement_architecture`, `task_dependencies`, `requirement_dependencies` tables and
   `tasks.parent_task_id`). Write links with `BaseHandler._link()`. Direction conventions: requirement → task

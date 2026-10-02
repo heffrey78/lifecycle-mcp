@@ -45,6 +45,9 @@ Fill when they apply:
 - out_of_scope: what this deliberately does not cover, so it stops coming up
 - business_value: why it is worth doing
 - risk_level: High, Medium or Low
+- project_ids: the projects it belongs to, when the tracker groups requirements into projects. get_project_status
+  lists them with their IDs. Pick by what each project is for, and ask when it is not obvious: a requirement left
+  out of its project is missing from that project's exported documents
 
 A worked example:
 
@@ -89,7 +92,8 @@ has to do. You read it; the server does not. Work in this order and do not skip 
    wordings and found nothing can weigh a NEW differently from one you never checked.
 5. Then apply only the first two:
    - NEW: create_requirement, with origin set to derived-from-code or derived-from-transcript, whichever the source
-     was. It is created in Draft, which is where it stays until a person approves it
+     was. It is created in Draft, which is where it stays until a person approves it. When the tracker has projects
+     (get_project_status lists them), pass project_ids for the ones it plainly belongs to and say which you chose
    - AMENDS: update_requirement on that ID, naming only the fields that change. Never create a second record for a
      requirement that already exists
    - ALREADY COVERED: do nothing at all
